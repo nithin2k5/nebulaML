@@ -308,6 +308,26 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         # Add augmentations if present
         if config.augmentations:
             train_params["augmentations"] = config.augmentations
+            
+        def epoch_end_callback(trainer_obj):
+            try:
+                epoch = trainer_obj.epoch + 1
+                total_epochs = trainer_obj.epochs
+                progress = (epoch / total_epochs) * 100
+                
+                metrics = {}
+                if hasattr(trainer_obj, 'metrics') and isinstance(trainer_obj.metrics, dict):
+                    metrics = {k: float(v) for k, v in trainer_obj.metrics.items()}
+                
+                if job_id in training_jobs:
+                    training_jobs[job_id]["progress"] = progress
+                    training_jobs[job_id]["current_epoch"] = epoch
+                    if metrics:
+                        training_jobs[job_id]["metrics"] = metrics
+            except Exception as e:
+                logger.error(f"Error in training callback: {e}")
+                
+        train_params["on_train_epoch_end"] = epoch_end_callback
         
         # Run training
         logger.info(f"Training parameters: {train_params}")
@@ -514,26 +534,29 @@ async def export_and_train(
             logger.warning(f"Failed to analyze dataset: {e}")
 
         # Automatically generate a version for training
-        version_id = str(uuid.uuid4())
         versions = DatasetVersionService.list_dataset_versions(request.dataset_id)
         version_num = len(versions) + 1
         name = f"Auto-Train v{version_num}"
         
         try:
-            yaml_path_str = VersioningEngine.create_version_from_dataset(
+            engine = VersioningEngine()
+            new_version_id = engine.generate_version(
                 dataset_id=request.dataset_id,
-                version_id=version_id,
-                version_number=version_num,
                 name=name,
                 preprocessing={},
                 augmentations=request.config.augmentations or {}
             )
-            yaml_path = Path(yaml_path_str)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate dataset version for training: {str(e)}")
             
-        if not yaml_path or not yaml_path.exists():
-            raise HTTPException(status_code=404, detail="Failed to automatically generate YAML for training.")
+        if not new_version_id:
+            raise HTTPException(status_code=500, detail="Failed to automatically generate version for training.")
+            
+        version = DatasetVersionService.get_version(new_version_id)
+        if not version or not version.get('yaml_path'):
+            raise HTTPException(status_code=404, detail="Dataset version or generated YAML not found.")
+            
+        yaml_path = Path(version['yaml_path'])
         
         # Force strict training mode
         request.config.strict_epochs = True
@@ -546,7 +569,7 @@ async def export_and_train(
             "status": "pending",
             "config": request.config.dict(),
             "progress": 0,
-            "version_id": version_id,
+            "version_id": new_version_id,
             "strict_mode": True
         }
         

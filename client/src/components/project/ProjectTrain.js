@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Play, Cpu, Clock } from "lucide-react";
-import { API_ENDPOINTS } from "@/lib/config";
+import { Play, Cpu, Clock, RefreshCw, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
+import { API_ENDPOINTS, API_BASE_URL } from "@/lib/config";
 import { toast } from 'sonner';
 
 export default function ProjectTrain({ dataset }) {
@@ -21,6 +21,7 @@ export default function ProjectTrain({ dataset }) {
     });
     const [training, setTraining] = useState(false);
     const [selectedClasses, setSelectedClasses] = useState([]);
+    const [jobs, setJobs] = useState([]);
 
     // Initialize with all classes selected
     useState(() => {
@@ -44,18 +45,34 @@ export default function ProjectTrain({ dataset }) {
 
     const toggleAll = () => {
         if (selectedClasses.length === dataset.classes.length) {
-            // Deselect all? No, maybe select just the first one or show error?
-            // Usually toggle all means select all or deselect all. 
-            // Since we need at least one, let's just reset to all if not all are selected, 
-            // or maybe do nothing if all are selected (or clear to 1?).
-            // Let's make it "Reset to All" if some are unselected, and "Clear" is risky.
-            // Better behavior: If all selected, select none? No.
-            // Let's just have "Select All" button.
             setSelectedClasses([...dataset.classes]);
         } else {
             setSelectedClasses([...dataset.classes]);
         }
     };
+
+    const fetchJobs = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/training/jobs`);
+            if (res.ok) {
+                const data = await res.json();
+                // Filter jobs for this dataset? The API currently returns all jobs.
+                // It would be better to return jobs per dataset, but for now we show all or try to guess.
+                // We'll show all jobs since the backend doesn't filter by dataset ID yet in the /jobs endpoint easily.
+                setJobs(data.jobs || []);
+            }
+        } catch (e) {
+            console.error("Failed to fetch jobs:", e);
+        }
+    };
+
+    useEffect(() => {
+        fetchJobs();
+        const interval = setInterval(() => {
+            fetchJobs();
+        }, 3000);
+        return () => clearInterval(interval);
+    }, []);
 
     const startTraining = async () => {
         setTraining(true);
@@ -73,6 +90,7 @@ export default function ProjectTrain({ dataset }) {
             const data = await response.json();
             if (data.success) {
                 toast.success("Training started! Job ID: " + data.job_id);
+                fetchJobs();
             } else {
                 toast.error("Failed to start training: " + data.detail);
             }
@@ -83,8 +101,22 @@ export default function ProjectTrain({ dataset }) {
         }
     };
 
+    const deleteJob = async (jobId) => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/training/job/${jobId}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                toast.success("Job deleted");
+                fetchJobs();
+            }
+        } catch (e) {
+            toast.error("Failed to delete job");
+        }
+    };
+
     return (
-        <div className="h-full flex flex-col gap-6">
+        <div className="h-full flex flex-col gap-6 overflow-y-auto pb-10 custom-scrollbar pr-2">
             <div className="flex justify-between items-center">
                 <div>
                     <h2 className="text-xl font-semibold">Train Model</h2>
@@ -193,6 +225,100 @@ export default function ProjectTrain({ dataset }) {
                                 {selectedClasses.length} of {dataset.classes?.length} classes selected.
                                 Backend will create a temporary filtered dataset for this training job.
                             </p>
+                        </CardContent>
+                    </Card>
+
+                    {/* Training Jobs Dashboard */}
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <div>
+                                <CardTitle>Training Jobs</CardTitle>
+                                <CardDescription>Monitor your current and previous training runs</CardDescription>
+                            </div>
+                            <Button variant="outline" size="icon" onClick={fetchJobs}>
+                                <RefreshCw className="h-4 w-4" />
+                            </Button>
+                        </CardHeader>
+                        <CardContent>
+                            {jobs.length === 0 ? (
+                                <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg border border-dashed">
+                                    <Cpu className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                                    <p>No training jobs found.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {jobs.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((job) => (
+                                        <div key={job.job_id} className="border rounded-lg p-4 bg-card/50">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <h4 className="font-semibold text-sm">
+                                                            {job.config?.model_name || 'Model'}
+                                                            {job.strict_mode && <Badge variant="outline" className="ml-2 text-[10px] h-4 leading-none">Strict Mode</Badge>}
+                                                        </h4>
+                                                        {job.status === "running" && (
+                                                            <Badge variant="secondary" className="bg-blue-500/10 text-blue-500 border-blue-500/20 flex items-center gap-1">
+                                                                <RefreshCw className="h-3 w-3 animate-spin" /> Running
+                                                            </Badge>
+                                                        )}
+                                                        {(job.status === "completed" || job.status === "success") && (
+                                                            <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 flex items-center gap-1">
+                                                                <CheckCircle2 className="h-3 w-3" /> Completed
+                                                            </Badge>
+                                                        )}
+                                                        {job.status === "failed" && (
+                                                            <Badge variant="secondary" className="bg-red-500/10 text-red-500 border-red-500/20 flex items-center gap-1">
+                                                                <AlertCircle className="h-3 w-3" /> Failed
+                                                            </Badge>
+                                                        )}
+                                                        {job.status === "pending" && (
+                                                            <Badge variant="outline" className="text-muted-foreground flex items-center gap-1">
+                                                                <Clock className="h-3 w-3" /> Pending
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground mt-1">Job ID: {job.job_id.substring(0, 8)}... | Epochs: {job.config?.epochs}</p>
+                                                </div>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-400" onClick={() => deleteJob(job.job_id)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+
+                                            {job.status === "running" && (
+                                                <div className="mt-3">
+                                                    <div className="flex justify-between text-xs mb-1">
+                                                        <span>Epoch {job.current_epoch || 0} / {job.config?.epochs || '?'}</span>
+                                                        <span>{Math.round(job.progress || 0)}%</span>
+                                                    </div>
+                                                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                                                        <div
+                                                            className="bg-primary h-2 rounded-full transition-all duration-500"
+                                                            style={{ width: `${Math.max(5, job.progress || 0)}%` }}
+                                                        />
+                                                    </div>
+
+                                                    {job.metrics && Object.keys(job.metrics).length > 0 && (
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-xs">
+                                                            {Object.entries(job.metrics).map(([key, value]) => (
+                                                                <div key={key} className="bg-muted/30 p-2 rounded flex flex-col">
+                                                                    <span className="text-muted-foreground truncate" title={key}>{key.split('/').pop()}</span>
+                                                                    <span className="font-semibold">{typeof value === 'number' ? value.toFixed(4) : value}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {job.status === "failed" && (
+                                                <div className="mt-2 text-xs text-red-400 p-2 bg-red-500/10 rounded">
+                                                    {job.error || "Unknown error occurred"}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
                 </div>
