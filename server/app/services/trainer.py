@@ -64,6 +64,10 @@ class YOLOTrainer:
             ]
             valid_augs = {k: v for k, v in augmentations.items() if k in yolo_supported}
             kwargs.update(valid_augs)
+            
+        on_train_epoch_end = kwargs.pop('on_train_epoch_end', None)
+        if on_train_epoch_end:
+            self.model.add_callback('on_train_epoch_end', on_train_epoch_end)
         
         results = self.model.train(
             data=data_yaml,

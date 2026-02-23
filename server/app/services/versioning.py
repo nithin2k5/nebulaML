@@ -167,11 +167,14 @@ class VersioningEngine:
         yaml_path = version_dir / 'data.yaml'
         classes = dataset['classes']
         
+        val_has_images = len(list((version_dir / 'val' / 'images').glob('*.jpg'))) > 0
+        test_has_images = len(list((version_dir / 'test' / 'images').glob('*.jpg'))) > 0
+        
         yaml_data = {
             'path': str(version_dir.absolute()),
             'train': 'train/images',
-            'val': 'val/images',
-            'test': 'test/images',
+            'val': 'val/images' if val_has_images else 'train/images',
+            'test': 'test/images' if test_has_images else '',
             'names': {i: name for i, name in enumerate(classes)}
         }
         

@@ -308,6 +308,26 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         # Add augmentations if present
         if config.augmentations:
             train_params["augmentations"] = config.augmentations
+            
+        def epoch_end_callback(trainer_obj):
+            try:
+                epoch = trainer_obj.epoch + 1
+                total_epochs = trainer_obj.epochs
+                progress = (epoch / total_epochs) * 100
+                
+                metrics = {}
+                if hasattr(trainer_obj, 'metrics') and isinstance(trainer_obj.metrics, dict):
+                    metrics = {k: float(v) for k, v in trainer_obj.metrics.items()}
+                
+                if job_id in training_jobs:
+                    training_jobs[job_id]["progress"] = progress
+                    training_jobs[job_id]["current_epoch"] = epoch
+                    if metrics:
+                        training_jobs[job_id]["metrics"] = metrics
+            except Exception as e:
+                logger.error(f"Error in training callback: {e}")
+                
+        train_params["on_train_epoch_end"] = epoch_end_callback
         
         # Run training
         logger.info(f"Training parameters: {train_params}")
