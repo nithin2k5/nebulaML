@@ -7,8 +7,11 @@ const AuthContext = createContext({});
 
 export const useAuth = () => useContext(AuthContext);
 
+import { API_BASE_URL } from "@/lib/config";
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -17,26 +20,27 @@ export function AuthProvider({ children }) {
   }, []);
 
   const checkAuth = async () => {
-    const token = localStorage.getItem("token");
-    if (token) {
+    const defaultToken = localStorage.getItem("token");
+    if (defaultToken) {
+      setToken(defaultToken);
       try {
-        const response = await fetch("http://localhost:8000/api/auth/me", {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
           headers: {
-            "Authorization": `Bearer ${token}`
+            "Authorization": `Bearer ${defaultToken}`
           }
         });
 
         if (response.ok) {
           const userData = await response.json();
           setUser(userData);
-          
+
           // Fetch permissions
-          const permResponse = await fetch("http://localhost:8000/api/auth/permissions", {
+          const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
             headers: {
-              "Authorization": `Bearer ${token}`
+              "Authorization": `Bearer ${defaultToken}`
             }
           });
-          
+
           if (permResponse.ok) {
             const permData = await permResponse.json();
             setUser(prev => ({ ...prev, permissions: permData.permissions }));
@@ -47,14 +51,17 @@ export function AuthProvider({ children }) {
       } catch (error) {
         console.error("Auth check failed:", error);
         localStorage.removeItem("token");
+        setToken(null);
       }
+    } else {
+      setToken(null);
     }
     setLoading(false);
   };
 
   const login = async (username, password) => {
     try {
-      const response = await fetch("http://localhost:8000/api/auth/login", {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -69,21 +76,22 @@ export function AuthProvider({ children }) {
 
       const data = await response.json();
       localStorage.setItem("token", data.access_token);
-      
+      setToken(data.access_token);
+
       // Fetch permissions
-      const permResponse = await fetch("http://localhost:8000/api/auth/permissions", {
+      const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
         headers: {
           "Authorization": `Bearer ${data.access_token}`
         }
       });
-      
+
       if (permResponse.ok) {
         const permData = await permResponse.json();
         setUser({ ...data.user, permissions: permData.permissions });
       } else {
         setUser(data.user);
       }
-      
+
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -92,7 +100,7 @@ export function AuthProvider({ children }) {
 
   const register = async (username, email, password, role = "user") => {
     try {
-      const response = await fetch("http://localhost:8000/api/auth/register", {
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -107,21 +115,22 @@ export function AuthProvider({ children }) {
 
       const data = await response.json();
       localStorage.setItem("token", data.access_token);
-      
+      setToken(data.access_token);
+
       // Fetch permissions
-      const permResponse = await fetch("http://localhost:8000/api/auth/permissions", {
+      const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
         headers: {
           "Authorization": `Bearer ${data.access_token}`
         }
       });
-      
+
       if (permResponse.ok) {
         const permData = await permResponse.json();
         setUser({ ...data.user, permissions: permData.permissions });
       } else {
         setUser(data.user);
       }
-      
+
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -130,6 +139,7 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem("token");
+    setToken(null);
     setUser(null);
     router.push("/login");
   };
@@ -145,6 +155,7 @@ export function AuthProvider({ children }) {
 
   const value = {
     user,
+    token,
     loading,
     login,
     register,

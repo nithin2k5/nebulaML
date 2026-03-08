@@ -8,7 +8,10 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { API_ENDPOINTS } from "@/lib/config";
 
+import { useAuth } from "@/context/AuthContext";
+
 export default function DashboardStats({ onNavigate }) {
+  const { token } = useAuth();
   const [liveStats, setLiveStats] = useState({
     totalDatasets: 0,
     totalImages: 0,
@@ -25,9 +28,10 @@ export default function DashboardStats({ onNavigate }) {
 
   const fetchLiveStats = async () => {
     try {
+      const headers = { "Authorization": `Bearer ${token}` };
       const [datasetsRes, modelsRes] = await Promise.allSettled([
-        fetch(API_ENDPOINTS.DATASETS.LIST),
-        fetch("http://localhost:8000/api/models/list"),
+        fetch(API_ENDPOINTS.DATASETS.LIST, { headers }),
+        fetch(`${API_ENDPOINTS.MODELS.LIST}`, { headers }),
       ]);
 
       let totalDatasets = 0, totalImages = 0, totalAnnotated = 0, totalReviewed = 0;
@@ -38,7 +42,7 @@ export default function DashboardStats({ onNavigate }) {
         totalDatasets = datasets.length;
 
         const statsPromises = datasets?.map(ds =>
-          fetch(API_ENDPOINTS.DATASETS.STATS(ds.id)).then(r => r.ok ? r.json() : null).catch(() => null)
+          fetch(API_ENDPOINTS.DATASETS.STATS(ds.id), { headers }).then(r => r.ok ? r.json() : null).catch(() => null)
         ) || [];
         const allStats = await Promise.allSettled(statsPromises);
         allStats.forEach(result => {
@@ -183,42 +187,7 @@ export default function DashboardStats({ onNavigate }) {
         </div>
       </div>
 
-      {/* Recent Activity Table */}
-      <div className="rounded-2xl bg-card/40 backdrop-blur-md border border-white/5 overflow-hidden">
-        <div className="p-6 border-b border-white/5 flex items-center justify-between">
-          <h3 className="text-lg font-bold">Recent Pipeline Activity</h3>
-          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground">View All</Button>
-        </div>
-        <div className="divide-y divide-white/5">
-          {liveStats.totalDatasets > 0 ? (
-            [
-              { action: `${liveStats.totalAnnotated} annotations saved`, model: `Across ${liveStats.totalDatasets} dataset(s)`, time: "Now", status: "success", icon: Check },
-              { action: `${liveStats.totalModels} model(s) in registry`, model: "Ready for inference", time: "Latest", status: liveStats.totalModels > 0 ? "success" : "pending", icon: liveStats.totalModels > 0 ? Check : Clock },
-              { action: `${liveStats.totalImages} images uploaded`, model: `${annotationPercent}% annotated`, time: "Total", status: "success", icon: Check },
-            ].map((activity, index) => (
-              <div key={index} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center text-xs",
-                    activity.status === "success" ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/20 text-amber-400"
-                  )}>
-                    <activity.icon />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-200">{activity.action}</p>
-                    <p className="text-xs text-muted-foreground">{activity.model}</p>
-                  </div>
-                </div>
-                <span className="text-xs font-mono text-gray-500">{activity.time}</span>
-              </div>
-            ))
-          ) : (
-            <div className="p-8 text-center text-muted-foreground text-sm">
-              No activity yet. Create a dataset to get started!
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Recent Activity Table -> Removed per user request */}
     </div>
   );
 }

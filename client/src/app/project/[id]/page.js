@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { API_ENDPOINTS } from "@/lib/config";
 import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity } from "lucide-react";
 import { toast } from 'sonner';
+import { useAuth } from "@/context/AuthContext";
 
 // Components for each tab
 import ProjectOverview from "@/components/project/ProjectOverview";
@@ -16,6 +17,7 @@ import ProjectUpload from "@/components/project/ProjectUpload";
 import ProjectAnnotate from "@/components/project/ProjectAnnotate";
 import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
+import ProjectVersions from "@/components/project/ProjectVersions"; // NEW
 import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth"; // NEW
 
@@ -27,6 +29,7 @@ export default function ProjectPage() {
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState(null);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
+    const { token } = useAuth();
 
     // Update URL when tab changes
     const handleTabChange = (val) => {
@@ -51,7 +54,9 @@ export default function ProjectPage() {
 
     const fetchDataset = async (id) => {
         try {
-            const res = await fetch(API_ENDPOINTS.DATASETS.GET(id));
+            const res = await fetch(API_ENDPOINTS.DATASETS.GET(id), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
             if (!res.ok) throw new Error("Dataset not found");
             const data = await res.json();
             setDataset(data);
@@ -65,7 +70,9 @@ export default function ProjectPage() {
 
     const fetchStats = async (id) => {
         try {
-            const res = await fetch(API_ENDPOINTS.DATASETS.STATS(id));
+            const res = await fetch(API_ENDPOINTS.DATASETS.STATS(id), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
             if (res.ok) setStats(await res.json());
         } catch (e) { console.error(e); }
     };
@@ -117,6 +124,13 @@ export default function ProjectPage() {
             icon: Cpu,
             status: 'pending', // TODO: Check for trained models
             meta: 'No Models'
+        },
+        {
+            id: 'versions',
+            label: 'Versions',
+            icon: Layers,
+            status: 'pending',
+            meta: 'Training Runs'
         },
         {
             id: 'deploy',
@@ -194,6 +208,7 @@ export default function ProjectPage() {
                         <TabTrigger value="annotate" icon={Image}>Annotate</TabTrigger>
                         <TabTrigger value="generate" icon={Layers}>Generate</TabTrigger>
                         <TabTrigger value="train" icon={Cpu}>Train</TabTrigger>
+                        <TabTrigger value="versions" icon={Layers}>Versions</TabTrigger>
                         <TabTrigger value="deploy" icon={Code}>Deploy</TabTrigger>
                     </TabsList>
                 </div>
@@ -217,7 +232,11 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="train" className="mt-0 h-full">
-                            <ProjectTrain dataset={dataset} />
+                            <ProjectTrain dataset={dataset} onTrainingStarted={() => handleTabChange('versions')} />
+                        </TabsContent>
+
+                        <TabsContent value="versions" className="mt-0 h-full">
+                            <ProjectVersions dataset={dataset} />
                         </TabsContent>
 
                         <TabsContent value="deploy" className="mt-0 h-full">
