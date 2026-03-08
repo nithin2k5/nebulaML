@@ -10,17 +10,19 @@ from pathlib import Path
 
 from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation
 from app.db.session import initialize_database
+from app.core.config import settings
+from app.core.logging import logger
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup
-    print("\n🚀 Starting YOLO Generator API...")
+    logger.info("🚀 Starting YOLO Generator API...")
     initialize_database()
     yield
     # Shutdown (if needed, add cleanup code here)
-    print("\n👋 Shutting down YOLO Generator API...")
+    logger.info("👋 Shutting down YOLO Generator API...")
 
 
 app = FastAPI(
@@ -33,7 +35,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002"],
+    allow_origins=settings.get_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -5,18 +5,9 @@ Creates MySQL database and tables if they don't exist
 
 import mysql.connector
 from mysql.connector import Error
-import os
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-# Database configuration
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", 3306))
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")  # No password by default
-DB_NAME = os.getenv("DB_NAME", "yolo_generator")
+from app.core.config import settings
+from app.core.logging import logger
 
 
 def create_database():
@@ -24,24 +15,24 @@ def create_database():
     try:
         # Connect without database
         connection = mysql.connector.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASSWORD
+            host=settings.db_host,
+            port=settings.db_port,
+            user=settings.db_user,
+            password=settings.db_password
         )
         
         cursor = connection.cursor()
         
         # Create database
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME}")
-        print(f"✓ Database '{DB_NAME}' ready")
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {settings.db_name}")
+        logger.info(f"✓ Database '{settings.db_name}' ready")
         
         cursor.close()
         connection.close()
         return True
         
     except Error as e:
-        print(f"✗ Error creating database: {e}")
+        logger.error(f"✗ Error creating database: {e}")
         return False
 
 
@@ -49,15 +40,15 @@ def get_db_connection():
     """Get database connection"""
     try:
         connection = mysql.connector.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            database=DB_NAME
+            host=settings.db_host,
+            port=settings.db_port,
+            user=settings.db_user,
+            password=settings.db_password,
+            database=settings.db_name
         )
         return connection
     except Error as e:
-        print(f"✗ Error connecting to database: {e}")
+        logger.error(f"✗ Error connecting to database: {e}")
         return None
 
 
@@ -90,7 +81,7 @@ def create_tables():
                 INDEX idx_role (role)
             )
         """)
-        print("✓ Table 'users' ready")
+        logger.info("✓ Table 'users' ready")
         
         # Datasets table
         cursor.execute("""
@@ -109,7 +100,7 @@ def create_tables():
                 INDEX idx_created_at (created_at)
             )
         """)
-        print("✓ Table 'datasets' ready")
+        logger.info("✓ Table 'datasets' ready")
         
         # Dataset images table
         cursor.execute("""
@@ -128,7 +119,7 @@ def create_tables():
                 INDEX idx_split (split)
             )
         """)
-        print("✓ Table 'dataset_images' ready")
+        logger.info("✓ Table 'dataset_images' ready")
         
         # Annotations table
         cursor.execute("""
@@ -151,7 +142,7 @@ def create_tables():
                 INDEX idx_status (status)
             )
         """)
-        print("✓ Table 'annotations' ready")
+        logger.info("✓ Table 'annotations' ready")
 
         # Dataset Versions table
         cursor.execute("""
@@ -169,7 +160,7 @@ def create_tables():
                 INDEX idx_dataset_id (dataset_id)
             )
         """)
-        print("✓ Table 'dataset_versions' ready")
+        logger.info("✓ Table 'dataset_versions' ready")
 
         # Dataset Version Images table
         cursor.execute("""
@@ -190,7 +181,7 @@ def create_tables():
                 INDEX idx_split (split)
             )
         """)
-        print("✓ Table 'dataset_version_images' ready")
+        logger.info("✓ Table 'dataset_version_images' ready")
         
         # Training jobs table
         cursor.execute("""
@@ -215,7 +206,7 @@ def create_tables():
                 INDEX idx_created_at (created_at)
             )
         """)
-        print("✓ Table 'training_jobs' ready")
+        logger.info("✓ Table 'training_jobs' ready")
         
         # Inference history table
         cursor.execute("""
@@ -233,7 +224,7 @@ def create_tables():
                 INDEX idx_created_at (created_at)
             )
         """)
-        print("✓ Table 'inference_history' ready")
+        logger.info("✓ Table 'inference_history' ready")
         
         # Models table
         cursor.execute("""
@@ -252,7 +243,7 @@ def create_tables():
                 INDEX idx_type (type)
             )
         """)
-        print("✓ Table 'models' ready")
+        logger.info("✓ Table 'models' ready")
         
         # System logs table
         cursor.execute("""
@@ -266,32 +257,32 @@ def create_tables():
                 INDEX idx_created_at (created_at)
             )
         """)
-        print("✓ Table 'system_logs' ready")
+        logger.info("✓ Table 'system_logs' ready")
         
         connection.commit()
         cursor.close()
         connection.close()
         
-        print("\n✅ All tables created successfully!")
+        logger.info("✅ All tables created successfully!")
         return True
         
     except Error as e:
-        print(f"\n✗ Error creating tables: {e}")
+        logger.error(f"✗ Error creating tables: {e}")
         return False
 
 
 def initialize_database():
     """Initialize database and tables"""
-    print("🔧 Initializing MySQL database...")
-    print(f"📍 Host: {DB_HOST}:{DB_PORT}")
-    print(f"📊 Database: {DB_NAME}\n")
+    logger.info("🔧 Initializing MySQL database...")
+    logger.info(f"📍 Host: {settings.db_host}:{settings.db_port}")
+    logger.info(f"📊 Database: {settings.db_name}")
     
     if create_database():
         if create_tables():
-            print("\n🎉 Database initialization complete!")
+            logger.info("🎉 Database initialization complete!")
             return True
     
-    print("\n❌ Database initialization failed!")
+    logger.error("❌ Database initialization failed!")
     return False
 
 
