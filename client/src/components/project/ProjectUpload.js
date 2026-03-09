@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Upload } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
+import { useAuth } from "@/context/AuthContext";
 
 export default function ProjectUpload({ dataset, onUploadComplete }) {
+    const { token } = useAuth();
     const [isDragging, setIsDragging] = useState(false);
     const [uploading, setUploading] = useState(false);
 
@@ -44,6 +46,9 @@ export default function ProjectUpload({ dataset, onUploadComplete }) {
         try {
             const response = await fetch(API_ENDPOINTS.DATASETS.UPLOAD(dataset.id), {
                 method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                },
                 body: formData,
             });
 

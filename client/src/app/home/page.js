@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { API_BASE_URL } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -309,6 +310,7 @@ export default function HomePage() {
               <Button
                 variant="outline"
                 size="lg"
+                onClick={() => window.open(`${API_BASE_URL}/docs`, '_blank')}
                 className="h-14 px-8 rounded-full text-base border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 text-white backdrop-blur-sm"
               >
                 <Code className="mr-2" />

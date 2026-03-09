@@ -10,8 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Layers, RefreshCw, Check } from "lucide-react";
 import { toast } from 'sonner';
 import { API_ENDPOINTS } from "@/lib/config";
+import { useAuth } from "@/context/AuthContext";
 
 export default function ProjectGenerate({ dataset, stats, onGenerate }) {
+    const { token } = useAuth();
     const [augmentations, setAugmentations] = useState({
         flipHorizontal: false,
         flipVertical: false,
@@ -33,6 +35,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
                 },
                 body: JSON.stringify({
                     split_ratio: 0.8,

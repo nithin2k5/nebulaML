@@ -10,21 +10,31 @@ export default function SplashScreen() {
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    // Simulate loading progress
+    // Check if we've seen the splash screen in this session
+    const hasSeenSplash = sessionStorage.getItem("hasSeenSplash");
+
+    if (hasSeenSplash) {
+      router.replace("/home");
+      return;
+    }
+
+    sessionStorage.setItem("hasSeenSplash", "true");
+
+    // Fast loading progress
     const timer = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(timer);
           return 100;
         }
-        return prev + Math.random() * 10;
+        return prev + 15; // Faster progress
       });
-    }, 100);
+    }, 50);
 
-    // Redirect after 2.5 seconds
+    // Redirect after just 800ms
     const redirectTimer = setTimeout(() => {
       router.push("/home");
-    }, 2500);
+    }, 800);
 
     return () => {
       clearInterval(timer);

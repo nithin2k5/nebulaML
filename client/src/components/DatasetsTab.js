@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/context/AuthContext";
+
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +25,7 @@ export default function DatasetsTab() {
   const [newDataset, setNewDataset] = useState({ name: "", description: "", classes: "" });
   const [showCreate, setShowCreate] = useState(false);
   const router = useRouter();
+  const { token } = useAuth();
 
   useEffect(() => {
     fetchDatasets();
@@ -31,7 +34,8 @@ export default function DatasetsTab() {
   const fetchDatasets = async () => {
     setLoading(true);
     try {
-      const response = await fetch(API_ENDPOINTS.DATASETS.LIST);
+      const headers = { "Authorization": `Bearer ${token}` };
+      const response = await fetch(API_ENDPOINTS.DATASETS.LIST, { headers });
       if (!response.ok) throw new Error("Failed to fetch");
       const rawData = await response.json();
       const data = Array.isArray(rawData) ? rawData : (rawData.datasets || []);
@@ -39,7 +43,7 @@ export default function DatasetsTab() {
       const datasetsWithStats = await Promise.all(
         data.map(async (ds) => {
           try {
-            const statsRes = await fetch(API_ENDPOINTS.DATASETS.STATS(ds.id));
+            const statsRes = await fetch(API_ENDPOINTS.DATASETS.STATS(ds.id), { headers });
             if (statsRes.ok) {
               const stats = await statsRes.json();
               return { ...ds, stats };
@@ -77,7 +81,10 @@ export default function DatasetsTab() {
     try {
       const response = await fetch(API_ENDPOINTS.DATASETS.CREATE, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({
           name: newDataset.name.trim(),
           description: newDataset.description.trim(),
@@ -104,7 +111,10 @@ export default function DatasetsTab() {
   const handleDelete = async (id, name) => {
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
     try {
-      const response = await fetch(API_ENDPOINTS.DATASETS.DELETE(id), { method: "DELETE" });
+      const response = await fetch(API_ENDPOINTS.DATASETS.DELETE(id), {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (response.ok) {
         toast.success(`"${name}" deleted`);
         fetchDatasets();
@@ -118,8 +128,35 @@ export default function DatasetsTab() {
 
   const handleExport = async (id) => {
     try {
-      window.location.href = `http://localhost:8000/api/annotations/datasets/${id}/export`;
-      toast.success("Export started — check your downloads");
+      const response = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/export`, {
+        method: 'POST',
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({})
+      });
+
+      if (!response.ok) throw new Error("Export failed");
+
+      const downloadResponse = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/download`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+
+      if (!downloadResponse.ok) throw new Error("Download failed");
+
+      // Since it's a file, we can download it by creating an object URL
+      const blob = await downloadResponse.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dataset_${id}_export.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast.success("Dataset exported and downloaded successfully!");
     } catch (error) {
       toast.error("Export failed");
     }
@@ -187,13 +224,34 @@ export default function DatasetsTab() {
           ))}
         </div>
       ) : datasets.length === 0 ? (
-        <div className="py-20 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02]">
-          <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center mx-auto mb-4 text-indigo-400">
-            <Folder className="text-3xl" />
+        <div className="py-20 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] max-w-2xl mx-auto">
+          <div className="w-20 h-20 rounded-full bg-indigo-500/10 flex items-center justify-center mx-auto mb-6 text-indigo-400">
+            <Folder className="text-4xl" />
           </div>
-          <h3 className="text-xl font-bold mb-2">No Datasets Yet</h3>
-          <p className="text-muted-foreground mb-6">Get started by creating your first dataset.</p>
-          <Button onClick={() => setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-500">
+          <h3 className="text-2xl font-bold mb-3">Welcome to NebulaML</h3>
+          <p className="text-gray-400 mb-8 max-w-md mx-auto leading-relaxed">
+            You don't have any datasets yet. Create your first dataset to start the ML pipeline.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left max-w-xl mx-auto mb-10">
+            <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-3">1</div>
+              <h4 className="font-semibold text-sm mb-1">Create Dataset</h4>
+              <p className="text-xs text-gray-500">Define classes and metadata</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white/5 border border-white/5 opacity-70">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-3">2</div>
+              <h4 className="font-semibold text-sm mb-1">Upload & Label</h4>
+              <p className="text-xs text-gray-500">Add images and bounding boxes</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white/5 border border-white/5 opacity-70">
+              <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center mb-3">3</div>
+              <h4 className="font-semibold text-sm mb-1">Train Model</h4>
+              <p className="text-xs text-gray-500">Click to train YOLO automatically</p>
+            </div>
+          </div>
+
+          <Button onClick={() => setShowCreate(true)} size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-transform hover:scale-105">
             <Plus className="mr-2" /> Create First Dataset
           </Button>
         </div>
