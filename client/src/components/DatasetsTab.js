@@ -127,6 +127,7 @@ export default function DatasetsTab() {
   };
 
   const handleExport = async (id) => {
+    const toastId = toast.loading('Preparing export...', { description: '0%' });
     try {
       const response = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/export`, {
         method: 'POST',
@@ -137,15 +138,47 @@ export default function DatasetsTab() {
         body: JSON.stringify({})
       });
 
-      if (!response.ok) throw new Error("Export failed");
+      if (!response.ok) throw new Error("Export request failed");
+      const data = await response.json();
 
+      if (data.job_id) {
+        const interval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/export-status/${data.job_id}`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.status === "completed") {
+                clearInterval(interval);
+                toast.success("Export ready! Downloading...", { id: toastId });
+                downloadDataset(id);
+              } else if (statusData.status === "failed") {
+                clearInterval(interval);
+                toast.error("Export failed: " + statusData.error, { id: toastId });
+              } else {
+                toast.loading('Preparing export...', { description: `${statusData.progress || 0}%`, id: toastId });
+              }
+            }
+          } catch (err) {
+            console.error("Polling error:", err);
+          }
+        }, 1000);
+      } else {
+        toast.success("Export ready! Downloading...", { id: toastId });
+        downloadDataset(id);
+      }
+    } catch (error) {
+      toast.error("Export failed", { id: toastId });
+    }
+  };
+
+  const downloadDataset = async (id) => {
+    try {
       const downloadResponse = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/download`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
 
       if (!downloadResponse.ok) throw new Error("Download failed");
 
-      // Since it's a file, we can download it by creating an object URL
       const blob = await downloadResponse.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -155,10 +188,8 @@ export default function DatasetsTab() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-
-      toast.success("Dataset exported and downloaded successfully!");
     } catch (error) {
-      toast.error("Export failed");
+      toast.error("Download failed");
     }
   };
 
@@ -230,7 +261,7 @@ export default function DatasetsTab() {
           </div>
           <h3 className="text-2xl font-bold mb-3">Welcome to NebulaML</h3>
           <p className="text-gray-400 mb-8 max-w-md mx-auto leading-relaxed">
-            You don't have any datasets yet. Create your first dataset to start the ML pipeline.
+            You don&apos;t have any datasets yet. Create your first dataset to start the ML pipeline.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left max-w-xl mx-auto mb-10">

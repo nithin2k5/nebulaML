@@ -25,6 +25,7 @@ import { API_ENDPOINTS } from "@/lib/config";
 
 export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete }) {
     const [loading, setLoading] = useState(false);
+    const [progress, setProgress] = useState(0);
     const [models, setModels] = useState([]);
     const [selectedModel, setSelectedModel] = useState("yolov8n.pt");
     const [confidence, setConfidence] = useState(0.25);
@@ -65,17 +66,45 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
             if (!res.ok) throw new Error("Auto-labeling failed");
 
             const data = await res.json();
-            toast.success(`Successfully auto-labeled ${data.labeled_count} images!`, {
-                description: "Review them and approve to finalize.",
-                icon: <Sparkles className="h-4 w-4 text-amber-500" />,
-            });
-            onComplete?.();
-            onClose();
+            if (data.job_id) {
+                const interval = setInterval(async () => {
+                    try {
+                        const statusRes = await fetch(`${API_ENDPOINTS.BASE}/annotations/datasets/${datasetId}/auto-label-status/${data.job_id}`);
+                        if (statusRes.ok) {
+                            const statusData = await statusRes.json();
+                            if (statusData.status === "completed") {
+                                clearInterval(interval);
+                                toast.success(`Successfully auto-labeled ${statusData.labeled_count} images!`, {
+                                    description: "Review them and approve to finalize.",
+                                    icon: <Sparkles className="h-4 w-4 text-amber-500" />,
+                                });
+                                setLoading(false);
+                                setProgress(0);
+                                onComplete?.();
+                                onClose();
+                            } else if (statusData.status === "failed") {
+                                clearInterval(interval);
+                                toast.error("Auto-label failed", { description: statusData.error });
+                                setLoading(false);
+                                setProgress(0);
+                            } else {
+                                setProgress(statusData.progress || 0);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Polling error:", e);
+                    }
+                }, 1000);
+            } else {
+                toast.success(`Successfully auto-labeled ${data.labeled_count} images!`);
+                setLoading(false);
+                onComplete?.();
+                onClose();
+            }
         } catch (error) {
             toast.error("Failed to start auto-labeling", {
                 description: error.message
             });
-        } finally {
             setLoading(false);
         }
     };
@@ -140,12 +169,18 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                     <Button
                         onClick={handleAutoLabel}
                         disabled={loading}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 relative overflow-hidden"
                     >
+                        {loading && (
+                            <div
+                                className="absolute left-0 top-0 bottom-0 bg-white/20 transition-all duration-300 pointer-events-none"
+                                style={{ width: `${progress}%` }}
+                            />
+                        )}
                         {loading ? (
                             <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Processing...
+                                <Loader2 className="h-4 w-4 animate-spin z-10" />
+                                <span className="z-10">Processing {progress}%</span>
                             </>
                         ) : (
                             <>

@@ -189,8 +189,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                             </p>
                         </CardContent>
                     </Card>
-
-    // Removed jobs dashboard to ProjectVersions.js
+                    {/* Jobs dashboard moved to ProjectVersions.js */}
                 </div>
 
                 <div className="space-y-6">

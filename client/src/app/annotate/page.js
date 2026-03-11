@@ -41,6 +41,7 @@ function AnnotationToolContent() {
   const [showAutoLabel, setShowAutoLabel] = useState(false);
   const [copiedBoxes, setCopiedBoxes] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'unlabeled', 'predicted', 'annotated', 'reviewed'
+  const [annotationType, setAnnotationType] = useState('detection'); // 'detection' or 'classification'
 
   // Filter images based on status
   const filteredImages = useMemo(() => {
@@ -230,6 +231,7 @@ function AnnotationToolContent() {
         boxesRef.current = fetchedBoxes;
         setBoxes(fetchedBoxes);
         setReviewStatus(data.status || 'annotated');
+        setAnnotationType(data.annotation_type || (dataset?.type?.toLowerCase().includes('class') ? 'classification' : 'detection'));
       } else {
         boxesRef.current = [];
         setBoxes([]);
@@ -584,7 +586,8 @@ function AnnotationToolContent() {
           height: naturalHeight || 0,
           boxes: currentBoxesToSave,
           split: selectedSplit || null,
-          status: newStatus
+          status: newStatus,
+          annotation_type: annotationType
         })
       });
 
@@ -902,17 +905,58 @@ function AnnotationToolContent() {
             </div>
 
             <div className="p-3 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+              {/* Annotation Mode Toggle */}
               <div>
-                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Classes</h3>
+                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Mode</h3>
+                <div className="flex bg-black/40 rounded-lg p-1 border border-white/5">
+                  <button
+                    onClick={() => setAnnotationType('detection')}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${annotationType === 'detection' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                  >
+                    Detection
+                  </button>
+                  <button
+                    onClick={() => setAnnotationType('classification')}
+                    className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${annotationType === 'classification' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                  >
+                    Classification
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">
+                  {annotationType === 'classification' ? 'Assign Labels' : 'Classes'}
+                </h3>
                 {dataset?.classes?.map((cls, idx) => {
                   const color = getClassColor(idx);
+                  const isAssigned = annotationType === 'classification' && boxes.some(b => b.class_name === cls);
+
                   return (
                     <button
                       key={idx}
-                      onClick={() => setSelectedClass(idx)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all flex items-center justify-between gap-2 mb-1 ${selectedClass === idx
-                        ? 'bg-white/10 text-white'
-                        : 'hover:bg-white/5 text-gray-400 hover:text-gray-200'
+                      onClick={() => {
+                        setSelectedClass(idx);
+                        if (annotationType === 'classification') {
+                          // Toggle classification label
+                          if (isAssigned) {
+                            const newBoxes = boxes.filter(b => b.class_name !== cls);
+                            boxesRef.current = newBoxes;
+                            setBoxes(newBoxes);
+                          } else {
+                            // Provide dummy w/h coordinates to prevent errors in drawing/backend, even though backend ignores them
+                            const newBox = { x: 50, y: 50, width: 200, height: 50, class_id: idx, class_name: cls };
+                            const newBoxes = [...boxes, newBox];
+                            boxesRef.current = newBoxes;
+                            setBoxes(newBoxes);
+                          }
+                        }
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all flex items-center justify-between gap-2 mb-1 ${isAssigned
+                          ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-300'
+                          : selectedClass === idx
+                            ? 'bg-white/10 text-white border border-transparent'
+                            : 'hover:bg-white/5 text-gray-400 hover:text-gray-200 border border-transparent'
                         }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
@@ -967,16 +1011,22 @@ function AnnotationToolContent() {
                   />
                   <canvas
                     ref={canvasRef}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
+                    onMouseDown={(e) => {
+                      if (annotationType === 'detection') handleMouseDown(e);
+                    }}
+                    onMouseMove={(e) => {
+                      if (annotationType === 'detection') handleMouseMove(e);
+                    }}
+                    onMouseUp={(e) => {
+                      if (annotationType === 'detection') handleMouseUp(e);
+                    }}
                     onMouseLeave={() => {
-                      if (isDrawing && startPos) {
+                      if (annotationType === 'detection' && isDrawing && startPos) {
                         setIsDrawing(false); setStartPos(null); setCurrentBox(null);
                         setTimeout(() => drawCanvas(), 0);
                       }
                     }}
-                    className="border border-white/5 shadow-2xl rounded cursor-crosshair bg-black"
+                    className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection' ? 'cursor-crosshair' : 'cursor-default pointer-events-none'}`}
                     style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }}
                   />
                 </div>

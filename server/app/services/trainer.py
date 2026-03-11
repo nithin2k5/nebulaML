@@ -78,11 +78,20 @@ class YOLOTrainer:
             device=self.device,
             **kwargs
         )
-        
+        # Export the best model to ONNX for faster inference
+        best_model_path = str(results.save_dir / "weights" / "best.pt")
+        try:
+            best_model = YOLO(best_model_path)
+            best_model.export(format="onnx")
+        except Exception as e:
+            # Non-fatal if export fails
+            print(f"ONNX export failed: {e}")
+            pass
+            
         return {
             "success": True,
             "epochs_completed": epochs,
-            "model_path": str(results.save_dir / "weights" / "best.pt"),
+            "model_path": best_model_path,
             "results_dir": str(results.save_dir),
             "metrics": {
                 "map50": float(results.results_dict.get("metrics/mAP50(B)", 0)),

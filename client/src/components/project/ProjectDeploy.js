@@ -227,6 +227,75 @@ print(response.json())`}
                     </Card>
                 </div>
             </div>
+
+            {/* Edge Deployment Section */}
+            <Card className="mt-2">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Terminal className="w-5 h-5" />
+                        Edge Deployment
+                    </CardTitle>
+                    <CardDescription>Export your model for deployment on edge devices</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {[
+                            { platform: "Raspberry Pi", format: "onnx", desc: "ONNX Runtime on ARM" },
+                            { platform: "Jetson Nano", format: "engine", desc: "TensorRT optimized" },
+                            { platform: "iOS / macOS", format: "coreml", desc: "Apple CoreML" },
+                            { platform: "Web Browser", format: "onnx", desc: "ONNX.js in-browser" },
+                        ].map((target) => (
+                            <div
+                                key={target.platform}
+                                className="p-4 rounded-lg border border-border hover:border-primary/50 transition-all"
+                            >
+                                <p className="font-medium text-sm">{target.platform}</p>
+                                <p className="text-xs text-muted-foreground mb-3">{target.desc}</p>
+                                <Badge variant="outline" className="text-[10px]">{target.format.toUpperCase()}</Badge>
+                            </div>
+                        ))}
+                    </div>
+
+                    {selectedJob && (
+                        <div className="mt-4">
+                            <Label className="text-sm font-medium mb-2 block">Inference Script (Python)</Label>
+                            <pre className="bg-muted p-4 rounded-md text-xs overflow-x-auto">
+                                {`# Edge Inference Script for NebulaML Models
+# Platform: Raspberry Pi / Jetson / Desktop
+# Requirements: pip install ultralytics opencv-python
+
+from ultralytics import YOLO
+import cv2
+
+# Load exported model
+model = YOLO("best.onnx")  # or best.pt, best.engine
+
+# Run inference on camera
+cap = cv2.VideoCapture(0)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # Run detection
+    results = model(frame, conf=${confidence})
+    
+    # Draw results
+    annotated = results[0].plot()
+    cv2.imshow("Detection", annotated)
+    
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()`}
+                            </pre>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }
+
