@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { API_ENDPOINTS } from "@/lib/config";
-import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity } from "lucide-react";
+import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3 } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
@@ -19,7 +19,9 @@ import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
 import ProjectVersions from "@/components/project/ProjectVersions"; // NEW
 import ProjectDeploy from "@/components/project/ProjectDeploy";
-import ProjectHealth from "@/components/project/ProjectHealth"; // NEW
+import ProjectHealth from "@/components/project/ProjectHealth";
+import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
+import ProjectMonitoring from "@/components/project/ProjectMonitoring";
 
 export default function ProjectPage() {
     const params = useParams();
@@ -122,7 +124,7 @@ export default function ProjectPage() {
             id: 'train',
             label: 'Train',
             icon: Cpu,
-            status: 'pending', // TODO: Check for trained models
+            status: 'pending',
             meta: 'No Models'
         },
         {
@@ -140,11 +142,25 @@ export default function ProjectPage() {
             meta: 'Not Deployed'
         },
         {
+            id: 'active-learning',
+            label: 'Active Learn',
+            icon: Brain,
+            status: 'pending',
+            meta: 'Re-train Loop'
+        },
+        {
+            id: 'monitoring',
+            label: 'Monitor',
+            icon: BarChart3,
+            status: 'pending',
+            meta: 'No Data'
+        },
+        {
             id: 'health',
             label: 'Health',
             icon: Activity,
-            status: 'pending', // You might want to add logic here based on dataset health
-            meta: 'No Issues' // Or a summary of health status
+            status: 'pending',
+            meta: 'No Issues'
         }
     ];
 
@@ -241,6 +257,14 @@ export default function ProjectPage() {
 
                         <TabsContent value="deploy" className="mt-0 h-full">
                             <ProjectDeploy dataset={dataset} />
+                        </TabsContent>
+
+                        <TabsContent value="active-learning" className="mt-0 h-full">
+                            <ProjectActiveLearning dataset={dataset} />
+                        </TabsContent>
+
+                        <TabsContent value="monitoring" className="mt-0 h-full">
+                            <ProjectMonitoring dataset={dataset} />
                         </TabsContent>
 
                         <TabsContent value="health" className="mt-0 h-full">

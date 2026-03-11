@@ -196,122 +196,97 @@ def split_dataset_stratified(
     seed: int = 42
 ) -> Dict[str, List[Dict]]:
     """
-    Split dataset into train/val/test sets using stratified sampling 
-    to maintain class distribution.
-    
-    Args:
-        images: List of image dictionaries. Each dict must have 'id' and 'annotations' 
-                (list of dicts with 'class_name').
-        train_ratio: Proportion of images for training
-        val_ratio: Proportion of images for validation
-        test_ratio: Proportion of images for testing
-        seed: Random seed for reproducibility
-        
-    Returns:
-        Dictionary with 'train', 'val', 'test' lists of images
+    Split dataset into train/val/test sets using multi-label stratified sampling.
+    This ensures that the distribution of ALL classes is preserved across splits.
     """
-    import random
-    from collections import defaultdict, Counter
-    
-    random.seed(seed)
-    
-    # Normalize ratios
-    total_ratio = train_ratio + val_ratio + test_ratio
-    train_ratio /= total_ratio
-    val_ratio /= total_ratio
-    test_ratio /= total_ratio
-    
-    # helper to get class counts for an image
-    def get_image_classes(img):
-        classes = set()
-        if 'annotations' in img:
-            for ann in img['annotations']:
-                if 'class_name' in ann:
-                    classes.add(ann['class_name'])
-        # Also check for 'classes' list if pre-processed
-        if 'classes' in img:
-            classes.update(img['classes'])
-        return list(classes)
+    if not images:
+        return {'train': [], 'val': [], 'test': []}
 
-    # 1. Organize images by their "rarest" class
-    # First tally all class counts
-    global_class_counts = Counter()
-    image_classes_map = {}
-    
-    for img in images:
-        classes = get_image_classes(img)
-        image_classes_map[img['id']] = classes
-        for c in classes:
-            global_class_counts[c] += 1
-            
-    if not global_class_counts:
-        # Fallback to random split if no classes found
+    import numpy as np
+    import random
+    try:
+        from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+    except ImportError:
+        # Fallback to random if package not installed yet in current env
+        print("Warning: iterative-stratification not found. Falling back to random split.")
         shuffled = images.copy()
+        random.seed(seed)
         random.shuffle(shuffled)
-        n_train = int(len(shuffled) * train_ratio)
-        n_val = int(len(shuffled) * val_ratio)
-        
+        n = len(shuffled)
+        n_train = int(n * train_ratio)
+        n_val = int(n * val_ratio)
         return {
             'train': shuffled[:n_train],
             'val': shuffled[n_train:n_train+n_val],
             'test': shuffled[n_train+n_val:]
         }
-    
-    # Sort classes by frequency (rare to common)
-    sorted_classes = sorted(global_class_counts.keys(), key=lambda k: global_class_counts[k])
-    
-    # Bucket images by their rarest class
-    # An image belongs to the bucket of its rarest class
-    buckets = defaultdict(list)
-    
+
+    # 1. Prepare multi-label indicators
+    # We need to know all unique classes across the dataset
+    all_classes = set()
     for img in images:
-        classes = image_classes_map[img['id']]
-        if not classes:
-            buckets['__background__'].append(img)
-            continue
-            
-        # Find rarest class in this image
-        rarest_class = min(classes, key=lambda c: global_class_counts[c])
-        buckets[rarest_class].append(img)
-        
-    # 2. Split each bucket
-    train_set = []
-    val_set = []
-    test_set = []
+        if 'annotations' in img:
+            for ann in img['annotations']:
+                all_classes.add(ann.get('class_name', 'unknown'))
+        if 'classes' in img:
+            all_classes.update(img['classes'])
     
-    for class_name, bucket_images in buckets.items():
-        random.shuffle(bucket_images)
+    class_to_idx = {name: i for i, name in enumerate(sorted(list(all_classes)))}
+    num_classes = len(class_to_idx)
+    
+    if num_classes == 0:
+        # Random split if no classes
+        shuffled = images.copy()
+        random.seed(seed)
+        random.shuffle(shuffled)
+        n = len(shuffled)
+        n_train = int(n * train_ratio)
+        n_val = int(n * val_ratio)
+        return {
+            'train': shuffled[:n_train],
+            'val': shuffled[n_train:n_train+n_val],
+            'test': shuffled[n_train+n_val:]
+        }
+
+    # Create indicator matrix Y
+    Y = np.zeros((len(images), num_classes), dtype=int)
+    for i, img in enumerate(images):
+        img_classes = set()
+        if 'annotations' in img:
+            for ann in img['annotations']:
+                img_classes.add(ann.get('class_name', 'unknown'))
+        if 'classes' in img:
+            img_classes.update(img['classes'])
         
-        n_total = len(bucket_images)
-        n_train = int(n_total * train_ratio)
-        n_val = int(n_total * val_ratio)
-        # Ensure at least one sample if possible, priority to train, then val
-        if n_total > 0 and n_train == 0:
-            n_train = 1
-            n_val = 0
-        elif n_total > 1 and n_val == 0 and val_ratio > 0:
-            n_val = 1
-            # Adjust train if we took the only one
-            if n_train + n_val > n_total:
-                n_train = max(0, n_total - n_val)
-                
-        # Split
-        train_chunk = bucket_images[:n_train]
-        val_chunk = bucket_images[n_train:n_train+n_val]
-        test_chunk = bucket_images[n_train+n_val:]
-        
-        train_set.extend(train_chunk)
-        val_set.extend(val_chunk)
-        test_set.extend(test_chunk)
-        
-    # Shuffle final sets
-    random.shuffle(train_set)
-    random.shuffle(val_set)
-    random.shuffle(test_set)
+        for cls in img_classes:
+            if cls in class_to_idx:
+                Y[i, class_to_idx[cls]] = 1
+
+    # 2. Perform Split
+    # We need to do this in two steps to get train/val/test
+    # Step 1: Split into (train+val) and (test)
+    test_size = test_ratio / (train_ratio + val_ratio + test_ratio)
+    
+    X = np.arange(len(images)).reshape(-1, 1) # Dummy X for index tracking
+    
+    msss1 = MultilabelStratifiedShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+    train_val_indices, test_indices = next(msss1.split(X, Y))
+    
+    X_train_val = X[train_val_indices]
+    Y_train_val = Y[train_val_indices]
+    
+    # Step 2: Split (train+val) into (train) and (val)
+    val_size = val_ratio / (train_ratio + val_ratio)
+    msss2 = MultilabelStratifiedShuffleSplit(n_splits=1, test_size=val_size, random_state=seed)
+    train_indices_rel, val_indices_rel = next(msss2.split(X_train_val, Y_train_val))
+    
+    # Map relative indices back to original indices
+    train_indices = train_val_indices[train_indices_rel]
+    val_indices = train_val_indices[val_indices_rel]
     
     return {
-        'train': train_set,
-        'val': val_set,
-        'test': test_set
+        'train': [images[i] for i in train_indices],
+        'val': [images[i] for i in val_indices],
+        'test': [images[i] for i in test_indices]
     }
 

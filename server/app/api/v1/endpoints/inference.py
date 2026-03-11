@@ -5,13 +5,16 @@ import os
 import io
 from pathlib import Path
 from PIL import Image
+from functools import lru_cache
 
 from app.services.inference import YOLOInference
 
 router = APIRouter()
 
-# Initialize inference model
-inference_model = None
+@lru_cache(maxsize=3)
+def get_inference_model(model_path: str) -> YOLOInference:
+    """Load and cache up to 3 models in memory for fast swapping"""
+    return YOLOInference(model_path)
 
 @router.post("/predict")
 async def predict_image(
@@ -34,25 +37,19 @@ async def predict_image(
         model_path = model_name
         
         if job_id:
-            # Construct path to best.pt for this job
-            # Assuming runs/detect/job_{job_id}/weights/best.pt
-            # We need to find the absolute path relative to backend root
-            weights_path = Path("runs/detect") / f"job_{job_id}" / "weights" / "best.pt"
-            if not weights_path.exists():
-                raise HTTPException(status_code=404, detail=f"Trained model for job {job_id} not found at {weights_path}")
-            model_path = str(weights_path)
+            weights_dir = Path("runs/detect") / f"job_{job_id}" / "weights"
+            onnx_path = weights_dir / "best.onnx"
+            pt_path = weights_dir / "best.pt"
             
-        # Initialize or update model
-        # For simplicity in this demo, we reload if the model path changes. 
-        # In prod, you'd want a cache of models or a worker pool.
-        if inference_model is None or inference_model.model.ckpt_path != model_path:
-             # Check if we need to reload. 
-             # YOLO wrapper doesn't expose ckpt_path easily, so we might just reload if job_id is passed
-             # or track current loaded model.
-             if job_id:
-                 inference_model = YOLOInference(model_path)
-             elif inference_model is None:
-                 inference_model = YOLOInference(model_path)
+            if onnx_path.exists():
+                model_path = str(onnx_path)
+            elif pt_path.exists():
+                model_path = str(pt_path)
+            else:
+                raise HTTPException(status_code=404, detail=f"Trained model for job {job_id} not found at {weights_dir}")
+                
+        # Get cached model
+        inference_model = get_inference_model(model_path)
 
         
         # Process image in memory
@@ -87,11 +84,10 @@ async def predict_batch(
     """
     Run inference on multiple images
     """
-    global inference_model
-    
     try:
-        if inference_model is None:
-            inference_model = YOLOInference()
+        # We need a model_name or job_id to know which model to use.
+        # But this endpoint doesn't accept model_name easily in the signature. Default to base.
+        inference_model = get_inference_model("yolov8n.pt")
         
         all_results = []
         images = []

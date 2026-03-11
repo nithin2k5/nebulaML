@@ -57,23 +57,53 @@ async def segment_point(
         px = max(0, min(px, w - 1))
         py = max(0, min(py, h - 1))
         
-        # Algorithm: Flood Fill for "Smart Click"
-        tolerance = 30
-        seed_point = (px, py)
+        # Algorithm: Hybrid FloodFill + GrabCut for "Smart Click"
         
-        mask = np.zeros((h+2, w+2), np.uint8)
-        flags = 4 | (255 << 8) | cv2.FLOODFILL_FIXED_RANGE | cv2.FLOODFILL_MASK_ONLY
+        # 1. Initialize mask with probable background
+        mask = np.full((h, w), cv2.GC_PR_BGD, dtype=np.uint8)
         
-        cv2.floodFill(img, mask, seed_point, (255, 255, 255), (tolerance,)*3, (tolerance,)*3, flags)
+        # 2. Strong FloodFill to capture immediate solid color body
+        ff_mask = np.zeros((h+2, w+2), np.uint8)
+        ff_flags = 4 | (255 << 8) | cv2.FLOODFILL_FIXED_RANGE | cv2.FLOODFILL_MASK_ONLY
+        # Very loose tolerance to get a good chunk of the object
+        cv2.floodFill(img, ff_mask, (px, py), (255, 255, 255), (35, 35, 35), (35, 35, 35), ff_flags)
+        ff_mask = ff_mask[1:-1, 1:-1]
         
-        # Crop mask to image size
-        mask = mask[1:-1, 1:-1]
+        # 3. Mark the floodfilled area as definite foreground
+        mask[ff_mask == 255] = cv2.GC_FGD
+        
+        # 4. Define a safe probable foreground box around click point
+        box_size = min(w, h) // 3
+        x1 = max(0, px - box_size//2)
+        y1 = max(0, py - box_size//2)
+        x2 = min(w, px + box_size//2)
+        y2 = min(h, py + box_size//2)
+        
+        # Where the mask isn't explicitly definite background or foreground, set to probable foreground in the bounding box
+        box_mask_condition = (mask[y1:y2, x1:x2] != cv2.GC_FGD) & (mask[y1:y2, x1:x2] != cv2.GC_BGD)
+        mask[y1:y2, x1:x2][box_mask_condition] = cv2.GC_PR_FGD
+        
+        # 5. Ensure the exact click point is heavily weighted
+        fx1, fy1 = max(0, px - 3), max(0, py - 3)
+        fx2, fy2 = min(w, px + 3), min(h, py + 3)
+        mask[fy1:fy2, fx1:fx2] = cv2.GC_FGD
+        
+        # Models for GrabCut
+        bgdModel = np.zeros((1, 65), np.float64)
+        fgdModel = np.zeros((1, 65), np.float64)
+        
+        # 6. Run GrabCut to snap perfectly to object boundaries
+        # We use fewer iterations (3) for speed since it's an API call
+        cv2.grabCut(img, mask, None, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_MASK)
+        
+        # Extract the final binary mask
+        final_mask = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype('uint8')
         
         # Find contours
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
-            # Fallback box
+            # Fallback box if everything failed
             min_dim = min(w, h)
             box_size = max(20, int(min_dim * 0.05)) # 5% of image size
             box = {
@@ -83,7 +113,7 @@ async def segment_point(
                 "height": box_size
             }
         else:
-            # Get bounding box of largest contour
+            # Get bounding box of largest contour to filter out background noise blips
             c = max(contours, key=cv2.contourArea)
             bx, by, bw, bh = cv2.boundingRect(c)
             

@@ -134,11 +134,7 @@ async def start_training(
             f.write(content)
         
         # Start training in background
-        trainer = YOLOTrainer(
-            config=config,
-            job_id=job_id,
-            data_path=str(yaml_path)
-        )
+        trainer = YOLOTrainer(model_name=config.model_name)
         
         # Register job
         training_jobs[job_id] = {
@@ -150,7 +146,17 @@ async def start_training(
             "created_at": datetime.now().isoformat()
         }
         
-        background_tasks.add_task(trainer.train)
+        background_tasks.add_task(
+            trainer.train,
+            data_yaml=str(yaml_path),
+            epochs=config.epochs,
+            imgsz=config.img_size,
+            batch=config.batch_size,
+            name=f"job_{job_id}",
+            strict_epochs=config.strict_epochs,
+            augmentations=config.augmentations,
+            patience=config.patience
+        )
         
         return {"job_id": job_id, "status": "started"}
         
@@ -186,74 +192,43 @@ async def start_micro_training(
         
         job_id = str(uuid.uuid4())
         
-        # 1. Get Dataset Info
-        # We need to generate a data.yaml from the dataset ID
-        # Since we don't have direct DB access here easily without service, 
-        # we'll assume the standard dataset location structure or use service if available.
-        # In `annotations_analyze.py` we saw `database_service` being used.
-        # let's duplicate the logic or import the service. 
-        # We imported `DatasetService` above.
-        
-        # 2. Prepare Data.yaml
-        # For this quick prototype, we will rely on the dataset having been exported 
-        # or we might need to trigger an export.
-        # Ideally, we should have an 'export' function.
-        # For now, let's assume the user has already 'Generated' the dataset version 
-        # and we can point to it. 
-        # BUT, the prompt implies "annotating -> train", so it might not be exported yet.
-        # We need to CREATE a temporary export of the current state.
-        
-        # Let's perform a quick export of labeled images to a temp dir
-        temp_dir = Path(tempfile.gettempdir()) / "yolo_micro_train" / job_id
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        
-        # This is complex to do without a proper export function exposed.
-        # However, looking at the code, we can assume for "Quick Iteration" 
-        # we might just want to verify the improved workflow UI first, 
-        # or we can mock the data preparation if actual export is too heavy.
-        
-        # Let's check `dataset_analyzer.py` or similar to see how they access data.
-        # It seems they access `datasets/{id}/images`.
-        
-        # Creating a basic yaml that points to the raw image directory (if YOLO supports it directly)
-        # YOLO usually needs a specific structure (train/val folders).
-        # We'll create a simple split here.
-        
-        # TODO: Implement proper export. For now, we will create a dummy yaml 
-        # provided the dataset path exists, just to allow the job to "start" and fail/run.
-        # Real implementation requires the `ProjectGenerate` step logic.
-        
-        # Mocking the success for UI verification as requested by "Workflow Improvement" focus.
-        # We will create the job entry so frontend sees it.
+        yaml_path = Path(f"datasets/{dataset_id}/data.yaml")
+        if not yaml_path.exists():
+            raise HTTPException(status_code=400, detail="Dataset not exported yet. Please export the dataset before micro-training.")
+            
+        # Fetch recommendations to improve micro-training accuracy
+        try:
+            analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
+            recs = analysis.augmentation_recommendations
+            # Override defaults with recommendations if it's a micro-job
+            config.img_size = analysis.recommended_image_size
+            config.augmentations = recs
+            logger.info(f"Applied analyzer recommendations for job {job_id}: imgsz={config.img_size}")
+        except Exception as e:
+            logger.warning(f"Could not fetch recommendations: {e}")
+
+        trainer = YOLOTrainer(model_name=config.model_name)
         
         training_jobs[job_id] = {
             "status": "running",
             "config": config.dict(),
-            "output": ["Starting micro-training...", "Exporting current annotations...", "Training started..."],
-            "metrics": {"epoch": 0, "loss": 0.5, "mAP50": 0.0},
-            "progress": 5,
+            "output": [f"Starting micro-training on dataset {dataset_id}..."],
+            "metrics": {},
+            "progress": 0,
             "created_at": datetime.now().isoformat()
         }
         
-        # Simulate background task
-        async def mock_train(jid):
-            import asyncio
-            import random
-            job = training_jobs[jid]
-            for i in range(1, config.epochs + 1):
-                await asyncio.sleep(2) # Fast updates
-                job["progress"] = (i / config.epochs) * 100
-                job["metrics"] = {
-                    "epoch": i,
-                    "loss": max(0.1, 0.5 - (i * 0.04)), 
-                    "mAP50": min(0.9, 0.1 + (i * 0.08))
-                }
-                job["output"].append(f"Epoch {i}/{config.epochs} - loss: {job['metrics']['loss']:.4f}")
-            
-            job["status"] = "completed"
-            job["output"].append("Training completed successfully!")
-            
-        background_tasks.add_task(mock_train, job_id)
+        background_tasks.add_task(
+            trainer.train,
+            data_yaml=str(yaml_path),
+            epochs=config.epochs,
+            imgsz=config.img_size,
+            batch=config.batch_size,
+            name=f"job_{job_id}",
+            strict_epochs=config.strict_epochs,
+            augmentations=config.augmentations,
+            patience=config.patience
+        )
         
         return {"job_id": job_id, "status": "started"}
 
@@ -594,3 +569,81 @@ async def export_and_train(
         logger.error(f"Export and train error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class PreviewAugmentationRequest(BaseModel):
+    dataset_id: str
+    preprocessing: Dict[str, Any] = {}
+    augmentations: Dict[str, Any] = {}
+
+
+@router.post("/preview-augmentation")
+async def preview_augmentation(request: PreviewAugmentationRequest):
+    """
+    Preview augmentation on a random image from the dataset.
+    Returns original and augmented images as base64.
+    """
+    import cv2
+    import base64
+    import random
+    import numpy as np
+
+    dataset = DatasetService.get_dataset(request.dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    images = DatasetService.get_dataset_images(request.dataset_id)
+    if not images:
+        raise HTTPException(status_code=400, detail="No images in dataset")
+
+    # Pick a random image
+    img_data = random.choice(images)
+    img_path = Path(img_data.get("path", ""))
+
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found on disk")
+
+    # Read image
+    img = cv2.imread(str(img_path))
+    if img is None:
+        raise HTTPException(status_code=500, detail="Failed to read image")
+
+    # Encode original as base64
+    _, orig_buffer = cv2.imencode('.jpg', img)
+    orig_b64 = base64.b64encode(orig_buffer).decode('utf-8')
+
+    # Build augmentation pipeline using VersioningEngine
+    engine = VersioningEngine()
+    pipeline = engine._build_augmentation_pipeline(
+        request.preprocessing, request.augmentations
+    )
+
+    # Apply augmentations
+    try:
+        augmented = pipeline(image=img)
+        aug_img = augmented["image"]
+    except Exception as e:
+        logger.warning(f"Augmentation failed, returning original: {e}")
+        aug_img = img
+
+    # Encode augmented as base64
+    _, aug_buffer = cv2.imencode('.jpg', aug_img)
+    aug_b64 = base64.b64encode(aug_buffer).decode('utf-8')
+
+    return {
+        "success": True,
+        "original": {
+            "base64": orig_b64,
+            "filename": img_data.get("filename", ""),
+            "width": img.shape[1],
+            "height": img.shape[0]
+        },
+        "augmented": {
+            "base64": aug_b64,
+            "width": aug_img.shape[1],
+            "height": aug_img.shape[0]
+        },
+        "config": {
+            "preprocessing": request.preprocessing,
+            "augmentations": request.augmentations
+        }
+    }
