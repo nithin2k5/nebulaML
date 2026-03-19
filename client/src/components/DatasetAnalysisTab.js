@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { RefreshCw, AlertTriangle, CheckCircle, Info, TrendingUp, BarChart2, Target, Settings } from "lucide-react";
 
 export default function DatasetAnalysisTab({ datasetId }) {
+  const { token } = useAuth();
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -25,7 +28,9 @@ export default function DatasetAnalysisTab({ datasetId }) {
     setError(null);
 
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/datasets/${datasetId}/analyze`);
+      const response = await fetch(API_ENDPOINTS.DATASETS.ANALYZE(datasetId), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       const data = await response.json();
 
       if (data.success) {

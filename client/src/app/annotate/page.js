@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import AutoLabelModal from "@/components/project/AutoLabelModal";
+import { API_ENDPOINTS } from "@/lib/config";
 import {
   Save, Trash2, Upload, ChevronLeft, ChevronRight, Home,
   Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu
@@ -18,6 +20,7 @@ import {
 function AnnotationToolContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { token } = useAuth();
   const datasetId = searchParams.get('dataset');
 
   const [dataset, setDataset] = useState(null);
@@ -75,26 +78,26 @@ function AnnotationToolContent() {
       fetchDataset();
       fetchStats();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetId]);
+  }, [datasetId, fetchDataset, fetchStats]);
 
-  const fetchStats = async () => {
-    if (!datasetId) return;
+  const fetchStats = useCallback(async () => {
+    if (!datasetId || !token) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/datasets/${datasetId}/stats`);
+      const response = await fetch(API_ENDPOINTS.DATASETS.STATS(datasetId), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (response.ok) setStats(await response.json());
     } catch (error) {
       console.error("Error fetching stats:", error);
     }
-  };
+  }, [datasetId, token]);
 
   useEffect(() => {
-    if (!datasetId) return;
+    if (!datasetId || !token) return;
     fetchStats();
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetId]);
+  }, [datasetId, token, fetchStats]);
 
   useEffect(() => {
     if (images.length > 0 && currentImageIndex < images.length) {
@@ -196,10 +199,12 @@ function AnnotationToolContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxes, boxHistory, dataset, images, currentImageIndex, copiedBoxes]);
 
-  const fetchDataset = async () => {
-    if (!datasetId) return;
+  const fetchDataset = useCallback(async () => {
+    if (!datasetId || !token) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/datasets/${datasetId}`);
+      const response = await fetch(API_ENDPOINTS.DATASETS.GET(datasetId), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (!response.ok) throw new Error(`Failed to fetch dataset: ${response.status}`);
       const data = await response.json();
       setDataset(data);
@@ -208,10 +213,10 @@ function AnnotationToolContent() {
       console.error("Error fetching dataset:", error);
       showToast("Error loading dataset. Make sure backend is running.", 'error');
     }
-  };
+  }, [datasetId, token, showToast]);
 
-  const loadImage = async (index) => {
-    if (!images[index] || !datasetId) return;
+  const loadImage = useCallback(async (index) => {
+    if (!images[index] || !datasetId || !token) return;
 
     // Instantly wipe old annotations synchronously so they don't ghost
     // over the new image while the network request is pending
@@ -223,7 +228,9 @@ function AnnotationToolContent() {
 
     const img = images[index];
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/annotations/${datasetId}/${img.id}`);
+      const response = await fetch(API_ENDPOINTS.ANNOTATIONS.GET_ANNOTATION(datasetId, img.id), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (latestImageIndexRequested.current !== index) return;
       if (response.ok) {
         const data = await response.json();
@@ -249,7 +256,7 @@ function AnnotationToolContent() {
       }
     }
     setSelectedSplit(img.split || null);
-  };
+  }, [datasetId, images, token, dataset?.type]);
 
   const handleUploadImages = async (e) => {
     const files = Array.from(e.target.files);
@@ -276,8 +283,9 @@ function AnnotationToolContent() {
     files.forEach(file => formData.append("files", file));
 
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/datasets/${datasetId}/upload`, {
+      const response = await fetch(API_ENDPOINTS.DATASETS.UPLOAD(datasetId), {
         method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
         body: formData,
       });
 
@@ -344,8 +352,9 @@ function AnnotationToolContent() {
         formData.append("x", x / img.naturalWidth);
         formData.append("y", y / img.naturalHeight);
 
-        const res = await fetch("http://localhost:8000/api/smart/segment", {
+        const res = await fetch(API_ENDPOINTS.SMART.SEGMENT, {
           method: "POST",
+          headers: { "Authorization": `Bearer ${token}` },
           body: formData
         });
 
@@ -433,7 +442,7 @@ function AnnotationToolContent() {
   };
 
   // Color palette for classes
-  const getClassColor = (classId) => {
+  const getClassColor = useCallback((classId) => {
     const colors = [
       { stroke: '#6366f1', fill: 'rgba(99,102,241,0.15)' },    // indigo
       { stroke: '#f43f5e', fill: 'rgba(244,63,94,0.15)' },     // rose
@@ -447,9 +456,9 @@ function AnnotationToolContent() {
       { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.15)' },    // blue
     ];
     return colors[classId % colors.length];
-  };
+  }, []);
 
-  const drawCanvas = () => {
+  const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const img = imageRef.current;
     if (!canvas || !img || !img.complete || img.naturalWidth === 0) return;
@@ -512,7 +521,7 @@ function AnnotationToolContent() {
     } catch (error) {
       console.error("Error drawing canvas:", error);
     }
-  };
+  }, [currentBox, isDrawing, getClassColor]);
 
   useEffect(() => {
     if (canvasRef.current && imageRef.current?.complete) drawCanvas();
@@ -538,13 +547,12 @@ function AnnotationToolContent() {
     }, 1000); // 1s debounce
 
     return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes]);
+  }, [boxes, datasetId, images, currentImageIndex, handleSaveAnnotations, reviewStatus, saveStatus]);
 
-  const handleSaveAnnotations = async (statusOverride = null) => {
-    if (!images[currentImageIndex] || !dataset) return false;
+  const handleSaveAnnotations = useCallback(async (statusOverride = null) => {
+    if (!images[currentImageIndex] || !dataset || !token) return false;
 
-    // CRITICAL: If the image annotations are still loading from the API, 
+    // CRITICAL: If the image annotations are still loading from the API,
     // never auto-save since it would overwrite the DB with our temporary empty state!
     if (isImageLoadingRef.current) return false;
 
@@ -575,9 +583,12 @@ function AnnotationToolContent() {
     }
 
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/save`, {
+      const response = await fetch(API_ENDPOINTS.ANNOTATIONS.SAVE, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({
           dataset_id: datasetId,
           image_id: img.id,
@@ -611,7 +622,7 @@ function AnnotationToolContent() {
       setTimeout(() => setSaveStatus(null), 3000);
       return false;
     }
-  };
+  }, [datasetId, images, currentImageIndex, dataset, token, reviewStatus, selectedSplit, annotationType, fetchStats]);
 
   const handleNavigation = async (direction) => {
     await handleSaveAnnotations();
@@ -818,8 +829,9 @@ function AnnotationToolContent() {
                       // If not, we might need a specific/new endpoint or modify the existing one.
                       // Let's modify the existing start endpoint to accept dataset_id instead of yaml upload
 
-                      const res = await fetch("http://localhost:8000/api/training/start-micro", {
+                      const res = await fetch(API_ENDPOINTS.TRAINING.START_MICRO, {
                         method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` },
                         body: formData // Content-Type header specific for FormData not needed, browser sets it
                       });
 
@@ -850,7 +862,9 @@ function AnnotationToolContent() {
                     const toastId = toast.loading("Analyzing dataset uncertainty...");
                     try {
                       // Fetch sorted images from backend
-                      const res = await fetch(`http://localhost:8000/api/annotations/datasets/${datasetId}/uncertainty`);
+                      const res = await fetch(API_ENDPOINTS.ANNOTATIONS.UNCERTAINTY(datasetId), {
+                        headers: { "Authorization": `Bearer ${token}` }
+                      });
                       const data = await res.json();
 
                       if (data.success && data.images.length > 0) {
@@ -989,7 +1003,7 @@ function AnnotationToolContent() {
                 <div className="relative w-full h-full flex items-center justify-center" style={{ transform: `scale(${zoom})`, transition: 'transform 0.2s ease' }}>
                   <img
                     ref={imageRef}
-                    src={`http://localhost:8000/api/annotations/image/${datasetId}/${currentImage.filename}`}
+                    src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, currentImage.filename)}
                     alt="Annotate"
                     className="hidden"
                     onLoad={(e) => {
@@ -1073,7 +1087,7 @@ function AnnotationToolContent() {
                         }`}
                     >
                       <img
-                        src={`http://localhost:8000/api/annotations/image/${datasetId}/${img.filename}`}
+                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename)}
                         alt={img.original_name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -1177,7 +1191,7 @@ function AnnotationToolContent() {
                 onClick={async () => {
                   if (!datasetId) return;
                   await fetchStats();
-                  window.location.href = `http://localhost:8000/api/annotations/datasets/${datasetId}/export`;
+                  window.location.href = API_ENDPOINTS.ANNOTATIONS.DOWNLOAD(datasetId);
                 }}
                 variant="outline"
                 className="w-full border-white/10 h-9 text-sm"

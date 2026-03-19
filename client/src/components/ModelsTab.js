@@ -9,15 +9,20 @@ import {
   Database, Download, Trash2, RefreshCw,
   Box, Clock, HardDrive, Activity
 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
 
 export default function ModelsTab() {
+  const { token } = useAuth();
   const [models, setModels] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchModels = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch("http://localhost:8000/api/models/list");
+      const response = await fetch(API_ENDPOINTS.MODELS.LIST, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       const data = await response.json();
       setModels(data.models || []);
     } catch (error) {
@@ -34,7 +39,9 @@ export default function ModelsTab() {
 
   const handleDownload = async (modelName) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/models/download/${modelName}`);
+      const response = await fetch(API_ENDPOINTS.MODELS.DOWNLOAD(modelName), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -53,7 +60,10 @@ export default function ModelsTab() {
   const handleDelete = async (modelName) => {
     if (!confirm(`Delete model "${modelName}" permanently?`)) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/models/delete/${modelName}`, { method: "DELETE" });
+      const response = await fetch(API_ENDPOINTS.MODELS.DELETE(modelName), { 
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (response.ok) {
         toast.success(`"${modelName}" deleted`);
         fetchModels();

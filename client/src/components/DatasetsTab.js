@@ -129,7 +129,7 @@ export default function DatasetsTab() {
   const handleExport = async (id) => {
     const toastId = toast.loading('Preparing export...', { description: '0%' });
     try {
-      const response = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/export`, {
+      const response = await fetch(API_ENDPOINTS.DATASETS.EXPORT(id), {
         method: 'POST',
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -144,7 +144,9 @@ export default function DatasetsTab() {
       if (data.job_id) {
         const interval = setInterval(async () => {
           try {
-            const statusRes = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/export-status/${data.job_id}`);
+            const statusRes = await fetch(API_ENDPOINTS.DATASETS.EXPORT_STATUS(id, data.job_id), {
+              headers: { "Authorization": `Bearer ${token}` }
+            });
             if (statusRes.ok) {
               const statusData = await statusRes.json();
               if (statusData.status === "completed") {
@@ -173,7 +175,7 @@ export default function DatasetsTab() {
 
   const downloadDataset = async (id) => {
     try {
-      const downloadResponse = await fetch(`http://localhost:8000/api/annotations/datasets/${id}/download`, {
+      const downloadResponse = await fetch(API_ENDPOINTS.ANNOTATIONS.DOWNLOAD(id), {
         headers: { "Authorization": `Bearer ${token}` }
       });
 

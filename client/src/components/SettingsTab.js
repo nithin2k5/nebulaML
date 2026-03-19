@@ -5,8 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Server, Monitor, CheckCircle, XCircle, RefreshCw, Globe, Database, Cpu, Github, Box } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
 
 export default function SettingsTab() {
+  const { token } = useAuth();
   const [backendStatus, setBackendStatus] = useState("checking");
   const [backendInfo, setBackendInfo] = useState(null);
   const [systemStats, setSystemStats] = useState({
@@ -24,7 +27,7 @@ export default function SettingsTab() {
   const checkBackendStatus = async () => {
     setBackendStatus("checking");
     try {
-      const response = await fetch("http://localhost:8000/health");
+      const response = await fetch(API_ENDPOINTS.HEALTH);
       if (response.ok) {
         const data = await response.json();
         setBackendStatus("connected");
@@ -91,12 +94,12 @@ export default function SettingsTab() {
             <div className="space-y-3">
               <div className="flex justify-between items-center p-3 rounded-lg bg-black/20 border border-white/5">
                 <span className="text-sm text-gray-400">Endpoint</span>
-                <code className="text-xs bg-white/10 px-2 py-1 rounded text-indigo-300">http://localhost:8000</code>
+                <code className="text-xs bg-white/10 px-2 py-1 rounded text-indigo-300">{API_ENDPOINTS.HEALTH.replace('/health', '')}</code>
               </div>
               <div className="flex justify-between items-center p-3 rounded-lg bg-black/20 border border-white/5">
                 <span className="text-sm text-gray-400">Docs</span>
-                <a href="http://localhost:8000/docs" target="_blank" className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
-                  Swaggger UI <Globe />
+                <a href={`${API_ENDPOINTS.HEALTH.replace('/health', '')}/docs`} target="_blank" className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                  Swagger UI <Globe />
                 </a>
               </div>
             </div>
