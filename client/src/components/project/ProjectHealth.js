@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 export default function ProjectHealth({ params }) {
+    const { token } = useAuth();
     const [analysis, setAnalysis] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -21,8 +24,9 @@ export default function ProjectHealth({ params }) {
         setError(null);
         try {
             // Trigger new analysis
-            const res = await fetch(`http://localhost:8000/api/annotations/datasets/${params.id}/analyze`, {
-                method: "POST"
+            const res = await fetch(API_ENDPOINTS.DATASETS.ANALYZE(params.id), {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
             });
             if (!res.ok) throw new Error("Analysis failed");
             const data = await res.json();

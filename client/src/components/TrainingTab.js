@@ -14,10 +14,13 @@ import {
   CheckCircle, XCircle, Clock, Cpu, TrendingUp
 } from "lucide-react";
 import GamifiedTerminal from "./GamifiedTerminal";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 function JobMetricsChart({ jobId, status }) {
+  const { token } = useAuth();
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -30,9 +33,12 @@ function JobMetricsChart({ jobId, status }) {
     }
   }, [jobId, status]);
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
+    if (!token) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/training/job/${jobId}/metrics`);
+      const res = await fetch(API_ENDPOINTS.TRAINING.JOB_METRICS(jobId), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.metrics) setMetrics(data.metrics);
@@ -42,7 +48,7 @@ function JobMetricsChart({ jobId, status }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [jobId, token]);
 
   if (loading && metrics.length === 0) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">Loading metrics...</div>;
   if (metrics.length === 0) return null; // No metrics yet
@@ -68,6 +74,7 @@ function JobMetricsChart({ jobId, status }) {
 }
 
 export default function TrainingTab() {
+  const { token } = useAuth();
   const [config, setConfig] = useState({
     model_name: "yolov8n",
     epochs: 50,
@@ -87,9 +94,12 @@ export default function TrainingTab() {
     return () => clearInterval(interval);
   }, []);
 
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
+    if (!token) return;
     try {
-      const response = await fetch("http://localhost:8000/api/training/jobs");
+      const response = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (response.ok) {
         const data = await response.json();
         // Sort jobs by created time descending if possible, or just reverse
@@ -99,7 +109,7 @@ export default function TrainingTab() {
     } catch (error) {
       console.error("Error fetching jobs:", error);
     }
-  };
+  }, [token]);
 
   const handleStartTraining = async () => {
     if (!config.dataset_yaml) {
@@ -116,8 +126,9 @@ export default function TrainingTab() {
     formData.append("img_size", config.img_size);
 
     try {
-      const response = await fetch("http://localhost:8000/api/training/start", {
+      const response = await fetch(API_ENDPOINTS.TRAINING.START, {
         method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
         body: formData
       });
 
@@ -138,7 +149,10 @@ export default function TrainingTab() {
 
   const handleTerminateJob = async (jobId) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/training/terminate/${jobId}`, { method: "POST" });
+      const response = await fetch(API_ENDPOINTS.TRAINING.TERMINATE(jobId), { 
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       if (response.ok) {
         toast.success("Training job terminated");
         fetchJobs();

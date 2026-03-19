@@ -15,8 +15,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
 
 export default function InferenceTab() {
+  const { token } = useAuth();
   const [mode, setMode] = useState("upload"); // 'upload' or 'webcam'
   const [image, setImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -143,8 +146,9 @@ export default function InferenceTab() {
     formData.append("confidence", confidence);
 
     try {
-      const response = await fetch("http://localhost:8000/api/inference/predict", {
+      const response = await fetch(API_ENDPOINTS.INFERENCE.PREDICT, {
         method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
         body: formData,
       });
       const data = await response.json();
@@ -216,8 +220,9 @@ export default function InferenceTab() {
       // Create a specific webcam endpoint or reuse predict? reusing for now.
       // Ideally we'd optimize this to accept base64 json to avoid multipart overhead,
       // but multipart is robust enough for 2-5fps on localhost.
-      const response = await fetch("http://localhost:8000/api/inference/predict", {
+      const response = await fetch(API_ENDPOINTS.INFERENCE.PREDICT, {
         method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
         body: formData,
       });
 

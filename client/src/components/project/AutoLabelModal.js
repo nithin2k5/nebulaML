@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAuth } from "@/context/AuthContext";
 import {
     Dialog,
     DialogContent,
@@ -24,6 +25,7 @@ import { toast } from "sonner";
 import { API_ENDPOINTS } from "@/lib/config";
 
 export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete }) {
+    const { token } = useAuth();
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState(0);
     const [models, setModels] = useState([]);
@@ -39,7 +41,9 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
 
     const fetchModels = async () => {
         try {
-            const res = await fetch(API_ENDPOINTS.MODELS.LIST);
+            const res = await fetch(API_ENDPOINTS.MODELS.LIST, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
             if (res.ok) {
                 const data = await res.json();
                 setModels(data.models || []);
@@ -58,8 +62,9 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
             formData.append("model_name", selectedModel);
             formData.append("confidence", confidence);
 
-            const res = await fetch(`${API_ENDPOINTS.BASE}/annotations/auto-label`, {
+            const res = await fetch(API_ENDPOINTS.ANNOTATIONS.AUTO_LABEL, {
                 method: "POST",
+                headers: { "Authorization": `Bearer ${token}` },
                 body: formData,
             });
 
@@ -69,7 +74,9 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
             if (data.job_id) {
                 const interval = setInterval(async () => {
                     try {
-                        const statusRes = await fetch(`${API_ENDPOINTS.BASE}/annotations/datasets/${datasetId}/auto-label-status/${data.job_id}`);
+                        const statusRes = await fetch(API_ENDPOINTS.ANNOTATIONS.AUTO_LABEL_STATUS(datasetId, data.job_id), {
+                            headers: { "Authorization": `Bearer ${token}` }
+                        });
                         if (statusRes.ok) {
                             const statusData = await statusRes.json();
                             if (statusData.status === "completed") {
