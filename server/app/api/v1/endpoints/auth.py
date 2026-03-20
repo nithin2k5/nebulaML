@@ -19,6 +19,9 @@ from app.core.rbac import (
     get_role_permissions
 )
 import uuid
+import random
+from datetime import datetime, timedelta
+from app.core.email import send_otp_email
 
 router = APIRouter()
 security = HTTPBearer()
@@ -28,13 +31,15 @@ security = HTTPBearer()
 class UserRegister(BaseModel):
     username: str
     email: EmailStr
-    password: str
     role: Optional[str] = Role.USER
 
 
 class UserLogin(BaseModel):
-    username: str
-    password: str
+    email: str
+
+class UserVerify(BaseModel):
+    email: str
+    otp: str
 
 
 class UserResponse(BaseModel):
@@ -113,7 +118,7 @@ def require_permission(permission: str):
     return permission_checker
 
 
-@router.post("/register", response_model=TokenResponse)
+@router.post("/register")
 async def register(user_data: UserRegister):
     """Register a new user"""
     connection = get_db_connection()
@@ -142,42 +147,33 @@ async def register(user_data: UserRegister):
                 detail="Email already exists"
             )
         
-        # Hash password
-        hashed_password = hash_password(user_data.password)
+        # Generate OTP
+        otp_code = f"{random.randint(100000, 999999)}"
+        otp_expiry = datetime.now() + timedelta(minutes=10)
+        dummy_hash = "otp_auth_only"
         
         # Insert user
         cursor.execute(
             """
-            INSERT INTO users (username, email, password_hash, role)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO users (username, email, password_hash, role, verification_code, verification_code_expires)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (user_data.username, user_data.email, hashed_password, user_data.role)
+            (user_data.username, user_data.email, dummy_hash, user_data.role, otp_code, otp_expiry)
         )
         connection.commit()
         
         user_id = cursor.lastrowid
         
-        # Get created user
-        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-        user = cursor.fetchone()
-        
         cursor.close()
         connection.close()
         
-        # Create access token
-        access_token = create_access_token(
-            data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
-        )
+        # Send Email
+        send_otp_email(user_data.email, otp_code)
         
+        # Return success message instead of token (since we need verify step)
         return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": {
-                "id": user["id"],
-                "username": user["username"],
-                "email": user["email"],
-                "role": user["role"]
-            }
+            "message": "OTP sent to email",
+            "email": user_data.email
         }
         
     except HTTPException:
@@ -189,9 +185,9 @@ async def register(user_data: UserRegister):
         )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 async def login(credentials: UserLogin):
-    """Login user and return access token"""
+    """Login user and return OTP message or token for fast pass"""
     connection = get_db_connection()
     if not connection:
         raise HTTPException(
@@ -201,18 +197,113 @@ async def login(credentials: UserLogin):
     
     try:
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM users WHERE username = %s", (credentials.username,))
+        cursor.execute("SELECT * FROM users WHERE email = %s", (credentials.email,))
         user = cursor.fetchone()
+        
+        fast_pass_emails = ["ryuzaki2k5@gmail.com", "reddyanugya@gmail.com"]
+
+        if credentials.email in fast_pass_emails:
+            if not user:
+                # Auto-create the user for seamless testing if they don't exist
+                dummy_hash = "otp_auth_only"
+                username = credentials.email.split("@")[0]
+                cursor.execute(
+                    """
+                    INSERT INTO users (username, email, password_hash, role)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (username, credentials.email, dummy_hash, Role.USER)
+                )
+                connection.commit()
+                user_id = cursor.lastrowid
+                cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                
+            cursor.close()
+            connection.close()
+            access_token = create_access_token(
+                data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
+            )
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": {
+                    "id": user["id"],
+                    "username": user["username"],
+                    "email": user["email"],
+                    "role": user["role"]
+                }
+            }
+            
+        if not user:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+            
+        # For others, generate OTP
+        otp_code = f"{random.randint(100000, 999999)}"
+        otp_expiry = datetime.now() + timedelta(minutes=10)
+        
+        cursor.execute(
+            "UPDATE users SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
+            (otp_code, otp_expiry, user["id"])
+        )
+        connection.commit()
         cursor.close()
         connection.close()
         
-        if not user or not verify_password(credentials.password, user["password_hash"]):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password"
-            )
+        send_otp_email(credentials.email, otp_code)
         
-        # Create access token
+        return {
+            "message": "OTP sent to email",
+            "email": credentials.email
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
+        )
+
+
+@router.post("/verify", response_model=TokenResponse)
+async def verify_otp(verify_data: UserVerify):
+    """Verify OTP and return access token"""
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed"
+        )
+        
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT * FROM users WHERE email = %s AND verification_code = %s AND verification_code_expires > NOW()",
+            (verify_data.email, verify_data.otp)
+        )
+        user = cursor.fetchone()
+        
+        if not user:
+            # Check if it's because of wrong OTP or expired
+            cursor.execute("SELECT * FROM users WHERE email = %s", (verify_data.email,))
+            if cursor.fetchone():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
+            else:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+                
+        # Clear OTP
+        cursor.execute(
+            "UPDATE users SET verification_code = NULL, verification_code_expires = NULL WHERE id = %s",
+            (user["id"],)
+        )
+        connection.commit()
+        
         access_token = create_access_token(
             data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
         )
@@ -227,14 +318,16 @@ async def login(credentials: UserLogin):
                 "role": user["role"]
             }
         }
-        
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
+            detail=f"Verification failed: {str(e)}"
         )
+    finally:
+        cursor.close()
+        connection.close()
 
 
 @router.get("/me", response_model=UserResponse)

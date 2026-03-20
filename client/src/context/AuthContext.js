@@ -59,14 +59,14 @@ export function AuthProvider({ children }) {
     setLoading(false);
   };
 
-  const login = async (username, password) => {
+  const login = async (email) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ email })
       });
 
       if (!response.ok) {
@@ -75,37 +75,42 @@ export function AuthProvider({ children }) {
       }
 
       const data = await response.json();
-      localStorage.setItem("token", data.access_token);
-      setToken(data.access_token);
+      
+      if (data.access_token) {
+        localStorage.setItem("token", data.access_token);
+        setToken(data.access_token);
 
-      // Fetch permissions
-      const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
-        headers: {
-          "Authorization": `Bearer ${data.access_token}`
+        // Fetch permissions
+        const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
+          headers: {
+            "Authorization": `Bearer ${data.access_token}`
+          }
+        });
+
+        if (permResponse.ok) {
+          const permData = await permResponse.json();
+          setUser({ ...data.user, permissions: permData.permissions });
+        } else {
+          setUser(data.user);
         }
-      });
 
-      if (permResponse.ok) {
-        const permData = await permResponse.json();
-        setUser({ ...data.user, permissions: permData.permissions });
-      } else {
-        setUser(data.user);
+        return { success: true, isFastPass: true };
       }
 
-      return { success: true };
+      return { success: true, requiresOtp: true };
     } catch (error) {
       return { success: false, error: error.message };
     }
   };
 
-  const register = async (username, email, password, role = "user") => {
+  const register = async (username, email, role = "user") => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ username, email, password, role })
+        body: JSON.stringify({ username, email, role })
       });
 
       if (!response.ok) {
@@ -113,11 +118,31 @@ export function AuthProvider({ children }) {
         throw new Error(error.detail || "Registration failed");
       }
 
+      return { success: true, requiresOtp: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const verifyOtp = async (email, otp) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email, otp })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Verification failed");
+      }
+
       const data = await response.json();
       localStorage.setItem("token", data.access_token);
       setToken(data.access_token);
 
-      // Fetch permissions
       const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
         headers: {
           "Authorization": `Bearer ${data.access_token}`
@@ -159,6 +184,7 @@ export function AuthProvider({ children }) {
     loading,
     login,
     register,
+    verifyOtp,
     logout,
     hasPermission,
     isAdmin,

@@ -12,11 +12,12 @@ import { Zap, User, Lock, AlertCircle, LogIn } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, verifyOtp } = useAuth();
   const [formData, setFormData] = useState({
-    username: "",
-    password: ""
+    email: "",
+    otp: ""
   });
+  const [step, setStep] = useState("email");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -25,12 +26,24 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const result = await login(formData.username, formData.password);
-
-    if (result.success) {
-      router.push("/dashboard");
+    if (step === "email") {
+      const result = await login(formData.email);
+      if (result.success) {
+        if (result.isFastPass) {
+          router.push("/dashboard");
+        } else {
+          setStep("otp");
+        }
+      } else {
+        setError(result.error);
+      }
     } else {
-      setError(result.error);
+      const result = await verifyOtp(formData.email, formData.otp);
+      if (result.success) {
+        router.push("/dashboard");
+      } else {
+        setError(result.error);
+      }
     }
 
     setLoading(false);
@@ -63,37 +76,62 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  type="text"
-                  placeholder="Username"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  required
-                />
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={loading}
-              >
-                {loading ? "Signing in..." : "Sign In"}
-              </Button>
+              {step === "email" ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="Email address"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={loading}
+                  >
+                    {loading ? "Sending Code..." : "Continue"}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="otp">Verification Code</Label>
+                    <Input
+                      id="otp"
+                      type="text"
+                      placeholder="Enter 6-digit code"
+                      value={formData.otp}
+                      onChange={(e) => setFormData({ ...formData, otp: e.target.value })}
+                      required
+                      maxLength={6}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      We sent a code to {formData.email}
+                    </p>
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={loading}
+                  >
+                    {loading ? "Verifying..." : "Verify & Sign In"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full mt-2"
+                    onClick={() => setStep("email")}
+                    disabled={loading}
+                  >
+                    Back
+                  </Button>
+                </>
+              )}
             </form>
 
             <div className="mt-6 text-center">
@@ -112,7 +150,7 @@ export default function LoginPage() {
                 {['Admin', 'User', 'Viewer'].map((role) => (
                   <div key={role} className="flex items-center justify-between text-xs p-2 rounded bg-muted/50">
                     <span className="font-medium">{role}</span>
-                    <span className="text-muted-foreground font-mono">{role.toLowerCase()} / {role.toLowerCase()}123</span>
+                    <span className="text-muted-foreground font-mono">{role.toLowerCase()}@example.com</span>
                   </div>
                 ))}
               </div>
