@@ -8,7 +8,7 @@ import uvicorn
 import os
 from pathlib import Path
 
-from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring
+from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration
 from app.db.session import initialize_database
 from app.core.config import settings
 from app.core.logging import logger
@@ -56,6 +56,7 @@ app.include_router(smart_annotation.router, prefix="/api/smart", tags=["Smart To
 app.include_router(video.router, prefix="/api/video", tags=["Video"])
 app.include_router(active_learning.router, prefix="/api/active-learning", tags=["Active Learning"])
 app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoring"])
+app.include_router(collaboration.router, prefix="/api/datasets", tags=["Collaboration"])
 
 @app.get("/")
 async def root():

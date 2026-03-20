@@ -22,6 +22,7 @@ import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth";
 import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
 import ProjectMonitoring from "@/components/project/ProjectMonitoring";
+import ProjectTeam from "@/components/project/ProjectTeam";
 
 export default function ProjectPage() {
     const params = useParams();
@@ -161,6 +162,13 @@ export default function ProjectPage() {
             icon: Activity,
             status: 'pending',
             meta: 'No Issues'
+        },
+        {
+            id: 'team',
+            label: 'Team',
+            icon: Grid,
+            status: 'pending',
+            meta: 'Access & Logs'
         }
     ];
 
@@ -269,6 +277,10 @@ export default function ProjectPage() {
 
                         <TabsContent value="health" className="mt-0 h-full">
                             <ProjectHealth params={params} />
+                        </TabsContent>
+
+                        <TabsContent value="team" className="mt-0 h-full">
+                            <ProjectTeam dataset={dataset} />
                         </TabsContent>
                     </div>
                 </div>
