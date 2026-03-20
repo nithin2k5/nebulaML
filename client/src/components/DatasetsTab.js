@@ -300,49 +300,82 @@ export default function DatasetsTab() {
                 key={dataset.id}
                 className="group rounded-2xl bg-card/40 backdrop-blur-md border border-white/5 hover:border-indigo-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden shadow-lg"
               >
-                <div className="p-6 flex-1">
+                <div className="p-6 flex flex-col flex-1 h-full">
                   {/* Header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500/20 transition-all">
-                      <FolderKanban className="text-lg" />
+                  <div className="flex items-center justify-between mb-3 gap-2">
+                    <div className="flex items-center gap-3 w-full overflow-hidden">
+                      <div className="w-10 h-10 rounded-xl flex-shrink-0 bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500/20 transition-all">
+                        <FolderKanban className="text-lg" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-lg text-white truncate" title={dataset.name}>{dataset.name}</h3>
+                        {dataset.description && (
+                          <p className="text-xs text-gray-500 truncate" title={dataset.description}>{dataset.description}</p>
+                        )}
+                      </div>
                     </div>
-                    <Badge variant="outline" className="text-[10px] h-5 border-white/10">
+                    <Badge variant="outline" className="text-[10px] h-6 px-2 flex-shrink-0 border-white/10 whitespace-nowrap">
                       {dataset.type || "Detection"}
                     </Badge>
                   </div>
 
-                  <h3 className="font-bold text-lg mb-1 text-white truncate">{dataset.name}</h3>
-                  {dataset.description && (
-                    <p className="text-sm text-gray-500 mb-4 line-clamp-2">{dataset.description}</p>
-                  )}
-
-                  {/* Stats */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="flex items-center gap-1.5 text-gray-400">
+                  {/* Spacer to push content down if needed, but we keep structure tight */}
+                  
+                  {/* Stats Grid - Strict Alignment */}
+                  <div className="grid grid-cols-3 gap-2 my-4 bg-white/[0.02] p-3 rounded-xl border border-white/5">
+                    <div className="flex flex-col items-start gap-1">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
                         <Image className="w-3.5 h-3.5" />
-                        <span>{total} images</span>
+                        <span>Images</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-gray-400">
-                        <Box className="w-3.5 h-3.5" />
-                        <span>{dataset.classes?.length || 0} classes</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-emerald-400/80">
-                        <Check className="w-3.5 h-3.5" />
-                        <span>{dataset.stats?.reviewed_images || 0} reviewed</span>
-                      </div>
+                      <span className="text-sm font-medium text-gray-200 pl-5">{total}</span>
                     </div>
+                    <div className="flex flex-col items-start gap-1">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                        <Box className="w-3.5 h-3.5" />
+                        <span>Classes</span>
+                      </div>
+                      <span className="text-sm font-medium text-gray-200 pl-5">{dataset.classes?.length || 0}</span>
+                    </div>
+                    <div className="flex flex-col items-start gap-1">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>Reviewed</span>
+                      </div>
+                      <span className="text-sm font-medium text-emerald-400 pl-5">{dataset.stats?.reviewed_images || 0}</span>
+                    </div>
+                  </div>
+
+                  {/* Progress & Classes aligned at bottom area using mt-auto */}
+                  <div className="mt-auto space-y-4 pt-2 border-t border-white/5">
+                    {/* Class badges - aligned strictly */}
+                    {dataset.classes?.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 h-auto min-h-[24px]">
+                        {dataset.classes.slice(0, 4).map((cls, i) => (
+                          <Badge key={i} variant="outline" className="text-[10px] font-normal px-2 py-0 h-5 border-white/10 bg-white/[0.03]">
+                            {cls}
+                          </Badge>
+                        ))}
+                        {dataset.classes.length > 4 && (
+                          <Badge variant="outline" className="text-[10px] font-normal px-2 py-0 h-5 border-white/10 bg-white/[0.03]">
+                            +{dataset.classes.length - 4}
+                          </Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-6" /> // spacer to maintain height if no classes
+                    )}
 
                     {/* Progress Bar */}
                     <div>
-                      <div className="flex justify-between text-xs mb-1.5">
-                        <span className="text-gray-500">Annotation Progress</span>
+                      <div className="flex justify-between items-end text-xs mb-1.5">
+                        <span className="text-gray-500 tracking-wide">Annotation Progress</span>
                         <span className={cn(
-                          "font-mono",
+                          "font-mono font-medium",
                           progress === 100 ? "text-emerald-400" : progress > 0 ? "text-indigo-400" : "text-gray-600"
                         )}>{progress}%</span>
                       </div>
-                      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden w-full">
                         <div
                           className={cn(
                             "h-full rounded-full transition-all duration-500",
@@ -352,22 +385,6 @@ export default function DatasetsTab() {
                         />
                       </div>
                     </div>
-
-                    {/* Class badges */}
-                    {dataset.classes?.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {dataset.classes.slice(0, 4).map((cls, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px] h-5 border-white/10 bg-white/[0.03]">
-                            {cls}
-                          </Badge>
-                        ))}
-                        {dataset.classes.length > 4 && (
-                          <Badge variant="outline" className="text-[10px] h-5 border-white/10 bg-white/[0.03]">
-                            +{dataset.classes.length - 4}
-                          </Badge>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
 

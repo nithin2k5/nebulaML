@@ -35,7 +35,7 @@ export default function DashboardPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-background text-foreground flex">
+      <div className="h-screen overflow-hidden bg-background text-foreground flex">
         {/* Mobile sidebar overlay */}
         {mobileSidebarOpen && (
           <div className="fixed inset-0 bg-black/60 z-40 lg:hidden" onClick={() => setMobileSidebarOpen(false)} />
