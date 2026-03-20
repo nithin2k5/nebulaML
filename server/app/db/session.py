@@ -258,6 +258,37 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'system_logs' ready")
+        # Project members table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_members (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                user_id INT NOT NULL,
+                role ENUM('admin', 'annotator', 'viewer') DEFAULT 'annotator',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE KEY unique_membership (dataset_id, user_id)
+            )
+        """)
+        logger.info("✓ Table 'project_members' ready")
+        
+        # Activity logs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                user_id INT,
+                action VARCHAR(255) NOT NULL,
+                details JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                INDEX idx_dataset_id (dataset_id),
+                INDEX idx_created_at (created_at)
+            )
+        """)
+        logger.info("✓ Table 'activity_logs' ready")
         
         connection.commit()
         cursor.close()

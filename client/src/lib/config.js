@@ -12,6 +12,9 @@ export const API_ENDPOINTS = {
         ANALYZE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/analyze`,
         DOWNLOAD_FORMAT: (id, format) => `${API_BASE_URL}/api/annotations/datasets/${id}/download-format?format=${format}`,
         UPLOAD_VIDEO: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/upload-video`,
+        MEMBERS: (id) => `${API_BASE_URL}/api/datasets/${id}/members`,
+        MEMBER_REMOVE: (id, userId) => `${API_BASE_URL}/api/datasets/${id}/members/${userId}`,
+        ACTIVITY: (id) => `${API_BASE_URL}/api/datasets/${id}/activity`,
     },
     ANNOTATIONS: {
         GET_IMAGE: (datasetId, filename) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}`,

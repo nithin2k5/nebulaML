@@ -10,6 +10,7 @@ import InferenceTab from "@/components/InferenceTab";
 import TrainingTab from "@/components/TrainingTab";
 import ModelsTab from "@/components/ModelsTab";
 import SettingsTab from "@/components/SettingsTab";
+import OnboardingTour from "@/components/OnboardingTour";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -35,6 +36,7 @@ export default function DashboardPage() {
 
   return (
     <ProtectedRoute>
+      <OnboardingTour />
       <div className="h-screen overflow-hidden bg-background text-foreground flex">
         {/* Mobile sidebar overlay */}
         {mobileSidebarOpen && (
@@ -74,6 +76,7 @@ export default function DashboardPage() {
               return (
                 <button
                   key={tab.id}
+                  id={`tour-${tab.id}`}
                   onClick={() => { setActiveTab(tab.id); setMobileSidebarOpen(false); }}
                   className={cn(
                     "w-full flex items-center gap-3 rounded-xl transition-all duration-200 text-sm font-medium",
