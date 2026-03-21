@@ -9,8 +9,8 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata = {
-  title: "YOLO Generator - ML Model Training Platform",
-  description: "Train and deploy YOLO models with ease",
+  title: "NebulaML - ML Model Training Platform",
+  description: "Train and deploy models with ease",
   icons: {
     icon: '/favicon.ico',
     apple: '/apple-touch-icon.png',

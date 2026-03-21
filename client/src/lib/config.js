@@ -4,6 +4,7 @@ export const API_ENDPOINTS = {
     DATASETS: {
         LIST: `${API_BASE_URL}/api/annotations/datasets/list`,
         CREATE: `${API_BASE_URL}/api/annotations/datasets/create`,
+        GET: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
         DELETE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
         STATS: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/stats`,
         UPLOAD: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/upload`,

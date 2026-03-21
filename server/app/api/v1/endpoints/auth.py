@@ -41,6 +41,9 @@ class UserVerify(BaseModel):
     email: str
     otp: str
 
+class EmailRequest(BaseModel):
+    email: EmailStr
+
 
 class UserResponse(BaseModel):
     id: int
@@ -132,14 +135,14 @@ async def register(user_data: UserRegister):
         cursor = connection.cursor(dictionary=True)
         
         # Check if username exists
-        cursor.execute("SELECT id FROM users WHERE username = %s", (user_data.username,))
+        cursor.execute("SELECT id FROM users WHERE username = %s UNION SELECT id FROM pending_registrations WHERE username = %s", (user_data.username, user_data.username))
         if cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already exists"
             )
         
-        # Check if email exists
+        # Check if email exists in users table
         cursor.execute("SELECT id FROM users WHERE email = %s", (user_data.email,))
         if cursor.fetchone():
             raise HTTPException(
@@ -150,19 +153,29 @@ async def register(user_data: UserRegister):
         # Generate OTP
         otp_code = f"{random.randint(100000, 999999)}"
         otp_expiry = datetime.now() + timedelta(minutes=10)
-        dummy_hash = "otp_auth_only"
         
-        # Insert user
-        cursor.execute(
-            """
-            INSERT INTO users (username, email, password_hash, role, verification_code, verification_code_expires)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (user_data.username, user_data.email, dummy_hash, user_data.role, otp_code, otp_expiry)
-        )
+        # Check if email exists in pending, update or insert
+        cursor.execute("SELECT id FROM pending_registrations WHERE email = %s", (user_data.email,))
+        pending_user = cursor.fetchone()
+        
+        if pending_user:
+            cursor.execute(
+                """
+                UPDATE pending_registrations 
+                SET username = %s, role = %s, verification_code = %s, verification_code_expires = %s
+                WHERE id = %s
+                """,
+                (user_data.username, user_data.role, otp_code, otp_expiry, pending_user['id'])
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO pending_registrations (username, email, role, verification_code, verification_code_expires)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (user_data.username, user_data.email, user_data.role, otp_code, otp_expiry)
+            )
         connection.commit()
-        
-        user_id = cursor.lastrowid
         
         cursor.close()
         connection.close()
@@ -284,25 +297,49 @@ async def verify_otp(verify_data: UserVerify):
     try:
         cursor = connection.cursor(dictionary=True)
         cursor.execute(
-            "SELECT * FROM users WHERE email = %s AND verification_code = %s AND verification_code_expires > NOW()",
+            "SELECT * FROM pending_registrations WHERE email = %s AND verification_code = %s AND verification_code_expires > NOW()",
             (verify_data.email, verify_data.otp)
         )
-        user = cursor.fetchone()
+        pending_user = cursor.fetchone()
         
-        if not user:
-            # Check if it's because of wrong OTP or expired
-            cursor.execute("SELECT * FROM users WHERE email = %s", (verify_data.email,))
-            if cursor.fetchone():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
-            else:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-                
-        # Clear OTP
-        cursor.execute(
-            "UPDATE users SET verification_code = NULL, verification_code_expires = NULL WHERE id = %s",
-            (user["id"],)
-        )
-        connection.commit()
+        if pending_user:
+            # Move to users table
+            dummy_hash = "otp_auth_only"
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, password_hash, role)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (pending_user["username"], pending_user["email"], dummy_hash, pending_user["role"])
+            )
+            user_id = cursor.lastrowid
+            
+            cursor.execute("DELETE FROM pending_registrations WHERE id = %s", (pending_user["id"],))
+            connection.commit()
+            
+            cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+            user = cursor.fetchone()
+        else:
+            cursor.execute(
+                "SELECT * FROM users WHERE email = %s AND verification_code = %s AND verification_code_expires > NOW()",
+                (verify_data.email, verify_data.otp)
+            )
+            user = cursor.fetchone()
+            
+            if not user:
+                # Check if it's because of wrong OTP or expired
+                cursor.execute("SELECT id FROM users WHERE email = %s UNION SELECT id FROM pending_registrations WHERE email = %s", (verify_data.email, verify_data.email))
+                if cursor.fetchone():
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
+                else:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+                    
+            # Clear OTP
+            cursor.execute(
+                "UPDATE users SET verification_code = NULL, verification_code_expires = NULL WHERE id = %s",
+                (user["id"],)
+            )
+            connection.commit()
         
         access_token = create_access_token(
             data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
@@ -325,6 +362,52 @@ async def verify_otp(verify_data: UserVerify):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Verification failed: {str(e)}"
         )
+    finally:
+        cursor.close()
+        connection.close()
+
+
+@router.post("/resend-otp")
+async def resend_otp(request: EmailRequest):
+    """Resend OTP to existing user or pending registration"""
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database connection failed")
+        
+    try:
+        cursor = connection.cursor(dictionary=True)
+        # Check users table first (for login flow)
+        cursor.execute("SELECT id FROM users WHERE email = %s", (request.email,))
+        user = cursor.fetchone()
+        
+        otp_code = f"{random.randint(100000, 999999)}"
+        otp_expiry = datetime.now() + timedelta(minutes=10)
+        
+        if user:
+            cursor.execute(
+                "UPDATE users SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
+                (otp_code, otp_expiry, user["id"])
+            )
+        else:
+            # Check pending_registrations
+            cursor.execute("SELECT id FROM pending_registrations WHERE email = %s", (request.email,))
+            pending_user = cursor.fetchone()
+            if pending_user:
+                cursor.execute(
+                    "UPDATE pending_registrations SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
+                    (otp_code, otp_expiry, pending_user["id"])
+                )
+            else:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+                
+        connection.commit()
+        send_otp_email(request.email, otp_code)
+        
+        return {"message": "OTP resent successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to resend OTP: {str(e)}")
     finally:
         cursor.close()
         connection.close()

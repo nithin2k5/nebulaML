@@ -20,8 +20,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_ENDPOINTS } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 export default function DatasetWorkflow({ dataset, onRefresh }) {
+  const { token } = useAuth();
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [stats, setStats] = useState(null);
@@ -52,7 +54,10 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
 
   const fetchDatasetStats = async () => {
     try {
-      const response = await fetch(API_ENDPOINTS.DATASETS.STATS(dataset.id));
+      if (!token) return;
+      const response = await fetch(API_ENDPOINTS.DATASETS.STATS(dataset.id), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
       const data = await response.json();
       setStats(data);
     } catch (error) {
@@ -172,6 +177,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
     try {
       const response = await fetch(API_ENDPOINTS.DATASETS.UPLOAD(dataset.id), {
         method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
         body: formData,
       });
 
@@ -304,7 +310,10 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             className="h-auto py-6 px-8 flex flex-col gap-2 hover:bg-muted/50 border-2"
             onClick={async () => {
               try {
-                const res = await fetch(API_ENDPOINTS.DATASETS.EXPORT(dataset.id), { method: "POST" });
+                const res = await fetch(API_ENDPOINTS.DATASETS.EXPORT(dataset.id), { 
+                  method: "POST",
+                  headers: { "Authorization": `Bearer ${token}` }
+                });
                 const data = await res.json();
                 if (data.success) {
                   alert("Dataset exported successfully!");
@@ -377,7 +386,10 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
                   try {
                     const res = await fetch(API_ENDPOINTS.TRAINING.EXPORT_AND_TRAIN, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { 
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`
+                      },
                       body: JSON.stringify({
                         dataset_id: dataset.id,
                         config: { ...trainingConfig, strict_epochs: true }

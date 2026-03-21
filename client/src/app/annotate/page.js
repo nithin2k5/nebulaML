@@ -73,12 +73,7 @@ function AnnotationToolContent() {
     setTimeout(() => setToastMessage(null), 3000);
   }, []);
 
-  useEffect(() => {
-    if (datasetId) {
-      fetchDataset();
-      fetchStats();
-    }
-  }, [datasetId, fetchDataset, fetchStats]);
+  // Initialization useEffect moved below fetchDataset to prevent ReferenceError (TDZ)
 
   const fetchStats = useCallback(async () => {
     if (!datasetId || !token) return;
@@ -214,6 +209,13 @@ function AnnotationToolContent() {
       showToast("Error loading dataset. Make sure backend is running.", 'error');
     }
   }, [datasetId, token, showToast]);
+
+  useEffect(() => {
+    if (datasetId) {
+      fetchDataset();
+      fetchStats();
+    }
+  }, [datasetId, fetchDataset, fetchStats]);
 
   const loadImage = useCallback(async (index) => {
     if (!images[index] || !datasetId || !token) return;
@@ -533,22 +535,8 @@ function AnnotationToolContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentImageIndex]);
 
-  // Auto-save when boxes change (debounced)
-  useEffect(() => {
-    if (boxes.length === 0 && reviewStatus === 'unlabeled') return; // Don't save empty if already unlabeled
-
-    // Skip initial load
-    if (saveStatus === 'saved' || saveStatus === 'loading') return;
-
-    const timeoutId = setTimeout(() => {
-      if (datasetId && images[currentImageIndex]) {
-        handleSaveAnnotations();
-      }
-    }, 1000); // 1s debounce
-
-    return () => clearTimeout(timeoutId);
-  }, [boxes, datasetId, images, currentImageIndex, handleSaveAnnotations, reviewStatus, saveStatus]);
-
+  // Auto-save useEffect moved below handleSaveAnnotations to prevent ReferenceError (TDZ)
+  
   const handleSaveAnnotations = useCallback(async (statusOverride = null) => {
     if (!images[currentImageIndex] || !dataset || !token) return false;
 
@@ -623,6 +611,22 @@ function AnnotationToolContent() {
       return false;
     }
   }, [datasetId, images, currentImageIndex, dataset, token, reviewStatus, selectedSplit, annotationType, fetchStats]);
+
+  // Auto-save when boxes change (debounced)
+  useEffect(() => {
+    if (boxes.length === 0 && reviewStatus === 'unlabeled') return; // Don't save empty if already unlabeled
+
+    // Skip initial load
+    if (saveStatus === 'saved' || saveStatus === 'loading') return;
+
+    const timeoutId = setTimeout(() => {
+      if (datasetId && images[currentImageIndex]) {
+        handleSaveAnnotations();
+      }
+    }, 1000); // 1s debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [boxes, datasetId, images, currentImageIndex, handleSaveAnnotations, reviewStatus, saveStatus]);
 
   const handleNavigation = async (direction) => {
     await handleSaveAnnotations();

@@ -3,7 +3,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
-import { Database, Image, Settings, BarChart2, Cpu, Layers, Code, Grid, Home, Upload } from "lucide-react";
+import { Database, Image, Settings, BarChart2, Cpu, Layers, Code, Grid, Home, Upload, Zap } from "lucide-react";
 import { Toaster } from 'sonner';
 
 export default function ProjectLayout({ children }) {
@@ -35,9 +35,9 @@ export default function ProjectLayout({ children }) {
                 <div className="h-16 flex items-center justify-center md:justify-start md:px-6 border-b border-border/50">
                     <div className="flex items-center gap-2 font-bold text-lg">
                         <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground">
-                            <Layers />
+                            <Zap />
                         </div>
-                        <span className="hidden md:inline">YOLO Gen</span>
+                        <span className="hidden md:inline">NebulaML</span>
                     </div>
                 </div>
 

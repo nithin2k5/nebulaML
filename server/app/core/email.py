@@ -11,8 +11,9 @@ load_dotenv()
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "noreply@yologenerator.com")
+_pwd = os.getenv("SMTP_PASSWORD", "")
+SMTP_PASSWORD = _pwd.replace(" ", "") if _pwd else ""
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", os.getenv("SMTP_FROM", SMTP_USERNAME or "noreply@yologenerator.com"))
 
 def send_otp_email(to_email: EmailStr, otp: str):
     """

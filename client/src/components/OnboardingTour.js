@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { X, ChevronRight, ChevronLeft, Flag } from "lucide-react";
+import { X, ChevronRight, ChevronLeft, Flag, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TOUR_STEPS = [
