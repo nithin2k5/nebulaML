@@ -5,7 +5,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection
 import uuid
 from datetime import datetime, timedelta
-from jose import jwt
+import jwt
 from app.core.config import settings
 from app.core.email import send_project_invite_email
 
@@ -153,7 +153,7 @@ async def accept_invite(req: AcceptInviteRequest, current_user: dict = Depends(g
             raise HTTPException(status_code=403, detail="This invite was sent to a different email address. Please login with the correct account.")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=400, detail="Invite link has expired.")
-    except jwt.JWTError:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid invite link.")
         
     conn = get_db_connection()
