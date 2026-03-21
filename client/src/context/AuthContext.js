@@ -162,6 +162,27 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const resendOtp = async (email) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/resend-otp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Failed to resend OTP");
+      }
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem("token");
     setToken(null);
@@ -185,6 +206,7 @@ export function AuthProvider({ children }) {
     login,
     register,
     verifyOtp,
+    resendOtp,
     logout,
     hasPermission,
     isAdmin,

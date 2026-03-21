@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, verifyOtp } = useAuth();
+  const { login, verifyOtp, resendOtp } = useAuth();
   const [formData, setFormData] = useState({
     email: "",
     otp: ""
@@ -19,6 +19,21 @@ export default function LoginPage() {
   const [step, setStep] = useState("email");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState("");
+
+  const handleResend = async () => {
+    setResendLoading(true);
+    setError("");
+    setResendSuccess("");
+    const result = await resendOtp(formData.email);
+    if (result.success) {
+      setResendSuccess("Code resent successfully!");
+    } else {
+      setError(result.error);
+    }
+    setResendLoading(false);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -79,6 +94,17 @@ export default function LoginPage() {
                 >
                   <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                   <p className="leading-relaxed">{error}</p>
+                </motion.div>
+              )}
+              {resendSuccess && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  exit={{ opacity: 0, y: -10 }}
+                  className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3 text-emerald-400 text-sm"
+                >
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">{resendSuccess}</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -153,6 +179,15 @@ export default function LoginPage() {
                     </div>
                     <p className="text-xs text-gray-500 ml-1">
                       We sent a code to <span className="text-gray-300 font-medium">{formData.email}</span>
+                      <br/>
+                      <button 
+                        type="button" 
+                        onClick={handleResend}
+                        disabled={resendLoading}
+                        className="text-indigo-400 hover:text-indigo-300 transition-colors mt-2"
+                      >
+                        {resendLoading ? "Sending..." : "Resend Code"}
+                      </button>
                     </p>
                   </div>
 

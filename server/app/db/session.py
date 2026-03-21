@@ -83,6 +83,21 @@ def create_tables():
         """)
         logger.info("✓ Table 'users' ready")
         
+        # Pending registrations table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_registrations (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                role ENUM('admin', 'user', 'viewer') DEFAULT 'user',
+                verification_code VARCHAR(6),
+                verification_code_expires TIMESTAMP NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_email (email)
+            )
+        """)
+        logger.info("✓ Table 'pending_registrations' ready")
+        
         # Datasets table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS datasets (
