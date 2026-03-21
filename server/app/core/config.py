@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Allowed origins
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Frontend URL (for invites/password resets)
+    frontend_url: str = "http://localhost:3000"
+
     # Will look for .env in the /server dir
     model_config = SettingsConfigDict(
         env_file=".env",

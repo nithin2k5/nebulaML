@@ -4,7 +4,10 @@ from pydantic import BaseModel
 from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection
 import uuid
-import datetime
+from datetime import datetime, timedelta
+from jose import jwt
+from app.core.config import settings
+from app.core.email import send_project_invite_email
 
 router = APIRouter()
 
@@ -71,7 +74,7 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
     try:
         cursor = conn.cursor(dictionary=True)
         # Verify permissions (must be owner or admin)
-        cursor.execute("SELECT user_id FROM datasets WHERE id = %s", (dataset_id,))
+        cursor.execute("SELECT user_id, name FROM datasets WHERE id = %s", (dataset_id,))
         ds = cursor.fetchone()
         if not ds:
             raise HTTPException(status_code=404, detail="Dataset not found")
@@ -83,34 +86,106 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
         if not is_owner and (not mem or mem['role'] != 'admin'):
             raise HTTPException(status_code=403, detail="Only owners and admins can add members")
             
-        # Find user by email
+        # Optional: verify if user exists beforehand to prevent duplicate invites, but we don't strictly reject if they don't exist
         cursor.execute("SELECT id FROM users WHERE email = %s", (req.email,))
         target_user = cursor.fetchone()
-        if not target_user:
-            raise HTTPException(status_code=404, detail="User with this email not found. They must sign up first.")
+        
+        if target_user:
+            if target_user['id'] == ds['user_id']:
+                raise HTTPException(status_code=400, detail="Cannot invite the project owner")
+                
+            cursor.execute("SELECT id FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, target_user['id']))
+            if cursor.fetchone():
+                raise HTTPException(status_code=400, detail="User is already a member")
+        
+        # Generate JWT invite token
+        invite_data = {
+            "dataset_id": dataset_id,
+            "dataset_name": ds['name'],
+            "email": req.email,
+            "role": req.role,
+            "exp": datetime.utcnow() + timedelta(days=7)
+        }
+        token = jwt.encode(invite_data, settings.secret_key, algorithm=settings.algorithm)
+        invite_link = f"{settings.frontend_url}/project/invite?token={token}"
+        
+        inviter_name = current_user.get("username") or current_user.get("email")
+        
+        success = send_project_invite_email(
+            to_email=req.email,
+            inviter_name=inviter_name,
+            project_name=ds['name'],
+            role=req.role,
+            invite_link=invite_link
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to dispatch invitation email")
             
-        if target_user['id'] == ds['user_id']:
-            raise HTTPException(status_code=400, detail="Cannot add the project owner as a member")
-            
-        # Check if already member
-        cursor.execute("SELECT id FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, target_user['id']))
+        # Log activity
+        cursor.execute(
+            "INSERT INTO activity_logs (dataset_id, user_id, action, details) VALUES (%s, %s, %s, %s)",
+            (dataset_id, current_user['id'], "invite_sent", f'{{"target_email": "{req.email}", "role": "{req.role}"}}')
+        )
+        
+        conn.commit()
+        return {"success": True, "message": "Invitation sent successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+
+@router.post("/invites/accept")
+async def accept_invite(req: AcceptInviteRequest, current_user: dict = Depends(get_current_user)):
+    try:
+        payload = jwt.decode(req.token, settings.secret_key, algorithms=[settings.algorithm])
+        email = payload.get("email")
+        dataset_id = payload.get("dataset_id")
+        role = payload.get("role")
+        
+        if not email or email.lower() != current_user.get("email", "").lower():
+            raise HTTPException(status_code=403, detail="This invite was sent to a different email address. Please login with the correct account.")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Invite link has expired.")
+    except jwt.JWTError:
+        raise HTTPException(status_code=400, detail="Invalid invite link.")
+        
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+        
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Check if already a member
+        cursor.execute("SELECT id FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, current_user['id']))
         if cursor.fetchone():
-            raise HTTPException(status_code=400, detail="User is already a member")
+            return {"success": True, "message": "Already a member", "dataset_id": dataset_id}
             
-        # Insert
+        # Verify dataset still exists
+        cursor.execute("SELECT id FROM datasets WHERE id = %s", (dataset_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Dataset no longer exists")
+            
         cursor.execute(
             "INSERT INTO project_members (dataset_id, user_id, role) VALUES (%s, %s, %s)",
-            (dataset_id, target_user['id'], req.role)
+            (dataset_id, current_user['id'], role)
         )
         
         # Log activity
         cursor.execute(
             "INSERT INTO activity_logs (dataset_id, user_id, action, details) VALUES (%s, %s, %s, %s)",
-            (dataset_id, current_user['id'], "member_added", f'{{"target_email": "{req.email}", "role": "{req.role}"}}')
+            (dataset_id, current_user['id'], "member_joined", f'{{"role": "{role}"}}')
         )
         
         conn.commit()
-        return {"success": True, "message": "Member added successfully"}
+        return {"success": True, "message": "Successfully joined the project", "dataset_id": dataset_id}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))

@@ -16,6 +16,7 @@ export const API_ENDPOINTS = {
         MEMBERS: (id) => `${API_BASE_URL}/api/datasets/${id}/members`,
         MEMBER_REMOVE: (id, userId) => `${API_BASE_URL}/api/datasets/${id}/members/${userId}`,
         ACTIVITY: (id) => `${API_BASE_URL}/api/datasets/${id}/activity`,
+        ACCEPT_INVITE: `${API_BASE_URL}/api/datasets/invites/accept`,
     },
     ANNOTATIONS: {
         GET_IMAGE: (datasetId, filename) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}`,
