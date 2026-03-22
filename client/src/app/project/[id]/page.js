@@ -32,7 +32,7 @@ export default function ProjectPage() {
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState(null);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
-    const { token } = useAuth();
+    const { token, loading: authLoading } = useAuth();
 
     // Update URL when tab changes
     const handleTabChange = (val) => {
@@ -49,11 +49,15 @@ export default function ProjectPage() {
     }, [searchParams]);
 
     useEffect(() => {
-        if (params.id) {
-            fetchDataset(params.id);
-            fetchStats(params.id);
+        if (params?.id && !authLoading) {
+            if (token) {
+                fetchDataset(params.id);
+                fetchStats(params.id);
+            } else {
+                setLoading(false);
+            }
         }
-    }, [params.id]);
+    }, [params?.id, token, authLoading]);
 
     const fetchDataset = async (id) => {
         try {
@@ -80,15 +84,7 @@ export default function ProjectPage() {
         } catch (e) { console.error(e); }
     };
 
-    useEffect(() => {
-        if (params?.id) {
-            fetchDataset(params.id);
-            fetchStats(params.id);
-        } else {
-            // If no ID, stop loading and show error
-            setLoading(false);
-        }
-    }, [params]);
+
 
     // Safety timeout
     useEffect(() => {
@@ -130,10 +126,10 @@ export default function ProjectPage() {
         },
         {
             id: 'versions',
-            label: 'Versions',
+            label: 'Model Registry',
             icon: Layers,
             status: 'pending',
-            meta: 'Training Runs'
+            meta: 'Trained Models'
         },
         {
             id: 'deploy',
@@ -232,7 +228,7 @@ export default function ProjectPage() {
                         <TabTrigger value="annotate" icon={Image}>Annotate</TabTrigger>
                         <TabTrigger value="generate" icon={Layers}>Generate</TabTrigger>
                         <TabTrigger value="train" icon={Cpu}>Train</TabTrigger>
-                        <TabTrigger value="versions" icon={Layers}>Versions</TabTrigger>
+                        <TabTrigger value="versions" icon={Layers}>Model Registry</TabTrigger>
                         <TabTrigger value="deploy" icon={Code}>Deploy</TabTrigger>
                     </TabsList>
                 </div>
@@ -252,7 +248,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="generate" className="mt-0 h-full">
-                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => fetchStats(dataset.id)} />
+                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); handleTabChange('train'); }} />
                         </TabsContent>
 
                         <TabsContent value="train" className="mt-0 h-full">
@@ -260,7 +256,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="versions" className="mt-0 h-full">
-                            <ProjectVersions dataset={dataset} />
+                            <ProjectVersions dataset={dataset} onDeploy={() => handleTabChange('deploy')} />
                         </TabsContent>
 
                         <TabsContent value="deploy" className="mt-0 h-full">

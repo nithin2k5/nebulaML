@@ -33,6 +33,8 @@ export const API_ENDPOINTS = {
         START_FROM_DATASET: `${API_BASE_URL}/api/training/start-from-dataset`,
         START_MICRO: `${API_BASE_URL}/api/training/start-micro`,
         EXPORT_AND_TRAIN: `${API_BASE_URL}/api/training/export-and-train`,
+        VERSIONS_GENERATE: `${API_BASE_URL}/api/training/versions/generate`,
+        VERSIONS_LIST: (id) => `${API_BASE_URL}/api/training/versions/list/${id}`,
         JOBS: `${API_BASE_URL}/api/training/jobs`,
         JOB: (id) => `${API_BASE_URL}/api/training/job/${id}`,
         JOB_METRICS: (id) => `${API_BASE_URL}/api/training/job/${id}/metrics`,

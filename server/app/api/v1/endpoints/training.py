@@ -89,8 +89,16 @@ async def generate_dataset_version(request: GenerateVersionRequest):
     return {
         "success": True,
         "version_id": version_id,
-        "message": "Dataset version successfully generated constraints."
+        "message": "Dataset version successfully generated."
     }
+
+@router.get("/versions/list/{dataset_id}")
+async def list_dataset_versions(dataset_id: str):
+    """
+    List all generated versions of a dataset
+    """
+    versions = DatasetVersionService.list_dataset_versions(dataset_id)
+    return {"versions": versions}
 
 @router.post("/start")
 async def start_training(

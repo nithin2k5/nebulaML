@@ -26,22 +26,36 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
     const [exportFormat, setExportFormat] = useState("yolo");
 
     const handleGenerate = async () => {
+        // Annotation QA Gate
+        if (!stats || stats.total_images === 0) {
+            toast.error("QA Error: Dataset is empty. Please upload some images first.");
+            return;
+        }
+        
+        if (stats.annotated_images < stats.total_images) {
+            const missing = stats.total_images - stats.annotated_images;
+            toast.error(`QA Error: ${missing} images are still missing annotations. Please completely annotate the dataset before generating a version.`);
+            return;
+        }
+
         setGenerating(true);
         try {
-            const response = await fetch(API_ENDPOINTS.DATASETS.EXPORT(dataset.id), {
+            const response = await fetch(API_ENDPOINTS.TRAINING.VERSIONS_GENERATE, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    split_ratio: 0.8,
-                    config: augmentations
+                    dataset_id: dataset.id,
+                    name: `Version ${new Date().toLocaleDateString()}`,
+                    preprocessing: {},
+                    augmentations: augmentations
                 })
             });
 
             if (response.ok) {
-                toast.success("Version generated successfully!");
+                toast.success("Version generated successfully! Head to Train tab.");
                 if (onGenerate) onGenerate();
             } else {
                 toast.error("Failed to generate version");

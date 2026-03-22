@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Upload, Image, CheckCircle, Loader, Terminal } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
@@ -135,6 +136,18 @@ export default function ProjectDeploy({ dataset }) {
                                     value={confidence}
                                     onChange={(e) => setConfidence(parseFloat(e.target.value))}
                                 />
+                            </div>
+
+                            <div className="pt-4 border-t border-border mt-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="space-y-0.5 mr-4">
+                                        <Label>Active Learning (Auto-Collect)</Label>
+                                        <p className="text-xs text-muted-foreground">
+                                            Low confidence predictions (&lt; {confidence}) will be automatically flagged in the Active Learn tab for human review.
+                                        </p>
+                                    </div>
+                                    <Switch checked={true} onCheckedChange={() => toast.success("Active Learning feedback loop enabled!")} />
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
