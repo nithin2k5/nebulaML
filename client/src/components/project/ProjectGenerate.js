@@ -26,6 +26,18 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
     const [exportFormat, setExportFormat] = useState("yolo");
 
     const handleGenerate = async () => {
+        // Annotation QA Gate
+        if (!stats || stats.total_images === 0) {
+            toast.error("QA Error: Dataset is empty. Please upload some images first.");
+            return;
+        }
+        
+        if (stats.annotated_images < stats.total_images) {
+            const missing = stats.total_images - stats.annotated_images;
+            toast.error(`QA Error: ${missing} images are still missing annotations. Please completely annotate the dataset before generating a version.`);
+            return;
+        }
+
         setGenerating(true);
         try {
             const response = await fetch(API_ENDPOINTS.TRAINING.VERSIONS_GENERATE, {

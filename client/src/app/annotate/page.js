@@ -1194,13 +1194,13 @@ function AnnotationToolContent() {
               <Button
                 onClick={async () => {
                   if (!datasetId) return;
-                  await fetchStats();
-                  window.location.href = API_ENDPOINTS.ANNOTATIONS.DOWNLOAD(datasetId);
+                  await handleSaveAnnotations();
+                  router.push(`/project/${datasetId}?tab=generate`);
                 }}
                 variant="outline"
-                className="w-full border-white/10 h-9 text-sm"
+                className="w-full border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 h-9 text-sm"
               >
-                <Download className="mr-2 w-3.5 h-3.5" /> Export
+                <Cpu className="mr-2 w-3.5 h-3.5" /> Train Model
               </Button>
               {boxHistory.length > 0 && (
                 <Button

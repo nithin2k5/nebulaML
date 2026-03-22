@@ -9,7 +9,7 @@ import { API_BASE_URL } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
-export default function ProjectVersions({ dataset }) {
+export default function ProjectVersions({ dataset, onDeploy }) {
     const [jobs, setJobs] = useState([]);
     const { token } = useAuth();
 
@@ -54,8 +54,8 @@ export default function ProjectVersions({ dataset }) {
         <div className="h-full flex flex-col gap-6 overflow-y-auto pb-10 custom-scrollbar pr-2">
             <div className="flex justify-between items-center">
                 <div>
-                    <h2 className="text-xl font-semibold">Training Versions</h2>
-                    <p className="text-muted-foreground text-sm">Monitor your current and previous training runs.</p>
+                    <h2 className="text-xl font-semibold">Model Registry</h2>
+                    <p className="text-muted-foreground text-sm">Monitor your current and previous training runs and deploy models.</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={fetchJobs}>
                     <RefreshCw className="h-4 w-4 mr-2" />
@@ -116,7 +116,7 @@ export default function ProjectVersions({ dataset }) {
                                             </div>
                                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity -mr-2 -mt-2">
                                                 {(job.status === "completed" || job.status === "success") && (
-                                                    <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary/80" onClick={() => toast.info("Head to the Deploy tab to try this model.")}>
+                                                    <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary/80" onClick={onDeploy}>
                                                         Deploy
                                                     </Button>
                                                 )}
