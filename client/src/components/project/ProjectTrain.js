@@ -7,11 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Play, Cpu, Clock } from "lucide-react";
+import { Play, Cpu, Clock, AlertCircle } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
+import { useAuth } from "@/context/AuthContext";
 
 export default function ProjectTrain({ dataset, onTrainingStarted }) {
+    const { token } = useAuth();
+    const [versions, setVersions] = useState([]);
+    const [selectedVersion, setSelectedVersion] = useState("");
     const [config, setConfig] = useState({
         epochs: 50,
         batch_size: 16,
@@ -23,11 +27,30 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
     const [selectedClasses, setSelectedClasses] = useState([]);
 
     // Initialize with all classes selected
-    useState(() => {
+    useEffect(() => {
         if (dataset?.classes) {
             setSelectedClasses([...dataset.classes]);
         }
     }, [dataset]);
+
+    // Fetch dataset versions
+    useEffect(() => {
+        const fetchVersions = async () => {
+            try {
+                const res = await fetch(API_ENDPOINTS.TRAINING.VERSIONS_LIST(dataset.id), {
+                    headers: { "Authorization": `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setVersions(data.versions || []);
+                    if (data.versions?.length > 0) {
+                        setSelectedVersion(data.versions[0].id);
+                    }
+                }
+            } catch(e) { console.error("Failed to fetch versions:", e); }
+        };
+        fetchVersions();
+    }, [dataset.id, token]);
 
     const toggleClass = (cls) => {
         if (selectedClasses.includes(cls)) {
@@ -51,13 +74,20 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
     };
 
     const startTraining = async () => {
+        if (!selectedVersion) {
+            toast.error("Please select a dataset version first.");
+            return;
+        }
         setTraining(true);
         try {
             const response = await fetch(API_ENDPOINTS.TRAINING.START_FROM_DATASET, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}` 
+                },
                 body: JSON.stringify({
-                    dataset_id: dataset.id,
+                    version_id: selectedVersion,
                     config: config,
                     classes: selectedClasses // Send selected classes
                 })
@@ -93,6 +123,28 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                             <CardTitle>Configuration</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            <div className="space-y-2 mb-6 p-4 bg-muted/30 rounded-lg border border-border">
+                                <Label className="text-base font-semibold">Dataset Version</Label>
+                                {versions.length > 0 ? (
+                                    <Select value={selectedVersion} onValueChange={setSelectedVersion}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select a version to train on" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {versions.map((ver) => (
+                                                <SelectItem key={ver.id} value={ver.id}>
+                                                    {ver.name} - {new Date(ver.created_at).toLocaleDateString()} ({ver.images_count} imgs)
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <div className="flex items-center text-amber-500 text-sm mt-2">
+                                        <AlertCircle className="w-4 h-4 mr-2" />
+                                        No dataset versions created yet. Please go to the Generate tab to create one before training.
+                                    </div>
+                                )}
+                            </div>
                             <div className="grid md:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Model Architecture</Label>
@@ -214,7 +266,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                             <Button
                                 className="w-full mt-6"
                                 onClick={startTraining}
-                                disabled={training || selectedClasses.length === 0}
+                                disabled={training || selectedClasses.length === 0 || !selectedVersion}
                             >
                                 {training ? "Starting..." : "Start Training"}
                                 {!training && <Play className="ml-2" />}

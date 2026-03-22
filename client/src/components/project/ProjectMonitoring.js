@@ -104,13 +104,13 @@ export default function ProjectMonitoring({ dataset }) {
                         <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                             <AlertTriangle className="w-4 h-4" /> Drift Status
                         </div>
-                        <p className="text-2xl font-bold">
+                        <div className="text-2xl font-bold">
                             {drift ? (
                                 drift.drift_detected ?
                                     <Badge variant="destructive">Detected</Badge> :
                                     <Badge className="bg-green-600">Stable</Badge>
                             ) : "—"}
-                        </p>
+                        </div>
                     </CardContent>
                 </Card>
             </div>

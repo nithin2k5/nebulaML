@@ -32,7 +32,7 @@ export default function ProjectPage() {
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState(null);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
-    const { token } = useAuth();
+    const { token, loading: authLoading } = useAuth();
 
     // Update URL when tab changes
     const handleTabChange = (val) => {
@@ -49,11 +49,15 @@ export default function ProjectPage() {
     }, [searchParams]);
 
     useEffect(() => {
-        if (params.id) {
-            fetchDataset(params.id);
-            fetchStats(params.id);
+        if (params?.id && !authLoading) {
+            if (token) {
+                fetchDataset(params.id);
+                fetchStats(params.id);
+            } else {
+                setLoading(false);
+            }
         }
-    }, [params.id]);
+    }, [params?.id, token, authLoading]);
 
     const fetchDataset = async (id) => {
         try {
@@ -80,15 +84,7 @@ export default function ProjectPage() {
         } catch (e) { console.error(e); }
     };
 
-    useEffect(() => {
-        if (params?.id) {
-            fetchDataset(params.id);
-            fetchStats(params.id);
-        } else {
-            // If no ID, stop loading and show error
-            setLoading(false);
-        }
-    }, [params]);
+
 
     // Safety timeout
     useEffect(() => {

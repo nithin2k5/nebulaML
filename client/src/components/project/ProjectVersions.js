@@ -114,9 +114,16 @@ export default function ProjectVersions({ dataset }) {
                                                 </div>
                                                 <p className="text-xs text-muted-foreground mt-1.5 font-mono">ID: {job.job_id.substring(0, 8)}</p>
                                             </div>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-400 -mr-2 -mt-2" onClick={() => deleteJob(job.job_id)}>
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity -mr-2 -mt-2">
+                                                {(job.status === "completed" || job.status === "success") && (
+                                                    <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary/80" onClick={() => toast.info("Head to the Deploy tab to try this model.")}>
+                                                        Deploy
+                                                    </Button>
+                                                )}
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-400" onClick={() => deleteJob(job.job_id)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         </div>
 
                                         <div className="text-sm text-muted-foreground mb-4 flex-1">

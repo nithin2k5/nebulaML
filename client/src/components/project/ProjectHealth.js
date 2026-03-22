@@ -25,7 +25,7 @@ export default function ProjectHealth({ params }) {
         try {
             // Trigger new analysis
             const res = await fetch(API_ENDPOINTS.DATASETS.ANALYZE(params.id), {
-                method: "POST",
+                method: "GET",
                 headers: { "Authorization": `Bearer ${token}` }
             });
             if (!res.ok) throw new Error("Analysis failed");
