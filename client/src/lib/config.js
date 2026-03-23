@@ -40,6 +40,12 @@ export const API_ENDPOINTS = {
         JOB_METRICS: (id) => `${API_BASE_URL}/api/training/job/${id}/metrics`,
         TERMINATE: (id) => `${API_BASE_URL}/api/training/terminate/${id}`,
         PREVIEW_AUGMENTATION: `${API_BASE_URL}/api/training/preview-augmentation`,
+        PREFLIGHT: (datasetId) => `${API_BASE_URL}/api/training/preflight/${datasetId}`,
+        CONFUSION_MATRIX: (jobId) => `${API_BASE_URL}/api/training/job/${jobId}/confusion-matrix`,
+        PER_CLASS_METRICS: (jobId) => `${API_BASE_URL}/api/training/job/${jobId}/per-class-metrics`,
+        PRESETS: `${API_BASE_URL}/api/training/presets`,
+        AUTO_RETRAIN_CONFIG: `${API_BASE_URL}/api/training/auto-retrain-config`,
+        AUTO_RETRAIN_CONFIG_GET: (datasetId) => `${API_BASE_URL}/api/training/auto-retrain-config/${datasetId}`,
     },
     SMART: {
         SEGMENT: `${API_BASE_URL}/api/smart/segment`,

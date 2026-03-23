@@ -35,11 +35,12 @@ class InferenceLog(BaseModel):
 
 @router.post("/log")
 async def log_inference(
-    log: InferenceLog
+    log: InferenceLog,
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Log an inference result for monitoring.
-    Called automatically after each prediction.
+    Called automatically after each prediction. Requires authentication.
     """
     entry = {
         "timestamp": datetime.now().isoformat(),
@@ -65,6 +66,7 @@ async def log_inference(
         inference_logs[log.dataset_id] = inference_logs[log.dataset_id][-10000:]
 
     return {"success": True, "logged": True}
+
 
 
 @router.get("/stats/{dataset_id}")

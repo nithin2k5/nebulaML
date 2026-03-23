@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Form
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Depends
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import os
@@ -8,8 +8,13 @@ from PIL import Image
 from functools import lru_cache
 
 from app.services.inference import YOLOInference
+from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
+
+# Max image upload size for inference: 10 MB
+_MAX_INFERENCE_SIZE = 10 * 1024 * 1024
+
 
 @lru_cache(maxsize=3)
 def get_inference_model(model_path: str) -> YOLOInference:
@@ -23,10 +28,11 @@ async def predict_image(
     model_name: Optional[str] = Form("yolov8n.pt"),
     job_id: Optional[str] = Form(None),
     agnostic_nms: Optional[bool] = Form(False),
-    augment: Optional[bool] = Form(False)
+    augment: Optional[bool] = Form(False),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    Run inference on uploaded image. 
+    Run inference on uploaded image. Requires authentication.
     If job_id is provided, loads trained weights from that job. 
     Otherwise uses pretrained model_name.
     """
@@ -37,6 +43,9 @@ async def predict_image(
         model_path = model_name
         
         if job_id:
+            # Prevent path traversal in job_id
+            if ".." in job_id or "/" in job_id or "\\" in job_id:
+                raise HTTPException(status_code=400, detail="Invalid job_id")
             weights_dir = Path("runs/detect") / f"job_{job_id}" / "weights"
             onnx_path = weights_dir / "best.onnx"
             pt_path = weights_dir / "best.pt"
@@ -51,10 +60,18 @@ async def predict_image(
         # Get cached model
         inference_model = get_inference_model(model_path)
 
-        
-        # Process image in memory
+        # Enforce file size limit
         content = await file.read()
-        image = Image.open(io.BytesIO(content))
+        if len(content) > _MAX_INFERENCE_SIZE:
+            raise HTTPException(status_code=413, detail=f"File too large (max {_MAX_INFERENCE_SIZE // 1024 // 1024} MB)")
+
+        # Validate it's a real image
+        try:
+            image = Image.open(io.BytesIO(content))
+            image.verify()
+            image = Image.open(io.BytesIO(content))  # re-open after verify
+        except Exception:
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
         
         # Run inference
         detections = inference_model.predict(
@@ -71,19 +88,27 @@ async def predict_image(
             "num_detections": len(detections)
         })
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/predict-batch")
 async def predict_batch(
     files: List[UploadFile] = File(...),
     confidence: Optional[float] = Form(0.25),
     agnostic_nms: Optional[bool] = Form(False),
-    augment: Optional[bool] = Form(False)
+    augment: Optional[bool] = Form(False),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    Run inference on multiple images
+    Run inference on multiple images. Requires authentication.
     """
+    # Limit batch size to 20 images
+    if len(files) > 20:
+        raise HTTPException(status_code=400, detail="Batch inference is limited to 20 images at a time")
+
     try:
         # We need a model_name or job_id to know which model to use.
         # But this endpoint doesn't accept model_name easily in the signature. Default to base.
@@ -95,7 +120,12 @@ async def predict_batch(
         # Read all files into memory
         for file in files:
             content = await file.read()
-            images.append(Image.open(io.BytesIO(content)))
+            if len(content) > _MAX_INFERENCE_SIZE:
+                raise HTTPException(status_code=413, detail=f"{file.filename}: File too large (max {_MAX_INFERENCE_SIZE // 1024 // 1024} MB)")
+            try:
+                images.append(Image.open(io.BytesIO(content)))
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"{file.filename}: Not a valid image")
         
         # Run batch inference
         all_detections = inference_model.predict_batch(
@@ -119,8 +149,11 @@ async def predict_batch(
             "total_images": len(files)
         })
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/models")
 async def list_available_models():

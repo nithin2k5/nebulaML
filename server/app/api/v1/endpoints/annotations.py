@@ -234,6 +234,19 @@ async def upload_images_to_dataset(
                 errors.append(f"{file.filename}: Failed to write file")
                 continue
             
+            # Pixel-level image validation — confirm the file is actually decodeable
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(file_path) as pil_img:
+                    pil_img.verify()  # raises if corrupt
+            except Exception:
+                try:
+                    file_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                errors.append(f"{file.filename}: Image is corrupt or unreadable (failed pixel validation)")
+                continue
+            
             # Add to database
             DatasetService.add_image(
                 dataset_id=dataset_id,

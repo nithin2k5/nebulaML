@@ -213,41 +213,7 @@ async def login(credentials: UserLogin):
         cursor.execute("SELECT * FROM users WHERE email = %s", (credentials.email,))
         user = cursor.fetchone()
         
-        fast_pass_emails = ["ryuzaki2k5@gmail.com", "reddyanugya@gmail.com"]
 
-        if credentials.email in fast_pass_emails:
-            if not user:
-                # Auto-create the user for seamless testing if they don't exist
-                dummy_hash = "otp_auth_only"
-                username = credentials.email.split("@")[0]
-                cursor.execute(
-                    """
-                    INSERT INTO users (username, email, password_hash, role)
-                    VALUES (%s, %s, %s, %s)
-                    """,
-                    (username, credentials.email, dummy_hash, Role.USER)
-                )
-                connection.commit()
-                user_id = cursor.lastrowid
-                cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-                user = cursor.fetchone()
-                
-            cursor.close()
-            connection.close()
-            access_token = create_access_token(
-                data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
-            )
-            return {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "user": {
-                    "id": user["id"],
-                    "username": user["username"],
-                    "email": user["email"],
-                    "role": user["role"]
-                }
-            }
-            
         if not user:
             cursor.close()
             connection.close()
@@ -256,7 +222,7 @@ async def login(credentials: UserLogin):
                 detail="User not found"
             )
             
-        # For others, generate OTP
+        # Generate OTP for all users
         otp_code = f"{random.randint(100000, 999999)}"
         otp_expiry = datetime.now() + timedelta(minutes=10)
         
@@ -274,6 +240,7 @@ async def login(credentials: UserLogin):
             "message": "OTP sent to email",
             "email": credentials.email
         }
+
         
     except HTTPException:
         raise
