@@ -56,6 +56,11 @@ class VersioningEngine:
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset: return None
         
+        # Ensure there are annotated images before generating
+        annotated_images = [img for img in dataset.get('images', []) if img.get('annotated')]
+        if not annotated_images:
+            raise ValueError("No annotated images found in the dataset. Please annotate some images before generating a version.")
+        
         # 1. Register Version in DB
         versions_list = DatasetVersionService.list_dataset_versions(dataset_id)
         version_num = len(versions_list) + 1
