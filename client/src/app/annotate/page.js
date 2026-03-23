@@ -14,8 +14,40 @@ import AutoLabelModal from "@/components/project/AutoLabelModal";
 import { API_ENDPOINTS } from "@/lib/config";
 import {
   Save, Trash2, Upload, ChevronLeft, ChevronRight, Home,
-  Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu
+  Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu,
+  MousePointer2, Square, Hexagon, GitCommit, Wand2
 } from "lucide-react";
+
+// Helpers for polygon selection
+const ptToSegmentDist = (px, py, vx, vy, wx, wy) => {
+  const l2 = (wx - vx) ** 2 + (wy - vy) ** 2;
+  if (l2 === 0) return Math.sqrt((px - vx) ** 2 + (py - vy) ** 2);
+  let t = ((px - vx) * (wx - vx) + (py - vy) * (wy - vy)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.sqrt((px - (vx + t * (wx - vx))) ** 2 + (py - (vy + t * (wy - vy))) ** 2);
+};
+
+const isPointInPolygon = (px, py, points) => {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+const isPointNearPolygon = (x, y, points, tolerance = 8) => {
+  if (points.length < 2) return false;
+  if (isPointInPolygon(x, y, points)) return true;
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    if (ptToSegmentDist(x, y, p1.x, p1.y, p2.x, p2.y) <= tolerance) return true;
+  }
+  return false;
+};
 
 function AnnotationToolContent() {
   const searchParams = useSearchParams();
@@ -45,6 +77,12 @@ function AnnotationToolContent() {
   const [copiedBoxes, setCopiedBoxes] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'unlabeled', 'predicted', 'annotated', 'reviewed'
   const [annotationType, setAnnotationType] = useState('detection'); // 'detection' or 'classification'
+
+  const [activeTool, setActiveTool] = useState('box'); // 'select', 'box', 'polygon', 'joint', 'ai'
+  const [currentPoints, setCurrentPoints] = useState([]);
+  const [hoveredBoxIndex, setHoveredBoxIndex] = useState(-1);
+  const [selectedBoxIndex, setSelectedBoxIndex] = useState(-1);
+  const [dragOffset, setDragOffset] = useState(null);
 
   // Filter images based on status
   const filteredImages = useMemo(() => {
@@ -113,7 +151,7 @@ function AnnotationToolContent() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes, currentBox, isDrawing]);
+  }, [boxes, currentBox, isDrawing, currentPoints, activeTool, hoveredBoxIndex, selectedBoxIndex]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -332,14 +370,52 @@ function AnnotationToolContent() {
     };
   };
 
-  const [isSmartMode, setIsSmartMode] = useState(false);
-
   const handleMouseDown = async (e) => {
     e.preventDefault();
     if (!canvasRef.current || !dataset) return;
     const { x, y } = getCanvasCoordinates(e);
 
-    if (isSmartMode) {
+    if (activeTool === 'select') {
+      // Find if we clicked on an existing box/point
+      let clickedIndex = -1;
+      for (let i = boxesRef.current.length - 1; i >= 0; i--) {
+        const box = boxesRef.current[i];
+        if (!box.type || box.type === 'box') {
+          if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+            clickedIndex = i;
+            break;
+          }
+        } else if (box.type === 'joint') {
+          if (Math.abs(x - box.x) < 10 && Math.abs(y - box.y) < 10) {
+            clickedIndex = i;
+            break;
+          }
+        } else if (box.type === 'polygon' || box.type === 'line') {
+          if (box.points && box.points.length > 0) {
+            if (isPointNearPolygon(x, y, box.points)) {
+              clickedIndex = i;
+              break;
+            }
+          }
+        }
+      }
+      setSelectedBoxIndex(clickedIndex);
+      if (clickedIndex !== -1) {
+        setIsDrawing(true);
+        const box = boxesRef.current[clickedIndex];
+        if (!box.type || box.type === 'box' || box.type === 'joint') {
+          setDragOffset({ dx: x - box.x, dy: y - box.y });
+        } else if (box.type === 'polygon') {
+          setDragOffset({ x, y }); // store initial click
+        }
+      } else {
+        setIsDrawing(false);
+      }
+      drawCanvas();
+      return;
+    }
+
+    if (activeTool === 'ai') {
       // Smart Segment Logic
       if (!datasetId || !images[currentImageIndex]) return;
 
@@ -391,21 +467,129 @@ function AnnotationToolContent() {
       return;
     }
 
-    setIsDrawing(true);
-    setStartPos({ x, y });
-    setCurrentBox({ x, y, width: 0, height: 0, class_id: selectedClass });
+    if (activeTool === 'joint') {
+      // Direct place joint
+      const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
+      const newBox = { type: 'joint', x, y, width: 10, height: 10, class_id: selectedClass, class_name: className };
+      setBoxHistory(prev => [...prev, boxesRef.current]);
+      const newBoxes = [...boxesRef.current, newBox];
+      boxesRef.current = newBoxes;
+      setBoxes(newBoxes);
+      drawCanvas();
+      return;
+    }
+
+    if (activeTool === 'polygon') {
+      // Add point
+      if (!isDrawing) {
+        setIsDrawing(true);
+        setCurrentPoints([{ x, y }]);
+      } else {
+        setCurrentPoints(prev => [...prev, { x, y }]);
+      }
+      drawCanvas();
+      return;
+    }
+
+    if (activeTool === 'box') {
+      setIsDrawing(true);
+      setStartPos({ x, y });
+      setCurrentBox({ type: 'box', x, y, width: 0, height: 0, class_id: selectedClass });
+    }
   };
 
   const handleMouseMove = (e) => {
     e.preventDefault();
-    if (!isDrawing || !startPos || !canvasRef.current) return;
+    if (!canvasRef.current) return;
     const { x, y } = getCanvasCoordinates(e);
-    setCurrentBox({ x: startPos.x, y: startPos.y, width: x - startPos.x, height: y - startPos.y });
-    drawCanvas();
+
+    // Hover logic for select tool
+    if (activeTool === 'select' && !isDrawing) {
+      let hovered = -1;
+      for (let i = boxesRef.current.length - 1; i >= 0; i--) {
+        const box = boxesRef.current[i];
+        if (!box.type || box.type === 'box') {
+          if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) { hovered = i; break; }
+        } else if (box.type === 'joint') {
+          if (Math.abs(x - box.x) < 10 && Math.abs(y - box.y) < 10) { hovered = i; break; }
+        } else if (box.type === 'polygon') {
+          if (box.points && box.points.length > 0) {
+            if (isPointNearPolygon(x, y, box.points)) { hovered = i; break; }
+          }
+        }
+      }
+      if (hovered !== hoveredBoxIndex) {
+        setHoveredBoxIndex(hovered);
+        drawCanvas();
+      }
+    }
+
+    // Dragging logic for select tool
+    if (activeTool === 'select' && isDrawing && selectedBoxIndex !== -1 && dragOffset) {
+      const box = boxesRef.current[selectedBoxIndex];
+      const newBoxes = [...boxesRef.current];
+      if (!box.type || box.type === 'box' || box.type === 'joint') {
+        newBoxes[selectedBoxIndex] = { ...box, x: x - dragOffset.dx, y: y - dragOffset.dy };
+      } else if (box.type === 'polygon' && dragOffset.x !== undefined) {
+        const dx = x - dragOffset.x;
+        const dy = y - dragOffset.y;
+        newBoxes[selectedBoxIndex] = {
+          ...box,
+          points: box.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
+        };
+        setDragOffset({ x, y });
+      }
+      boxesRef.current = newBoxes;
+      setBoxes(newBoxes);
+      drawCanvas();
+      return;
+    }
+
+    if (!isDrawing) return;
+
+    if (activeTool === 'polygon') {
+      // Just re-draw to update line to cursor
+      drawCanvas();
+      // To draw the line to cursor, we can temporarily add the point in drawCanvas or just keep it in local let
+      const ctx = canvasRef.current.getContext('2d');
+      drawCanvas();
+      ctx.beginPath();
+      const lastPoint = currentPoints[currentPoints.length - 1];
+      if (lastPoint) {
+        ctx.moveTo(lastPoint.x, lastPoint.y);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = '#a78bfa';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      return;
+    }
+
+    if (activeTool === 'box' && startPos) {
+      setCurrentBox({ x: startPos.x, y: startPos.y, width: x - startPos.x, height: y - startPos.y });
+      drawCanvas();
+    }
   };
 
   const handleMouseUp = (e) => {
     e.preventDefault();
+
+    // Poly is finished via double click or Enter key, but let's allow it to finish via context menu or something later. For now we use double click event.
+    // So for polygon, up does nothing special unless it's select
+    if (activeTool === 'select') {
+      if (isDrawing) { // finished dragging
+        // Save state to history after drag
+        setBoxHistory(prev => [...prev, boxesRef.current]);
+      }
+      setIsDrawing(false);
+      setDragOffset(null);
+      return;
+    }
+
+    if (activeTool !== 'box') return;
+
     if (!isDrawing || !startPos || !dataset || !canvasRef.current) {
       setIsDrawing(false); setStartPos(null); setCurrentBox(null);
       return;
@@ -416,12 +600,9 @@ function AnnotationToolContent() {
     const height = y - startPos.y;
 
     if (Math.abs(width) > 10 && Math.abs(height) > 10) {
-      // Safety check for class name
-      const className = (dataset.classes && dataset.classes[selectedClass])
-        ? dataset.classes[selectedClass]
-        : `class_${selectedClass}`;
-
+      const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
       const normalizedBox = {
+        type: 'box',
         x: width < 0 ? startPos.x + width : startPos.x,
         y: height < 0 ? startPos.y + height : startPos.y,
         width: Math.abs(width),
@@ -443,19 +624,54 @@ function AnnotationToolContent() {
     setStartPos(null);
   };
 
+  useEffect(() => {
+    const handleDoubleClick = (e) => {
+      if (activeTool === 'polygon' && isDrawing && currentPoints.length > 2) {
+        const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
+        // approximate bounding box
+        const minX = Math.min(...currentPoints.map(p => p.x));
+        const maxX = Math.max(...currentPoints.map(p => p.x));
+        const minY = Math.min(...currentPoints.map(p => p.y));
+        const maxY = Math.max(...currentPoints.map(p => p.y));
+
+        const newBox = {
+          type: 'polygon',
+          points: [...currentPoints],
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY,
+          class_id: selectedClass,
+          class_name: className
+        };
+
+        setBoxHistory(prev => [...prev, boxesRef.current]);
+        const newBoxes = [...boxesRef.current, newBox];
+        boxesRef.current = newBoxes;
+        setBoxes(newBoxes);
+        setIsDrawing(false);
+        setCurrentPoints([]);
+        drawCanvas();
+      }
+    };
+    const canvas = canvasRef.current;
+    if (canvas) canvas.addEventListener('dblclick', handleDoubleClick);
+    return () => { if (canvas) canvas.removeEventListener('dblclick', handleDoubleClick); }
+  }, [activeTool, isDrawing, currentPoints, dataset, selectedClass]);
+
   // Color palette for classes
   const getClassColor = useCallback((classId) => {
     const colors = [
-      { stroke: '#6366f1', fill: 'rgba(99,102,241,0.15)' },    // indigo
-      { stroke: '#f43f5e', fill: 'rgba(244,63,94,0.15)' },     // rose
-      { stroke: '#10b981', fill: 'rgba(16,185,129,0.15)' },    // emerald
-      { stroke: '#f59e0b', fill: 'rgba(245,158,11,0.15)' },    // amber
-      { stroke: '#8b5cf6', fill: 'rgba(139,92,246,0.15)' },    // violet
-      { stroke: '#06b6d4', fill: 'rgba(6,182,212,0.15)' },     // cyan
-      { stroke: '#ec4899', fill: 'rgba(236,72,153,0.15)' },    // pink
-      { stroke: '#84cc16', fill: 'rgba(132,204,22,0.15)' },    // lime
-      { stroke: '#ef4444', fill: 'rgba(239,68,68,0.15)' },     // red
-      { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.15)' },    // blue
+      { stroke: '#6366f1', fill: 'rgba(99,102,241,0.35)' },    // indigo
+      { stroke: '#f43f5e', fill: 'rgba(244,63,94,0.35)' },     // rose
+      { stroke: '#10b981', fill: 'rgba(16,185,129,0.35)' },    // emerald
+      { stroke: '#f59e0b', fill: 'rgba(245,158,11,0.35)' },    // amber
+      { stroke: '#8b5cf6', fill: 'rgba(139,92,246,0.35)' },    // violet
+      { stroke: '#06b6d4', fill: 'rgba(6,182,212,0.35)' },     // cyan
+      { stroke: '#ec4899', fill: 'rgba(236,72,153,0.35)' },    // pink
+      { stroke: '#84cc16', fill: 'rgba(132,204,22,0.35)' },    // lime
+      { stroke: '#ef4444', fill: 'rgba(239,68,68,0.35)' },     // red
+      { stroke: '#3b82f6', fill: 'rgba(59,130,246,0.35)' },    // blue
     ];
     return colors[classId % colors.length];
   }, []);
@@ -471,17 +687,42 @@ function AnnotationToolContent() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       // Draw existing boxes with colored fills using the latest ref state
-      boxesRef.current.forEach((box) => {
+      boxesRef.current.forEach((box, index) => {
         const color = getClassColor(box.class_id);
+        const isSelected = index === selectedBoxIndex;
+        const isHovered = index === hoveredBoxIndex;
 
-        // Semi-transparent fill
-        ctx.fillStyle = color.fill;
-        ctx.fillRect(box.x, box.y, box.width, box.height);
+        // Increase opacity substantially for selected and slightly for hovered
+        let currentFill = color.fill;
+        if (isSelected) currentFill = currentFill.replace('0.35', '0.6');
+        else if (isHovered) currentFill = currentFill.replace('0.35', '0.45');
+        
+        ctx.fillStyle = currentFill;
+        ctx.strokeStyle = isSelected ? '#ffffff' : (isHovered ? `${color.stroke}FF` : color.stroke);
+        ctx.lineWidth = isSelected ? 4 : (isHovered ? 4 : 3);
 
-        // Stroke
-        ctx.strokeStyle = color.stroke;
-        ctx.lineWidth = 3;
-        ctx.strokeRect(box.x, box.y, box.width, box.height);
+        if (box.type === 'polygon' || box.type === 'line') {
+          if (box.points && box.points.length > 0) {
+            ctx.beginPath();
+            ctx.moveTo(box.points[0].x, box.points[0].y);
+            for (let i = 1; i < box.points.length; i++) {
+              ctx.lineTo(box.points[i].x, box.points[i].y);
+            }
+            if (box.type === 'polygon') ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
+        } else if (box.type === 'joint') {
+          ctx.beginPath();
+          ctx.arc(box.x, box.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          // Semi-transparent fill
+          ctx.fillRect(box.x, box.y, box.width, box.height);
+          // Stroke
+          ctx.strokeRect(box.x, box.y, box.width, box.height);
+        }
 
         // Label with background
         const labelText = `${box.class_name}`;
@@ -510,8 +751,29 @@ function AnnotationToolContent() {
         ctx.fillText(labelText, box.x + 6, box.y - 6);
       });
 
+      // Draw current polygon being drawn
+      if (activeTool === 'polygon' && isDrawing && currentPoints.length > 0) {
+        ctx.strokeStyle = '#a78bfa';
+        ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(167, 139, 250, 0.1)';
+        ctx.beginPath();
+        ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
+        for (let i = 1; i < currentPoints.length; i++) {
+          ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
+        }
+        ctx.stroke();
+
+        // Draw little circles for vertices
+        currentPoints.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+        });
+      }
+
       // Draw current box being drawn
-      if (currentBox && isDrawing) {
+      if (currentBox && isDrawing && activeTool === 'box') {
         ctx.strokeStyle = '#a78bfa';
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 4]);
@@ -528,7 +790,7 @@ function AnnotationToolContent() {
   useEffect(() => {
     if (canvasRef.current && imageRef.current?.complete) drawCanvas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes, currentBox, isDrawing]);
+  }, [boxes, currentBox, isDrawing, currentPoints, activeTool, hoveredBoxIndex, selectedBoxIndex]);
 
   useEffect(() => {
     if (imageRef.current && imageRef.current.complete && canvasRef.current) drawCanvas();
@@ -536,7 +798,7 @@ function AnnotationToolContent() {
   }, [currentImageIndex]);
 
   // Auto-save useEffect moved below handleSaveAnnotations to prevent ReferenceError (TDZ)
-  
+
   const handleSaveAnnotations = useCallback(async (statusOverride = null) => {
     if (!images[currentImageIndex] || !dataset || !token) return false;
 
@@ -653,6 +915,11 @@ function AnnotationToolContent() {
     const newBoxes = boxesRef.current.filter((_, i) => i !== index);
     boxesRef.current = newBoxes;
     setBoxes(newBoxes);
+    if (selectedBoxIndex === index) {
+      setSelectedBoxIndex(-1);
+    } else if (selectedBoxIndex > index) {
+      setSelectedBoxIndex(selectedBoxIndex - 1);
+    }
   };
 
   const handleZoom = (delta) => {
@@ -904,25 +1171,67 @@ function AnnotationToolContent() {
                 </Button>
               </div>
 
-              {/* Smart Mode Toggle */}
+              {/* Empty section here since we replaced smart mode with AI mode in tool bar */}
               <div className="pt-2 border-t border-white/5">
-                <Button
-                  variant={isSmartMode ? "default" : "outline"}
-                  size="sm"
-                  className={`w-full h-8 text-xs ${isSmartMode ? "bg-purple-600 hover:bg-purple-500 text-white border-transparent" : "border-dashed border-white/20 text-gray-400"}`}
-                  onClick={() => setIsSmartMode(!isSmartMode)}
-                >
-                  <Sparkles className={`w-3 h-3 mr-1.5 ${isSmartMode ? "text-white" : "text-purple-400"}`} />
-                  {isSmartMode ? "Smart Mode Active" : "Smart Mode Off"}
-                </Button>
                 <p className="text-[10px] text-gray-500 mt-1 text-center">
-                  {isSmartMode ? "Click an object to auto-segment" : "Switch to Smart Mode for auto-segmentation"}
+                  {activeTool === 'ai' ? "Click an object to auto-segment it" :
+                    activeTool === 'polygon' ? "Click points to define polygon, Double-click to finish" :
+                      activeTool === 'box' ? "Click and drag to draw a bounding box" :
+                        activeTool === 'joint' ? "Click to place a keypoint/joint" :
+                          "Click or drag on an annotation to select and move it"}
                 </p>
               </div>
 
             </div>
 
             <div className="p-3 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+              {/* Tools Selection */}
+              <div>
+                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Tools</h3>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => setActiveTool('select')}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'select' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    title="Select & Move: Click or drag shapes"
+                  >
+                    <MousePointer2 className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Select</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTool('box'); setIsDrawing(false); setCurrentBox(null); setStartPos(null); }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'box' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    title="Bounding Box: Click and drag to draw a box"
+                  >
+                    <Square className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Box</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTool('polygon'); setIsDrawing(false); setCurrentPoints([]); }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'polygon' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    title="Polygon/Line: Click to add points, double-click to finish"
+                  >
+                    <Hexagon className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Draw Lines</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTool('joint'); setIsDrawing(false); }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'joint' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    title="Joint Lines (Keypoints): Click to place a joint"
+                  >
+                    <GitCommit className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Joints</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTool('ai'); setIsDrawing(false); setCurrentPoints([]); setCurrentBox(null); }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-2 ${activeTool === 'ai' ? 'bg-purple-600 text-white shadow-sm' : 'bg-black/40 text-purple-400 hover:text-purple-300 hover:bg-white/5 border border-white/5 border-dashed'}`}
+                    title="AI Mode: Click an object to auto-segment"
+                  >
+                    <Wand2 className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">AI Smart Mode</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Annotation Mode Toggle */}
               <div>
                 <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Mode</h3>
@@ -971,10 +1280,10 @@ function AnnotationToolContent() {
                         }
                       }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all flex items-center justify-between gap-2 mb-1 ${isAssigned
-                          ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-300'
-                          : selectedClass === idx
-                            ? 'bg-white/10 text-white border border-transparent'
-                            : 'hover:bg-white/5 text-gray-400 hover:text-gray-200 border border-transparent'
+                        ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-300'
+                        : selectedClass === idx
+                          ? 'bg-white/10 text-white border border-transparent'
+                          : 'hover:bg-white/5 text-gray-400 hover:text-gray-200 border border-transparent'
                         }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
