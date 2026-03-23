@@ -11,6 +11,7 @@ import { Play, Cpu, Clock, AlertCircle } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
+import ProjectVersions from "@/components/project/ProjectVersions";
 
 export default function ProjectTrain({ dataset, onTrainingStarted }) {
     const { token } = useAuth();
@@ -87,6 +88,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                     "Authorization": `Bearer ${token}` 
                 },
                 body: JSON.stringify({
+                    dataset_id: dataset.id,
                     version_id: selectedVersion,
                     config: config,
                     classes: selectedClasses // Send selected classes
@@ -132,7 +134,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                                         </SelectTrigger>
                                         <SelectContent>
                                             {versions.map((ver) => (
-                                                <SelectItem key={ver.id} value={ver.id}>
+                                                <SelectItem key={ver.id} value={ver.id.toString()}>
                                                     {ver.name} - {new Date(ver.created_at).toLocaleDateString()} ({ver.images_count} imgs)
                                                 </SelectItem>
                                             ))}
@@ -274,6 +276,14 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                         </CardContent>
                     </Card>
                 </div>
+            </div>
+
+            {/* Model Registry & Jobs */}
+            <div className="mt-8">
+                <ProjectVersions dataset={dataset} onDeploy={() => {
+                    // Navigate to deploy stage if it exists in route query or just trigger refresh
+                    toast.info("Please navigate to the Deploy tab to deploy your model.");
+                }} />
             </div>
         </div>
     );

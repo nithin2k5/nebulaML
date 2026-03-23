@@ -362,25 +362,51 @@ async def save_annotation(request: dict = Body(...)):
             for box in boxes:
                 f.write(f"{box['class_id']}\n")
         else:
-            # Detection: store class_id + normalized bbox
+            # Detection/Segmentation
             for box in boxes:
-                # Convert to YOLO format (class_id center_x center_y width height)
                 if width <= 0 or height <= 0:
                     continue
+                
+                box_type = box.get("type", "box")
+                
+                if box_type == "polygon" or box_type == "line":
+                    points = box.get("points", [])
+                    if len(points) < 2:
+                        continue
                     
-                # Normalize coordinates to 0-1
-                center_x = (box["x"] + box["width"] / 2) / width
-                center_y = (box["y"] + box["height"] / 2) / height
-                norm_width = box["width"] / width
-                norm_height = box["height"] / height
-                
-                # Clamp values to 0-1 range to be safe
-                center_x = max(0.0, min(1.0, center_x))
-                center_y = max(0.0, min(1.0, center_y))
-                norm_width = max(0.0, min(1.0, norm_width))
-                norm_height = max(0.0, min(1.0, norm_height))
-                
-                f.write(f"{box['class_id']} {center_x} {center_y} {norm_width} {norm_height}\n")
+                    # YOLO Segmentation format: class_id x1 y1 x2 y2 ... (normalized)
+                    coords = []
+                    for p in points:
+                        norm_x = max(0.0, min(1.0, p["x"] / width))
+                        norm_y = max(0.0, min(1.0, p["y"] / height))
+                        coords.extend([f"{norm_x:.6f}", f"{norm_y:.6f}"])
+                    
+                    f.write(f"{box['class_id']} {' '.join(coords)}\n")
+                    
+                elif box_type == "joint":
+                    # For joints/keypoints without bbox, a proxy bbox could be used or just a point format depending on YOLO configuration
+                    # Standard YOLO pose format requires a bbox. We'll make a tiny bounding box around the point.
+                    # format: class_id center_x center_y width height px py visibility ...
+                    center_x = max(0.0, min(1.0, box["x"] / width))
+                    center_y = max(0.0, min(1.0, box["y"] / height))
+                    pw = 0.02
+                    ph = 0.02
+                    # simple bounding box fallback
+                    f.write(f"{box['class_id']} {center_x:.6f} {center_y:.6f} {pw:.6f} {ph:.6f}\n")
+                    
+                else:
+                    # Standard Bounding Box
+                    center_x = (box["x"] + box["width"] / 2) / width
+                    center_y = (box["y"] + box["height"] / 2) / height
+                    norm_width = box["width"] / width
+                    norm_height = box["height"] / height
+                    
+                    center_x = max(0.0, min(1.0, center_x))
+                    center_y = max(0.0, min(1.0, center_y))
+                    norm_width = max(0.0, min(1.0, norm_width))
+                    norm_height = max(0.0, min(1.0, norm_height))
+                    
+                    f.write(f"{box['class_id']} {center_x:.6f} {center_y:.6f} {norm_width:.6f} {norm_height:.6f}\n")
     
     # Update memory cache
     if dataset_id in datasets_db:

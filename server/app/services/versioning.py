@@ -56,6 +56,11 @@ class VersioningEngine:
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset: return None
         
+        # Ensure there are annotated images before generating
+        annotated_images = [img for img in dataset.get('images', []) if img.get('annotated')]
+        if not annotated_images:
+            raise ValueError("No annotated images found in the dataset. Please annotate some images before generating a version.")
+        
         # 1. Register Version in DB
         versions_list = DatasetVersionService.list_dataset_versions(dataset_id)
         version_num = len(versions_list) + 1
@@ -110,17 +115,27 @@ class VersioningEngine:
                 if img_w <= 0 or img_h <= 0:
                     continue
                     
-                # Calculate normalized YOLO format coordinates
-                center_x = (box.get("x", 0) + box.get("width", 0) / 2) / img_w
-                center_y = (box.get("y", 0) + box.get("height", 0) / 2) / img_h
-                norm_width = box.get("width", 0) / img_w
-                norm_height = box.get("height", 0) / img_h
+                # First calculate min/max coordinates
+                x_min = box.get("x", 0) / img_w
+                y_min = box.get("y", 0) / img_h
+                x_max = (box.get("x", 0) + box.get("width", 0)) / img_w
+                y_max = (box.get("y", 0) + box.get("height", 0)) / img_h
                 
-                # Clamp values to valid Albumentations [0, 1] bounds, ensuring width/height > 0
-                center_x = max(0.0, min(1.0, center_x))
-                center_y = max(0.0, min(1.0, center_y))
-                norm_width = max(0.001, min(1.0, norm_width))
-                norm_height = max(0.001, min(1.0, norm_height))
+                # Clamp strict bounds [0, 1]
+                x_min = max(0.0, min(1.0, x_min))
+                y_min = max(0.0, min(1.0, y_min))
+                x_max = max(0.0, min(1.0, x_max))
+                y_max = max(0.0, min(1.0, y_max))
+                
+                # Re-calculate YOLO format
+                norm_width = x_max - x_min
+                norm_height = y_max - y_min
+                center_x = x_min + (norm_width / 2.0)
+                center_y = y_min + (norm_height / 2.0)
+                
+                # Skip invalid tiny boxes
+                if norm_width < 0.001 or norm_height < 0.001:
+                    continue
                 
                 bboxes.append([center_x, center_y, norm_width, norm_height])
                 class_labels.append(box.get('class_id', 0))

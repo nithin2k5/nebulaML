@@ -143,8 +143,6 @@ class DatasetAnalyzer:
             try:
                 # Check if image is corrupt - use load() for full validation
                 with Image.open(img_path) as pil_img:
-                    pil_img.verify()  # Quick check
-                    # Full load to ensure image is actually readable
                     pil_img.load()
                     width, height = pil_img.size
                 

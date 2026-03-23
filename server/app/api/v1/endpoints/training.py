@@ -55,6 +55,7 @@ class TrainingConfig(BaseModel):
         return v
 
 class DatasetTrainingRequest(BaseModel):
+    dataset_id: str
     version_id: str
     config: TrainingConfig
     classes: Optional[List[str]] = None  # Optional list of class names to filter
@@ -431,6 +432,11 @@ async def start_training_from_dataset(
         
         if not yaml_path.exists():
             raise HTTPException(status_code=404, detail="YAML file missing from disk.")
+            
+        train_images_dir = yaml_path.parent / 'train' / 'images'
+        if not train_images_dir.exists() or not any(train_images_dir.iterdir()):
+            raise HTTPException(status_code=400, detail="This dataset version has no training images. Please annotate some images and generate a new version before training.")
+            
         
         # Generate job ID
         job_id = str(uuid.uuid4())

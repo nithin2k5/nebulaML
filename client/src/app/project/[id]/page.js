@@ -17,7 +17,7 @@ import ProjectUpload from "@/components/project/ProjectUpload";
 import ProjectAnnotate from "@/components/project/ProjectAnnotate";
 import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
-import ProjectVersions from "@/components/project/ProjectVersions"; // NEW
+import ProjectVersions from "@/components/project/ProjectVersions";
 import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth";
 import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
@@ -126,7 +126,7 @@ export default function ProjectPage() {
         },
         {
             id: 'versions',
-            label: 'Model Registry',
+            label: 'Registry',
             icon: Layers,
             status: 'pending',
             meta: 'Trained Models'
@@ -228,7 +228,7 @@ export default function ProjectPage() {
                         <TabTrigger value="annotate" icon={Image}>Annotate</TabTrigger>
                         <TabTrigger value="generate" icon={Layers}>Generate</TabTrigger>
                         <TabTrigger value="train" icon={Cpu}>Train</TabTrigger>
-                        <TabTrigger value="versions" icon={Layers}>Model Registry</TabTrigger>
+                        <TabTrigger value="versions" icon={Layers}>Registry</TabTrigger>
                         <TabTrigger value="deploy" icon={Code}>Deploy</TabTrigger>
                     </TabsList>
                 </div>
