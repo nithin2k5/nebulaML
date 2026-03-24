@@ -20,7 +20,7 @@ const PRESET_META = {
     accurate: { icon: Target, color: "text-emerald-500", label: "Accurate", desc: "~2 hrs • Maximum accuracy for production", epochs: 300, batch_size: 8, img_size: 1024, model_name: "yolov8m.pt", learning_rate: 0.001, patience: 80 },
 };
 
-export default function ProjectTrain({ dataset, onTrainingStarted }) {
+export default function ProjectTrain({ dataset, onTrainingStarted, versionRefreshKey = 0 }) {
     const { token } = useAuth();
     const [versions, setVersions] = useState([]);
     const [selectedVersion, setSelectedVersion] = useState("");
@@ -76,7 +76,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
             } catch(e) { console.error("Failed to fetch versions:", e); }
         };
         fetchVersions();
-    }, [dataset.id, token]);
+    }, [dataset.id, token, versionRefreshKey]);
 
     // Run preflight check when version changes
     useEffect(() => {
@@ -111,7 +111,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
 
     const toggleAll = () => {
         if (selectedClasses.length === dataset.classes.length) {
-            setSelectedClasses([...dataset.classes]);
+            setSelectedClasses([]);
         } else {
             setSelectedClasses([...dataset.classes]);
         }
@@ -142,13 +142,17 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                 })
             });
 
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(errText || `Server error ${response.status}`);
+            }
             const data = await response.json();
             if (data.success) {
                 toast.success("Training started!");
                 setActiveJobId(data.job_id);
                 if (onTrainingStarted) onTrainingStarted();
             } else {
-                toast.error("Failed to start training: " + data.detail);
+                toast.error("Failed to start training: " + (data.detail || "Unknown error"));
             }
         } catch (e) {
             toast.error("Error: " + e.message);
@@ -327,16 +331,20 @@ export default function ProjectTrain({ dataset, onTrainingStarted }) {
                                     <Label>Epochs</Label>
                                     <Input
                                         type="number"
+                                        min={1}
+                                        max={1000}
                                         value={config.epochs}
-                                        onChange={e => { setConfig({ ...config, epochs: parseInt(e.target.value) }); setActivePreset(null); }}
+                                        onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) { setConfig({ ...config, epochs: v }); setActivePreset(null); } }}
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Batch Size</Label>
                                     <Input
                                         type="number"
+                                        min={1}
+                                        max={128}
                                         value={config.batch_size}
-                                        onChange={e => { setConfig({ ...config, batch_size: parseInt(e.target.value) }); setActivePreset(null); }}
+                                        onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) { setConfig({ ...config, batch_size: v }); setActivePreset(null); } }}
                                     />
                                 </div>
                                 <div className="space-y-2">

@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { toast } from 'sonner';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1427,7 +1428,7 @@ function AnnotationToolContent() {
                 <div className="relative w-full h-full flex items-center justify-center" style={{ transform: `scale(${zoom})`, transition: 'transform 0.2s ease' }}>
                   <img
                     ref={imageRef}
-                    src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, currentImage.filename)}
+                    src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, currentImage.filename, token)}
                     alt="Annotate"
                     className="hidden"
                     onLoad={(e) => {
@@ -1515,7 +1516,7 @@ function AnnotationToolContent() {
                         }`}
                     >
                       <img
-                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename)}
+                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token)}
                         alt={img.original_name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -1612,7 +1613,9 @@ function AnnotationToolContent() {
                   onClick={() => {
                     if (copiedBoxes) {
                       setBoxHistory(prev => [...prev, boxes]);
-                      setBoxes(prev => [...prev, ...copiedBoxes]);
+                      const merged = [...boxes, ...copiedBoxes];
+                      boxesRef.current = merged;
+                      setBoxes(merged);
                       showToast(`Pasted ${copiedBoxes.length} boxes`);
                     }
                   }}

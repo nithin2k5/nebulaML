@@ -96,10 +96,10 @@ export default function TrainingTab() {
   const logEndRef = useRef(null);
 
   useEffect(() => {
-    fetchJobs();
-    const interval = setInterval(fetchJobs, 5000);
+    if (token) fetchJobs();
+    const interval = setInterval(() => { if (token) fetchJobs(); }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [token, fetchJobs]);
 
   const fetchJobs = useCallback(async () => {
     if (!token) return;
@@ -156,9 +156,10 @@ export default function TrainingTab() {
   };
 
   const handleTerminateJob = async (jobId) => {
+    if (!window.confirm("Terminate this training job? The current progress will be lost.")) return;
     try {
       const response = await fetch(API_ENDPOINTS.TRAINING.TERMINATE(jobId), { 
-        method: "POST",
+        method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (response.ok) {

@@ -31,17 +31,19 @@ class VersioningEngine:
             width, height = preprocessing["resize"].get("width", 640), preprocessing["resize"].get("height", 640)
             transforms.append(A.Resize(height=height, width=width))
             
-        # Optional Augmentations
+        # Optional Augmentations — accepts both frontend keys and legacy keys
         if augmentations.get("blur", False):
             transforms.append(A.Blur(blur_limit=3, p=0.5))
-        if augmentations.get("flip", False):
+        if augmentations.get("flipHorizontal", False) or augmentations.get("flip", False):
             transforms.append(A.HorizontalFlip(p=0.5))
+        if augmentations.get("flipVertical", False):
+            transforms.append(A.VerticalFlip(p=0.5))
         if augmentations.get("rotate", False):
             transforms.append(A.Rotate(limit=15, p=0.5))
         if augmentations.get("brightness", False):
             transforms.append(A.RandomBrightnessContrast(p=0.5))
-        if augmentations.get("noise", False):
-            transforms.append(A.GaussNoise(p=0.5))
+        if augmentations.get("grayscale", False) or augmentations.get("noise", False):
+            transforms.append(A.ToGray(p=0.5))
             
         return A.Compose(transforms, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
@@ -93,12 +95,16 @@ class VersioningEngine:
         splits = ['train'] * n_train + ['val'] * n_val + ['test'] * (len(images) - n_train - n_val)
         
         for img_data, split in zip(images, splits):
-            # Only process annotated images
+            # Only process images that are actually annotated
             if not img_data['annotated']: continue
                 
             orig_path = img_data['path']
             annotation = AnnotationService.get_annotation(dataset_id, img_data['id'])
             if not annotation: continue
+
+            # Skip images whose annotation has no bounding boxes — they produce empty YOLO labels
+            if not annotation.get('boxes'):
+                continue
             
             # Read image
             image = cv2.imread(orig_path)

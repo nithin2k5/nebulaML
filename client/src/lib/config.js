@@ -19,7 +19,7 @@ export const API_ENDPOINTS = {
         ACCEPT_INVITE: `${API_BASE_URL}/api/datasets/invites/accept`,
     },
     ANNOTATIONS: {
-        GET_IMAGE: (datasetId, filename) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}`,
+        GET_IMAGE: (datasetId, filename, token) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}${token ? `?token=${token}` : ''}`,
         GET_ANNOTATION: (datasetId, imageId) => `${API_BASE_URL}/api/annotations/annotations/${datasetId}/${imageId}`,
         SAVE: `${API_BASE_URL}/api/annotations/save`,
         AUTO_LABEL: `${API_BASE_URL}/api/annotations/auto-label`,
@@ -38,7 +38,7 @@ export const API_ENDPOINTS = {
         JOBS: `${API_BASE_URL}/api/training/jobs`,
         JOB: (id) => `${API_BASE_URL}/api/training/job/${id}`,
         JOB_METRICS: (id) => `${API_BASE_URL}/api/training/job/${id}/metrics`,
-        TERMINATE: (id) => `${API_BASE_URL}/api/training/terminate/${id}`,
+        TERMINATE: (id) => `${API_BASE_URL}/api/training/job/${id}`,
         PREVIEW_AUGMENTATION: `${API_BASE_URL}/api/training/preview-augmentation`,
         PREFLIGHT: (datasetId) => `${API_BASE_URL}/api/training/preflight/${datasetId}`,
         CONFUSION_MATRIX: (jobId) => `${API_BASE_URL}/api/training/job/${jobId}/confusion-matrix`,

@@ -68,6 +68,12 @@ export default function GamifiedTerminal({ output, onCommand, isRunning = false 
                     <span className="ml-3 text-xs text-gray-400 flex items-center gap-2">
                         <TerminalIcon size={12} />
                         NEBULA_OS_V2.0
+                        {isRunning && (
+                            <span className="flex items-center gap-1 text-amber-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                                running
+                            </span>
+                        )}
                     </span>
                 </div>
 

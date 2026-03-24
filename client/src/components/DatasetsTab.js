@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/context/AuthContext";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,12 +23,19 @@ export default function DatasetsTab() {
   const [datasets, setDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newDataset, setNewDataset] = useState({ name: "", description: "", classes: "" });
+  const exportIntervalsRef = useRef([]);
   const [showCreate, setShowCreate] = useState(false);
   const router = useRouter();
   const { token } = useAuth();
 
   useEffect(() => {
-    fetchDatasets();
+    if (token) fetchDatasets();
+  }, [token]);
+
+  useEffect(() => {
+    return () => {
+      exportIntervalsRef.current.forEach(clearInterval);
+    };
   }, []);
 
   const fetchDatasets = async () => {
@@ -151,10 +158,12 @@ export default function DatasetsTab() {
               const statusData = await statusRes.json();
               if (statusData.status === "completed") {
                 clearInterval(interval);
+                exportIntervalsRef.current = exportIntervalsRef.current.filter(i => i !== interval);
                 toast.success("Export ready! Downloading...", { id: toastId });
                 downloadDataset(id);
               } else if (statusData.status === "failed") {
                 clearInterval(interval);
+                exportIntervalsRef.current = exportIntervalsRef.current.filter(i => i !== interval);
                 toast.error("Export failed: " + statusData.error, { id: toastId });
               } else {
                 toast.loading('Preparing export...', { description: `${statusData.progress || 0}%`, id: toastId });
@@ -164,6 +173,7 @@ export default function DatasetsTab() {
             console.error("Polling error:", err);
           }
         }, 1000);
+        exportIntervalsRef.current.push(interval);
       } else {
         toast.success("Export ready! Downloading...", { id: toastId });
         downloadDataset(id);

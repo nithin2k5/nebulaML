@@ -19,42 +19,36 @@ import shutil
 # Import trainer
 from app.services.trainer import YOLOTrainer
 from app.services.dataset_analyzer import DatasetAnalyzer
-from app.services.database import DatasetService, DatasetVersionService
+from app.services.database import DatasetService, DatasetVersionService, TrainingJobService
 from app.services.versioning import VersioningEngine
-from utils.dataset_utils import split_dataset_stratified
 from app.api.v1.endpoints.auth import get_current_user
+from utils.dataset_utils import split_dataset_stratified
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Concurrency — limit simultaneous training jobs to avoid resource exhaustion
-# ---------------------------------------------------------------------------
 MAX_CONCURRENT_JOBS = 2
-_training_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 
-# ---------------------------------------------------------------------------
-# Job persistence — keep training_jobs on disk so they survive server restarts
-# ---------------------------------------------------------------------------
-_JOBS_FILE = Path("training_jobs.json")
+training_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_loaded = False
 
-def _load_jobs() -> Dict[str, Dict[str, Any]]:
-    if _JOBS_FILE.exists():
+def _ensure_jobs_loaded():
+    global _jobs_loaded
+    if not _jobs_loaded:
         try:
-            return json.loads(_JOBS_FILE.read_text())
-        except Exception:
-            pass
-    return {}
+            persisted = TrainingJobService.load_all_jobs()
+            training_jobs.update(persisted)
+            _jobs_loaded = True
+            logger.info(f"Loaded {len(persisted)} training jobs from DB")
+        except Exception as e:
+            logger.warning(f"Could not load jobs from DB: {e}")
+            _jobs_loaded = True
 
-def _save_jobs(jobs: Dict[str, Dict[str, Any]]) -> None:
+def _persist_job(job_id: str):
     try:
-        _JOBS_FILE.write_text(json.dumps(jobs, default=str))
+        TrainingJobService.upsert_job(job_id, training_jobs[job_id])
     except Exception as e:
-        logger.warning(f"Could not persist training_jobs: {e}")
-
-# Initialise from disk on startup
-training_jobs: Dict[str, Dict[str, Any]] = _load_jobs()
-
+        logger.warning(f"Could not persist job {job_id}: {e}")
 
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
@@ -156,7 +150,7 @@ async def generate_dataset_version(
     }
 
 @router.get("/versions/list/{dataset_id}")
-async def list_dataset_versions(dataset_id: str):
+async def list_dataset_versions(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
     List all generated versions of a dataset
     """
@@ -180,6 +174,7 @@ async def start_training(
     """
     Start model training job. Requires authentication.
     """
+    _ensure_jobs_loaded()
     # Validate YAML content-type
     if dataset_yaml.content_type and not (
         dataset_yaml.content_type in ["application/x-yaml", "text/yaml", "text/plain", "application/octet-stream"]
@@ -219,12 +214,9 @@ async def start_training(
             content = await dataset_yaml.read()
             f.write(content)
         
-        # Start training in background
-        trainer = YOLOTrainer(model_name=config.model_name)
-        
         # Register job
         training_jobs[job_id] = {
-            "status": "running",
+            "status": "pending",
             "config": config.dict(),
             "output": [],
             "metrics": {},
@@ -232,19 +224,9 @@ async def start_training(
             "created_at": datetime.now().isoformat(),
             "user_id": current_user["id"]
         }
-        _save_jobs(training_jobs)
-        
-        background_tasks.add_task(
-            trainer.train,
-            data_yaml=str(yaml_path),
-            epochs=config.epochs,
-            imgsz=config.img_size,
-            batch=config.batch_size,
-            name=f"job_{job_id}",
-            strict_epochs=config.strict_epochs,
-            augmentations=config.augmentations,
-            patience=config.patience
-        )
+        _persist_job(job_id)
+
+        background_tasks.add_task(run_training, job_id, str(yaml_path), config)
         
         return {"job_id": job_id, "status": "started"}
         
@@ -259,15 +241,17 @@ async def start_micro_training(
     background_tasks: BackgroundTasks,
     dataset_id: str = Form(...),
     model_name: str = Form("yolov8n.pt"),
-    epochs: int = Form(10), # Default small
+    epochs: int = Form(10),
     batch_size: int = Form(16),
-    img_size: int = Form(416), # Default small
-    device: Optional[str] = Form(None)
+    img_size: int = Form(416),
+    device: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Start a 'Micro-Training' job for quick iteration.
     Uses existing dataset from database instead of uploaded YAML.
     """
+    _ensure_jobs_loaded()
     try:
         # Create minimal config
         config = TrainingConfig(
@@ -297,28 +281,18 @@ async def start_micro_training(
         except Exception as e:
             logger.warning(f"Could not fetch recommendations: {e}")
 
-        trainer = YOLOTrainer(model_name=config.model_name)
-        
         training_jobs[job_id] = {
-            "status": "running",
+            "status": "pending",
             "config": config.dict(),
             "output": [f"Starting micro-training on dataset {dataset_id}..."],
             "metrics": {},
             "progress": 0,
+            "dataset_id": dataset_id,
             "created_at": datetime.now().isoformat()
         }
-        
-        background_tasks.add_task(
-            trainer.train,
-            data_yaml=str(yaml_path),
-            epochs=config.epochs,
-            imgsz=config.img_size,
-            batch=config.batch_size,
-            name=f"job_{job_id}",
-            strict_epochs=config.strict_epochs,
-            augmentations=config.augmentations,
-            patience=config.patience
-        )
+        _persist_job(job_id)
+
+        background_tasks.add_task(run_training, job_id, str(yaml_path), config)
         
         return {"job_id": job_id, "status": "started"}
 
@@ -335,6 +309,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         training_jobs[job_id]["status"] = "running"
         training_jobs[job_id]["progress"] = 0
         training_jobs[job_id]["current_epoch"] = 0
+        _persist_job(job_id)
         
         logger.info(f"Starting training job {job_id} with {config.epochs} epochs")
         
@@ -410,8 +385,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             "confusion_matrix_path": results.get("confusion_matrix_path"),
             "completed_at": datetime.now().isoformat(),
         })
-        _save_jobs(training_jobs)
-        
+        _persist_job(job_id)
         logger.info(f"Training job {job_id} completed successfully")
         
     except Exception as e:
@@ -422,10 +396,10 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             "progress": training_jobs[job_id].get("progress", 0),
             "failed_at": datetime.now().isoformat(),
         })
-        _save_jobs(training_jobs)
+        _persist_job(job_id)
 
 @router.get("/status/{job_id}")
-async def get_training_status(job_id: str):
+async def get_training_status(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get training job status
     """
@@ -435,10 +409,11 @@ async def get_training_status(job_id: str):
     return training_jobs[job_id]
 
 @router.get("/jobs")
-async def list_training_jobs():
+async def list_training_jobs(current_user: dict = Depends(get_current_user)):
     """
     List all training jobs
     """
+    _ensure_jobs_loaded()
     return {
         "jobs": [
             {"job_id": job_id, **job_data}
@@ -447,7 +422,7 @@ async def list_training_jobs():
     }
 
 @router.delete("/job/{job_id}")
-async def delete_training_job(job_id: str):
+async def delete_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Delete a training job
     """
@@ -458,7 +433,7 @@ async def delete_training_job(job_id: str):
     raise HTTPException(status_code=404, detail="Job not found")
 
 @router.get("/job/{job_id}/metrics")
-async def get_training_metrics(job_id: str):
+async def get_training_metrics(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get training metrics from results.csv
     """
@@ -704,11 +679,13 @@ async def get_training_presets():
 @router.post("/start-from-dataset")
 async def start_training_from_dataset(
     background_tasks: BackgroundTasks,
-    request: DatasetTrainingRequest
+    request: DatasetTrainingRequest,
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Start training from an exported dataset. Auto-exports if not already exported.
     """
+    _ensure_jobs_loaded()
     try:
         # Analyze dataset first
         try:
@@ -742,8 +719,11 @@ async def start_training_from_dataset(
             "status": "pending",
             "config": request.config.dict(),
             "progress": 0,
-            "version_id": request.version_id
+            "version_id": request.version_id,
+            "dataset_id": request.dataset_id,
+            "created_at": datetime.now().isoformat()
         }
+        _persist_job(job_id)
         
         # Handle Class Filtering
         final_yaml_path = str(yaml_path)
@@ -807,6 +787,7 @@ async def export_and_train(
     """
     Export dataset and start training in one operation (strict training mode)
     """
+    _ensure_jobs_loaded()
     try:
         # Analyze dataset first
         try:
@@ -855,8 +836,11 @@ async def export_and_train(
             "config": request.config.dict(),
             "progress": 0,
             "version_id": new_version_id,
-            "strict_mode": True
+            "dataset_id": request.dataset_id,
+            "strict_mode": True,
+            "created_at": datetime.now().isoformat(),
         }
+        _persist_job(job_id)
         
         # Add training to background tasks
         background_tasks.add_task(
