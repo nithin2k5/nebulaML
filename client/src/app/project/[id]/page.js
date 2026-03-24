@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
-import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3 } from "lucide-react";
+import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
@@ -131,6 +131,13 @@ export default function ProjectPage() {
 
     const pipelineStages = [
         {
+            id: 'overview',
+            label: 'Overview',
+            icon: LayoutDashboard,
+            status: 'pending',
+            meta: 'Summary'
+        },
+        {
             id: 'upload',
             label: 'Upload',
             icon: Upload,
@@ -167,7 +174,7 @@ export default function ProjectPage() {
         {
             id: 'versions',
             label: 'Registry',
-            icon: Grid,
+            icon: Package,
             status: hasModels ? 'complete' : 'pending',
             meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
         },
@@ -180,10 +187,10 @@ export default function ProjectPage() {
         },
         {
             id: 'active-learning',
-            label: 'Active Learn',
+            label: 'Learning',
             icon: Brain,
             status: 'pending',
-            meta: 'Re-train Loop'
+            meta: 'Re-train'
         },
         {
             id: 'monitoring',
@@ -202,7 +209,7 @@ export default function ProjectPage() {
         {
             id: 'team',
             label: 'Team',
-            icon: Grid,
+            icon: Users,
             status: 'pending',
             meta: 'Access & Logs'
         }
@@ -243,31 +250,31 @@ export default function ProjectPage() {
                 </div>
             </header>
 
-            {/* Pipeline Visualizer (Quick Nav) */}
-            <div className="px-6 py-4 bg-muted/5 border-b border-border">
-                <div className="flex items-center justify-between max-w-4xl mx-auto relative">
-                    {/* Connecting Line */}
-                    <div className="absolute top-1/2 left-0 w-full h-0.5 bg-border -z-10 -translate-y-1/2" />
-
-                    {pipelineStages.map((stage, idx) => (
-                        <div
-                            key={stage.id}
-                            onClick={() => handleTabChange(stage.id)}
-                            className={`flex flex-col items-center gap-2 cursor-pointer group bg-background px-4 py-2 rounded-xl border transition-all hover:scale-105 ${activeTab === stage.id ? 'border-primary ring-2 ring-primary/20' : 'border-border'}`}
-                        >
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${stage.status === 'complete' ? 'bg-green-500/10 border-green-500 text-green-500' :
-                                stage.status === 'inprogress' ? 'bg-amber-500/10 border-amber-500 text-amber-500 animate-pulse' :
-                                stage.status === 'failed' ? 'bg-red-500/10 border-red-500 text-red-500' :
-                                    'bg-muted border-muted-foreground/30 text-muted-foreground'
-                                }`}>
-                                <stage.icon className="w-5 h-5" />
-                            </div>
-                            <div className="text-center">
-                                <p className={`text-xs font-semibold ${activeTab === stage.id ? 'text-primary' : 'text-foreground'}`}>{stage.label}</p>
-                                <p className="text-[10px] text-muted-foreground">{stage.meta}</p>
-                            </div>
-                        </div>
-                    ))}
+            {/* Pipeline Visualizer — scrollable row so steps stay readable */}
+            <div className="px-3 sm:px-6 py-3 bg-muted/5 border-b border-border">
+                <div className="max-w-7xl mx-auto overflow-x-auto overscroll-x-contain">
+                    <div className="flex items-stretch gap-2 min-w-max py-1 pr-2">
+                        {pipelineStages.map((stage) => (
+                            <button
+                                type="button"
+                                key={stage.id}
+                                onClick={() => handleTabChange(stage.id)}
+                                className={`flex flex-col items-center self-stretch shrink-0 w-[6.25rem] sm:w-[6.5rem] min-h-[5.75rem] rounded-xl border bg-background px-1 py-2 transition-colors hover:bg-muted/50 ${activeTab === stage.id ? 'border-primary ring-2 ring-primary/25 shadow-sm' : 'border-border'}`}
+                            >
+                                <div className={`shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center border-2 ${stage.status === 'complete' ? 'bg-green-500/10 border-green-500 text-green-500' :
+                                    stage.status === 'inprogress' ? 'bg-amber-500/10 border-amber-500 text-amber-500 animate-pulse' :
+                                    stage.status === 'failed' ? 'bg-red-500/10 border-red-500 text-red-500' :
+                                        'bg-muted border-muted-foreground/30 text-muted-foreground'
+                                    }`}>
+                                    <stage.icon className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </div>
+                                <div className="mt-1.5 flex flex-1 flex-col items-center justify-end gap-0.5 w-full min-h-0 text-center">
+                                    <span className={`w-full text-[10px] sm:text-[11px] font-semibold leading-snug whitespace-nowrap overflow-hidden text-ellipsis ${activeTab === stage.id ? 'text-primary' : 'text-foreground'}`}>{stage.label}</span>
+                                    <span className="w-full text-[9px] sm:text-[10px] text-muted-foreground leading-tight line-clamp-2 break-words">{stage.meta}</span>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 

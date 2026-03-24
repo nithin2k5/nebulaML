@@ -7,7 +7,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 import mysql.connector
-from app.db.session import get_db_connection
+from app.db.session import get_db_connection, migrate_users_otp_columns
+from app.core.logging import logger
 from app.core.rbac import (
     hash_password, 
     verify_password, 
@@ -209,6 +210,15 @@ async def login(credentials: UserLogin):
         )
     
     try:
+        try:
+            migrate_users_otp_columns(connection)
+        except mysql.connector.Error as mig_err:
+            logger.error("OTP column migration failed: %s", mig_err)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database schema update failed. Check server logs.",
+            ) from mig_err
+
         cursor = connection.cursor(dictionary=True)
         cursor.execute("SELECT * FROM users WHERE email = %s", (credentials.email,))
         user = cursor.fetchone()
@@ -233,9 +243,12 @@ async def login(credentials: UserLogin):
         connection.commit()
         cursor.close()
         connection.close()
-        
-        send_otp_email(credentials.email, otp_code)
-        
+
+        try:
+            send_otp_email(credentials.email, otp_code)
+        except Exception as mail_err:
+            logger.exception("send_otp_email failed after OTP was stored: %s", mail_err)
+
         return {
             "message": "OTP sent to email",
             "email": credentials.email
@@ -245,6 +258,7 @@ async def login(credentials: UserLogin):
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("login failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Login failed: {str(e)}"
