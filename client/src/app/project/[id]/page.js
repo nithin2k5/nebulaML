@@ -127,6 +127,7 @@ export default function ProjectPage() {
     const failedJobs    = trainingJobs.filter(j => j.status === 'failed');
     const hasModels     = completedJobs.length > 0;
     const isTraining    = runningJobs.length > 0;
+    const hasFailed     = failedJobs.length > 0 && !hasModels && !isTraining;
 
     const pipelineStages = [
         {
@@ -158,10 +159,10 @@ export default function ProjectPage() {
             icon: Cpu,
             status: isTraining ? 'inprogress' :
                     hasModels ? 'complete' :
-                    failedJobs.length > 0 && !hasModels ? 'failed' : 'pending',
+                    hasFailed ? 'failed' : 'pending',
             meta: isTraining ? `${runningJobs[0] ? Math.round(runningJobs[0].progress || 0) + '%' : 'Running'}` :
                   hasModels ? `${completedJobs.length} Model${completedJobs.length > 1 ? 's' : ''}` :
-                  failedJobs.length > 0 ? 'Failed' : 'No Jobs'
+                  hasFailed ? 'Failed' : 'No Jobs'
         },
         {
             id: 'versions',

@@ -221,6 +221,7 @@ async def start_training(
             "output": [],
             "metrics": {},
             "progress": 0,
+            "dataset_id": None,
             "created_at": datetime.now().isoformat(),
             "user_id": current_user["id"]
         }
@@ -364,6 +365,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
                     training_jobs[job_id]["current_epoch"] = epoch
                     if metrics:
                         training_jobs[job_id]["metrics"] = metrics
+                    _persist_job(job_id)
             except Exception as e:
                 logger.error(f"Error in training callback: {e}")
                 
@@ -403,6 +405,7 @@ async def get_training_status(job_id: str, current_user: dict = Depends(get_curr
     """
     Get training job status
     """
+    _ensure_jobs_loaded()
     if job_id not in training_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     
