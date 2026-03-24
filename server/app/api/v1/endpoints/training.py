@@ -1,9 +1,11 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form
+from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form, Depends
 from typing import Optional
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+import asyncio
+import json
 import os
 import yaml
 from pathlib import Path
@@ -17,15 +19,36 @@ import shutil
 # Import trainer
 from app.services.trainer import YOLOTrainer
 from app.services.dataset_analyzer import DatasetAnalyzer
-from app.services.database import DatasetService, DatasetVersionService
+from app.services.database import DatasetService, DatasetVersionService, TrainingJobService
 from app.services.versioning import VersioningEngine
+from app.api.v1.endpoints.auth import get_current_user
 from utils.dataset_utils import split_dataset_stratified
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Store training jobs
+MAX_CONCURRENT_JOBS = 2
+
 training_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_loaded = False
+
+def _ensure_jobs_loaded():
+    global _jobs_loaded
+    if not _jobs_loaded:
+        try:
+            persisted = TrainingJobService.load_all_jobs()
+            training_jobs.update(persisted)
+            _jobs_loaded = True
+            logger.info(f"Loaded {len(persisted)} training jobs from DB")
+        except Exception as e:
+            logger.warning(f"Could not load jobs from DB: {e}")
+            _jobs_loaded = True
+
+def _persist_job(job_id: str):
+    try:
+        TrainingJobService.upsert_job(job_id, training_jobs[job_id])
+    except Exception as e:
+        logger.warning(f"Could not persist job {job_id}: {e}")
 
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
@@ -37,6 +60,20 @@ class TrainingConfig(BaseModel):
     device: Optional[str] = Field(default=None, description="Device (cpu, cuda, mps, or None for auto)")
     strict_epochs: bool = Field(default=False, description="If True, enforce exact epoch count (disable early stopping)")
     augmentations: Optional[Dict[str, Any]] = Field(default=None, description="Data augmentation parameters")
+    preset: Optional[str] = Field(default=None, description="Preset name: fast, balanced, accurate")
+
+    def apply_preset(self):
+        """Apply a named preset, overriding defaults but not user-set values."""
+        presets = {
+            "fast": {"epochs": 25, "batch_size": 32, "img_size": 416, "model_name": "yolov8n.pt", "patience": 10, "learning_rate": 0.01},
+            "balanced": {"epochs": 100, "batch_size": 16, "img_size": 640, "model_name": "yolov8s.pt", "patience": 50, "learning_rate": 0.01},
+            "accurate": {"epochs": 300, "batch_size": 8, "img_size": 1024, "model_name": "yolov8m.pt", "patience": 80, "learning_rate": 0.001},
+        }
+        if self.preset and self.preset in presets:
+            p = presets[self.preset]
+            for k, v in p.items():
+                setattr(self, k, v)
+        return self
     
     @validator('epochs')
     def validate_epochs(cls, v):
@@ -69,13 +106,32 @@ class GenerateVersionRequest(BaseModel):
     name: str = "Version 1"
     preprocessing: Dict[str, Any] = {}
     augmentations: Dict[str, Any] = {}
+
+class AutoRetrainConfig(BaseModel):
+    dataset_id: str
+    enabled: bool = False
+    min_new_annotations: int = Field(default=50, ge=10, le=1000)
+
+# In-memory store for auto-retrain configs
+auto_retrain_configs: Dict[str, Dict[str, Any]] = {}
     
 @router.post("/versions/generate")
-async def generate_dataset_version(request: GenerateVersionRequest):
+async def generate_dataset_version(
+    request: GenerateVersionRequest,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Generate an immutable Roboflow-style version of a dataset 
     with specific preprocessing and augmentations.
+    Requires authentication.
     """
+    # Verify dataset ownership
+    dataset = DatasetService.get_dataset(request.dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to generate versions for this dataset")
+
     engine = VersioningEngine()
     version_id = engine.generate_version(
         dataset_id=request.dataset_id,
@@ -94,7 +150,7 @@ async def generate_dataset_version(request: GenerateVersionRequest):
     }
 
 @router.get("/versions/list/{dataset_id}")
-async def list_dataset_versions(dataset_id: str):
+async def list_dataset_versions(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
     List all generated versions of a dataset
     """
@@ -112,11 +168,27 @@ async def start_training(
     learning_rate: Optional[float] = Form(None),
     patience: Optional[int] = Form(50),
     device: Optional[str] = Form(None),
-    strict_epochs: bool = Form(False)
+    strict_epochs: bool = Form(False),
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    Start model training job
+    Start model training job. Requires authentication.
     """
+    _ensure_jobs_loaded()
+    # Validate YAML content-type
+    if dataset_yaml.content_type and not (
+        dataset_yaml.content_type in ["application/x-yaml", "text/yaml", "text/plain", "application/octet-stream"]
+    ):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a YAML file")
+
+    # Enforce concurrency limit
+    active = sum(1 for j in training_jobs.values() if j.get("status") == "running")
+    if active >= MAX_CONCURRENT_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many training jobs running ({active}/{MAX_CONCURRENT_JOBS}). Wait for one to finish before starting another."
+        )
+
     try:
         # Create TrainingConfig from form data
         config = TrainingConfig(
@@ -142,33 +214,24 @@ async def start_training(
             content = await dataset_yaml.read()
             f.write(content)
         
-        # Start training in background
-        trainer = YOLOTrainer(model_name=config.model_name)
-        
         # Register job
         training_jobs[job_id] = {
-            "status": "running",
+            "status": "pending",
             "config": config.dict(),
             "output": [],
             "metrics": {},
             "progress": 0,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
+            "user_id": current_user["id"]
         }
-        
-        background_tasks.add_task(
-            trainer.train,
-            data_yaml=str(yaml_path),
-            epochs=config.epochs,
-            imgsz=config.img_size,
-            batch=config.batch_size,
-            name=f"job_{job_id}",
-            strict_epochs=config.strict_epochs,
-            augmentations=config.augmentations,
-            patience=config.patience
-        )
+        _persist_job(job_id)
+
+        background_tasks.add_task(run_training, job_id, str(yaml_path), config)
         
         return {"job_id": job_id, "status": "started"}
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start training: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -178,15 +241,17 @@ async def start_micro_training(
     background_tasks: BackgroundTasks,
     dataset_id: str = Form(...),
     model_name: str = Form("yolov8n.pt"),
-    epochs: int = Form(10), # Default small
+    epochs: int = Form(10),
     batch_size: int = Form(16),
-    img_size: int = Form(416), # Default small
-    device: Optional[str] = Form(None)
+    img_size: int = Form(416),
+    device: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Start a 'Micro-Training' job for quick iteration.
     Uses existing dataset from database instead of uploaded YAML.
     """
+    _ensure_jobs_loaded()
     try:
         # Create minimal config
         config = TrainingConfig(
@@ -216,28 +281,18 @@ async def start_micro_training(
         except Exception as e:
             logger.warning(f"Could not fetch recommendations: {e}")
 
-        trainer = YOLOTrainer(model_name=config.model_name)
-        
         training_jobs[job_id] = {
-            "status": "running",
+            "status": "pending",
             "config": config.dict(),
             "output": [f"Starting micro-training on dataset {dataset_id}..."],
             "metrics": {},
             "progress": 0,
+            "dataset_id": dataset_id,
             "created_at": datetime.now().isoformat()
         }
-        
-        background_tasks.add_task(
-            trainer.train,
-            data_yaml=str(yaml_path),
-            epochs=config.epochs,
-            imgsz=config.img_size,
-            batch=config.batch_size,
-            name=f"job_{job_id}",
-            strict_epochs=config.strict_epochs,
-            augmentations=config.augmentations,
-            patience=config.patience
-        )
+        _persist_job(job_id)
+
+        background_tasks.add_task(run_training, job_id, str(yaml_path), config)
         
         return {"job_id": job_id, "status": "started"}
 
@@ -254,6 +309,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         training_jobs[job_id]["status"] = "running"
         training_jobs[job_id]["progress"] = 0
         training_jobs[job_id]["current_epoch"] = 0
+        _persist_job(job_id)
         
         logger.info(f"Starting training job {job_id} with {config.epochs} epochs")
         
@@ -324,9 +380,12 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             "current_epoch": config.epochs,
             "results": results,
             "model_path": results.get("model_path", ""),
-            "metrics": results.get("metrics", {})
+            "metrics": results.get("metrics", {}),
+            "per_class_metrics": results.get("per_class_metrics", []),
+            "confusion_matrix_path": results.get("confusion_matrix_path"),
+            "completed_at": datetime.now().isoformat(),
         })
-        
+        _persist_job(job_id)
         logger.info(f"Training job {job_id} completed successfully")
         
     except Exception as e:
@@ -334,11 +393,13 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         training_jobs[job_id].update({
             "status": "failed",
             "error": str(e),
-            "progress": training_jobs[job_id].get("progress", 0)
+            "progress": training_jobs[job_id].get("progress", 0),
+            "failed_at": datetime.now().isoformat(),
         })
+        _persist_job(job_id)
 
 @router.get("/status/{job_id}")
-async def get_training_status(job_id: str):
+async def get_training_status(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get training job status
     """
@@ -348,10 +409,11 @@ async def get_training_status(job_id: str):
     return training_jobs[job_id]
 
 @router.get("/jobs")
-async def list_training_jobs():
+async def list_training_jobs(current_user: dict = Depends(get_current_user)):
     """
     List all training jobs
     """
+    _ensure_jobs_loaded()
     return {
         "jobs": [
             {"job_id": job_id, **job_data}
@@ -360,7 +422,7 @@ async def list_training_jobs():
     }
 
 @router.delete("/job/{job_id}")
-async def delete_training_job(job_id: str):
+async def delete_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Delete a training job
     """
@@ -371,7 +433,7 @@ async def delete_training_job(job_id: str):
     raise HTTPException(status_code=404, detail="Job not found")
 
 @router.get("/job/{job_id}/metrics")
-async def get_training_metrics(job_id: str):
+async def get_training_metrics(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get training metrics from results.csv
     """
@@ -405,14 +467,225 @@ async def get_training_metrics(job_id: str):
         return {"metrics": [], "error": str(e)}
 
 
+@router.get("/preflight/{dataset_id}")
+async def preflight_check(dataset_id: str):
+    """
+    Run pre-flight validation before training.
+    Returns warnings (informational) and blockers (prevent training).
+    """
+    warnings = []
+    blockers = []
+    
+    try:
+        analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
+        
+        # Check class balance — warn if any class has 10x more than another
+        if analysis.class_frequency:
+            counts = list(analysis.class_frequency.values())
+            if len(counts) > 1:
+                max_count = max(counts)
+                min_count = min(counts)
+                if min_count > 0 and max_count / min_count >= 10:
+                    most = max(analysis.class_frequency, key=analysis.class_frequency.get)
+                    least = min(analysis.class_frequency, key=analysis.class_frequency.get)
+                    warnings.append({
+                        "type": "class_imbalance",
+                        "message": f"Severe class imbalance: '{most}' has {max_count} annotations vs '{least}' with {min_count}.",
+                        "suggestion": "Consider oversampling the minority class, using class weights, or collecting more data for underrepresented classes."
+                    })
+                elif min_count > 0 and max_count / min_count >= 3:
+                    warnings.append({
+                        "type": "class_imbalance",
+                        "message": f"Moderate class imbalance detected (ratio {max_count/min_count:.1f}x).",
+                        "suggestion": "Enable mosaic and mixup augmentations to help with class balance."
+                    })
+        
+        # Check corrupt images
+        if analysis.corrupt_images:
+            blockers.append({
+                "type": "corrupt_images",
+                "message": f"{len(analysis.corrupt_images)} corrupt image(s) detected.",
+                "files": analysis.corrupt_images[:10],
+                "suggestion": "Remove or re-upload these images before training."
+            })
+        
+        # Check minimum annotated images
+        if analysis.annotated_images < 5:
+            blockers.append({
+                "type": "insufficient_data",
+                "message": f"Only {analysis.annotated_images} annotated images. Minimum 5 required.",
+                "suggestion": "Annotate more images before starting training."
+            })
+        elif analysis.annotated_images < 20:
+            warnings.append({
+                "type": "low_data",
+                "message": f"Only {analysis.annotated_images} annotated images. Results may be unreliable.",
+                "suggestion": "Consider annotating at least 50+ images per class for better results."
+            })
+        
+        # Check split distribution
+        train_ratio = analysis.split_ratios.get("train", 0)
+        val_ratio = analysis.split_ratios.get("val", 0)
+        if train_ratio > 0 and val_ratio == 0:
+            warnings.append({
+                "type": "no_validation_split",
+                "message": "No validation split detected. Model performance cannot be evaluated.",
+                "suggestion": "Assign some images to the 'val' split, or use the auto-split feature."
+            })
+        
+        # Check data leakage
+        if analysis.data_leakage_detected:
+            warnings.append({
+                "type": "data_leakage",
+                "message": "Duplicate images found across train/val splits.",
+                "suggestion": "Remove duplicates to prevent inflated metrics."
+            })
+        
+        # Overall quality
+        quality_score = analysis.overall_quality_score
+        
+        return {
+            "success": True,
+            "dataset_id": dataset_id,
+            "quality_score": round(quality_score, 1),
+            "annotated_images": analysis.annotated_images,
+            "total_annotations": analysis.total_annotations,
+            "class_frequency": analysis.class_frequency,
+            "warnings": warnings,
+            "blockers": blockers,
+            "can_train": len(blockers) == 0 
+        }
+    except Exception as e:
+        logger.error(f"Preflight check failed: {e}")
+        return {
+            "success": False,
+            "warnings": [],
+            "blockers": [{"type": "error", "message": str(e), "suggestion": "Check server logs."}],
+            "can_train": False
+        }
+
+
+@router.get("/job/{job_id}/confusion-matrix")
+async def get_confusion_matrix(job_id: str):
+    """
+    Return the confusion matrix image for a completed training job.
+    """
+    from fastapi.responses import FileResponse
+    
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job_name = f"job_{job_id}"
+    # YOLO saves confusion_matrix.png and confusion_matrix_normalized.png
+    for variant in ["confusion_matrix_normalized.png", "confusion_matrix.png"]:
+        cm_path = Path("runs/detect") / job_name / variant
+        if cm_path.exists():
+            return FileResponse(str(cm_path), media_type="image/png")
+    
+    raise HTTPException(status_code=404, detail="Confusion matrix not available yet")
+
+
+@router.get("/job/{job_id}/per-class-metrics")
+async def get_per_class_metrics(job_id: str):
+    """
+    Return per-class precision, recall, mAP50 from the results.
+    """
+    import csv
+    
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job_name = f"job_{job_id}"
+    results_dir = Path("runs/detect") / job_name
+    
+    # Try to read per-class metrics from results
+    per_class = []
+    
+    # YOLO also saves results per class if available
+    # We can extract from the results.csv or from the training results
+    job = training_jobs[job_id]
+    if "per_class_metrics" in job:
+        per_class = job["per_class_metrics"]
+    
+    return {
+        "success": True,
+        "job_id": job_id,
+        "per_class_metrics": per_class,
+        "overall_metrics": job.get("metrics", {})
+    }
+
+
+@router.post("/auto-retrain-config")
+async def set_auto_retrain_config(config: AutoRetrainConfig):
+    """
+    Configure auto-retrain triggers for a dataset.
+    """
+    auto_retrain_configs[config.dataset_id] = {
+        "enabled": config.enabled,
+        "min_new_annotations": config.min_new_annotations,
+        "annotations_since_last_train": 0
+    }
+    return {
+        "success": True,
+        "config": auto_retrain_configs[config.dataset_id]
+    }
+
+
+@router.get("/auto-retrain-config/{dataset_id}")
+async def get_auto_retrain_config(dataset_id: str):
+    """
+    Get auto-retrain configuration for a dataset.
+    """
+    config = auto_retrain_configs.get(dataset_id, {
+        "enabled": False,
+        "min_new_annotations": 50,
+        "annotations_since_last_train": 0
+    })
+    return {"success": True, "config": config}
+
+
+@router.get("/presets")
+async def get_training_presets():
+    """
+    Return available training presets with descriptions.
+    """
+    return {
+        "presets": {
+            "fast": {
+                "label": "Fast",
+                "description": "Quick training for rapid iteration. Lower accuracy.",
+                "epochs": 25, "batch_size": 32, "img_size": 416,
+                "model_name": "yolov8n.pt", "patience": 10, "learning_rate": 0.01,
+                "estimated_time": "~5 min"
+            },
+            "balanced": {
+                "label": "Balanced",
+                "description": "Good tradeoff between speed and accuracy.",
+                "epochs": 100, "batch_size": 16, "img_size": 640,
+                "model_name": "yolov8s.pt", "patience": 50, "learning_rate": 0.01,
+                "estimated_time": "~30 min"
+            },
+            "accurate": {
+                "label": "High Accuracy",
+                "description": "Maximum accuracy. Best for production models.",
+                "epochs": 300, "batch_size": 8, "img_size": 1024,
+                "model_name": "yolov8m.pt", "patience": 80, "learning_rate": 0.001,
+                "estimated_time": "~2 hours"
+            }
+        }
+    }
+
+
 @router.post("/start-from-dataset")
 async def start_training_from_dataset(
     background_tasks: BackgroundTasks,
-    request: DatasetTrainingRequest
+    request: DatasetTrainingRequest,
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Start training from an exported dataset. Auto-exports if not already exported.
     """
+    _ensure_jobs_loaded()
     try:
         # Analyze dataset first
         try:
@@ -446,8 +719,11 @@ async def start_training_from_dataset(
             "status": "pending",
             "config": request.config.dict(),
             "progress": 0,
-            "version_id": request.version_id
+            "version_id": request.version_id,
+            "dataset_id": request.dataset_id,
+            "created_at": datetime.now().isoformat()
         }
+        _persist_job(job_id)
         
         # Handle Class Filtering
         final_yaml_path = str(yaml_path)
@@ -511,6 +787,7 @@ async def export_and_train(
     """
     Export dataset and start training in one operation (strict training mode)
     """
+    _ensure_jobs_loaded()
     try:
         # Analyze dataset first
         try:
@@ -559,8 +836,11 @@ async def export_and_train(
             "config": request.config.dict(),
             "progress": 0,
             "version_id": new_version_id,
-            "strict_mode": True
+            "dataset_id": request.dataset_id,
+            "strict_mode": True,
+            "created_at": datetime.now().isoformat(),
         }
+        _persist_job(job_id)
         
         # Add training to background tasks
         background_tasks.add_task(

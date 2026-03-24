@@ -18,7 +18,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
         flipVertical: false,
         rotate: false,
         blur: false,
-        noise: false
+        grayscale: false
     });
     const [generating, setGenerating] = useState(false);
     const [previewLoading, setPreviewLoading] = useState(false);
@@ -26,7 +26,6 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
     const [exportFormat, setExportFormat] = useState("yolo");
 
     const handleGenerate = async () => {
-        // Annotation QA Gate
         if (!stats || stats.total_images === 0) {
             toast.error("QA Error: Dataset is empty. Please upload some images first.");
             return;
@@ -37,6 +36,8 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
             toast.error(`QA Error: ${missing} images are still missing annotations. Please completely annotate the dataset before generating a version.`);
             return;
         }
+
+        if (!window.confirm("Generate a new dataset version? This action creates an immutable snapshot and cannot be undone.")) return;
 
         setGenerating(true);
         try {
@@ -96,9 +97,25 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
         }
     };
 
-    const handleDownloadFormat = () => {
-        const url = API_ENDPOINTS.DATASETS.DOWNLOAD_FORMAT(dataset.id, exportFormat);
-        window.open(url, "_blank");
+    const handleDownloadFormat = async () => {
+        try {
+            const url = API_ENDPOINTS.DATASETS.DOWNLOAD_FORMAT(dataset.id, exportFormat);
+            const res = await fetch(url, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                toast.error("Download failed: " + (await res.text()));
+                return;
+            }
+            const blob = await res.blob();
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `${dataset.name || "dataset"}_${exportFormat}.zip`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        } catch (e) {
+            toast.error("Download error: " + e.message);
+        }
     };
 
     const exportFormats = [
@@ -200,8 +217,8 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                                 <p className="text-xs text-muted-foreground">Convert to black and white</p>
                             </div>
                             <Switch
-                                checked={augmentations.noise}
-                                onCheckedChange={c => setAugmentations({ ...augmentations, noise: c })}
+                                checked={augmentations.grayscale}
+                                onCheckedChange={c => setAugmentations({ ...augmentations, grayscale: c })}
                             />
                         </div>
                     </CardContent>
@@ -281,7 +298,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                 <CardContent className="p-6 text-center">
                     <h3 className="font-semibold mb-2">Estimated Version Size</h3>
                     <p className="text-muted-foreground">
-                        {stats?.train_images || 0} → ~{Math.round((stats?.train_images || 0) * (1 + Object.values(augmentations).filter(Boolean).length * 0.5))} images
+                        {stats?.train_images || 0} → ~{Math.round((stats?.train_images || 0) * (1 + Object.values(augmentations).filter(Boolean).length * 0.5))} augmented images
                     </p>
                 </CardContent>
             </Card>

@@ -11,8 +11,10 @@ import { Switch } from "@/components/ui/switch";
 import { Upload, Image, CheckCircle, Loader, Terminal } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
+import { useAuth } from "@/context/AuthContext";
 
 export default function ProjectDeploy({ dataset }) {
+    const { token } = useAuth();
     const [jobs, setJobs] = useState([]);
     const [selectedJob, setSelectedJob] = useState(null);
     const [selectedFile, setSelectedFile] = useState(null);
@@ -20,25 +22,27 @@ export default function ProjectDeploy({ dataset }) {
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState(null);
 
-    // Fetch training jobs for this dataset
     useEffect(() => {
-        fetchJobs();
-    }, [dataset.id]);
+        if (token) fetchJobs();
+    }, [dataset.id, token]);
 
     const fetchJobs = async () => {
         try {
-            const res = await fetch(API_ENDPOINTS.TRAINING.JOBS);
+            const res = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
             if (res.ok) {
                 const data = await res.json();
-                // Filter jobs for this dataset that are completed
-                const projectJobs = data.jobs.filter(j => j.dataset_id === dataset.id && j.status === "completed");
+                const projectJobs = data.jobs.filter(j => j.dataset_id === dataset.id && (j.status === "completed" || j.status === "success"));
                 setJobs(projectJobs);
                 if (projectJobs.length > 0) {
                     setSelectedJob(projectJobs[0].job_id);
                 }
+            } else {
+                toast.error("Failed to load trained models");
             }
         } catch (e) {
-            console.error("Failed to fetch jobs", e);
+            toast.error("Error loading models: " + e.message);
         }
     };
 
@@ -119,7 +123,7 @@ export default function ProjectDeploy({ dataset }) {
                                     <SelectContent>
                                         {jobs.map((job) => (
                                             <SelectItem key={job.job_id} value={job.job_id}>
-                                                {job.config?.model_name || "Unknown Model"} - {new Date().toLocaleDateString()}
+                                                {job.config?.model_name || "Unknown Model"} - {job.created_at ? new Date(job.created_at).toLocaleDateString() : "Unknown date"}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>

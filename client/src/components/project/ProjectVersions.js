@@ -14,28 +14,31 @@ export default function ProjectVersions({ dataset, onDeploy }) {
     const { token } = useAuth();
 
     const fetchJobs = async () => {
+        if (!token) return;
         try {
             const res = await fetch(`${API_BASE_URL}/api/training/jobs`, {
                 headers: { "Authorization": `Bearer ${token}` }
             });
             if (res.ok) {
                 const data = await res.json();
-                setJobs(data.jobs || []);
+                const datasetJobs = (data.jobs || []).filter(j => j.dataset_id === dataset?.id);
+                setJobs(datasetJobs);
+            } else {
+                toast.error("Failed to load training jobs");
             }
         } catch (e) {
-            console.error("Failed to fetch jobs:", e);
+            toast.error("Error loading jobs: " + e.message);
         }
     };
 
     useEffect(() => {
         fetchJobs();
-        const interval = setInterval(() => {
-            fetchJobs();
-        }, 12000); // Increased from 3s to 12s to reduce server load
+        const interval = setInterval(fetchJobs, 12000);
         return () => clearInterval(interval);
-    }, []);
+    }, [token, dataset?.id]);
 
     const deleteJob = async (jobId) => {
+        if (!window.confirm("Delete this training job? This cannot be undone.")) return;
         try {
             const res = await fetch(`${API_BASE_URL}/api/training/job/${jobId}`, {
                 method: 'DELETE',
@@ -44,9 +47,11 @@ export default function ProjectVersions({ dataset, onDeploy }) {
             if (res.ok) {
                 toast.success("Job deleted");
                 fetchJobs();
+            } else {
+                toast.error("Failed to delete job");
             }
         } catch (e) {
-            toast.error("Failed to delete job");
+            toast.error("Failed to delete job: " + e.message);
         }
     };
 

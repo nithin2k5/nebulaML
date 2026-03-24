@@ -319,8 +319,9 @@ class AnnotationService:
             
             connection.commit()
             
-            # Mark image as annotated
-            DatasetService.mark_image_annotated(dataset_id, image_id, True)
+            # Only mark as annotated when the image actually has labels
+            is_annotated = len(boxes) > 0 and status not in ("unlabeled",)
+            DatasetService.mark_image_annotated(dataset_id, image_id, is_annotated)
             
             # Update image split if provided
             if split:
@@ -561,3 +562,84 @@ class DatasetVersionService:
             print(f"Error listing dataset versions: {e}")
             if connection: connection.close()
             return []
+
+
+class TrainingJobService:
+    """Persist training job state to the training_jobs table so restarts don't lose history."""
+
+    @staticmethod
+    def upsert_job(job_id: str, data: dict) -> bool:
+        connection = get_db_connection()
+        if not connection:
+            return False
+        try:
+            cursor = connection.cursor()
+            config = data.get("config", {})
+            cursor.execute("""
+                INSERT INTO training_jobs
+                    (id, dataset_id, model_name, status, progress, epochs, batch_size, config, results, error_message, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    status       = VALUES(status),
+                    progress     = VALUES(progress),
+                    config       = VALUES(config),
+                    results      = VALUES(results),
+                    error_message = VALUES(error_message)
+            """, (
+                job_id,
+                data.get("dataset_id"),
+                config.get("model_name", ""),
+                data.get("status", "pending"),
+                int(data.get("progress", 0)),
+                config.get("epochs", 0),
+                config.get("batch_size", 16),
+                json.dumps(config),
+                json.dumps(data.get("results")) if data.get("results") else None,
+                data.get("error"),
+                data.get("created_at", datetime.now().isoformat()),
+            ))
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return True
+        except Error as e:
+            print(f"Error upserting training job: {e}")
+            if connection:
+                connection.close()
+            return False
+
+    @staticmethod
+    def load_all_jobs() -> dict:
+        """Load all persisted jobs as the in-memory dict format used by training.py."""
+        connection = get_db_connection()
+        if not connection:
+            return {}
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT id, dataset_id, model_name, status, progress, epochs, batch_size,
+                       config, results, error_message, created_at
+                FROM training_jobs
+                ORDER BY created_at ASC
+            """)
+            rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
+            jobs = {}
+            for row in rows:
+                config_data = json.loads(row["config"]) if row["config"] else {}
+                jobs[row["id"]] = {
+                    "status": row["status"],
+                    "progress": row["progress"],
+                    "dataset_id": row["dataset_id"],
+                    "config": config_data,
+                    "metrics": json.loads(row["results"]) if row["results"] else {},
+                    "error": row["error_message"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                }
+            return jobs
+        except Error as e:
+            print(f"Error loading training jobs: {e}")
+            if connection:
+                connection.close()
+            return {}

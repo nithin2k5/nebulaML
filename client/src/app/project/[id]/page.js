@@ -5,7 +5,6 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { API_ENDPOINTS } from "@/lib/config";
 import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3 } from "lucide-react";
 import { toast } from 'sonner';
@@ -31,6 +30,8 @@ export default function ProjectPage() {
     const [dataset, setDataset] = useState(null);
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState(null);
+    const [trainingJobs, setTrainingJobs] = useState([]);
+    const [versionRefreshKey, setVersionRefreshKey] = useState(0);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
     const { token, loading: authLoading } = useAuth();
 
@@ -53,6 +54,7 @@ export default function ProjectPage() {
             if (token) {
                 fetchDataset(params.id);
                 fetchStats(params.id);
+                fetchTrainingJobs(params.id);
             } else {
                 setLoading(false);
             }
@@ -84,6 +86,25 @@ export default function ProjectPage() {
         } catch (e) { console.error(e); }
     };
 
+    const fetchTrainingJobs = async (datasetId) => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setTrainingJobs((data.jobs || []).filter(j => j.dataset_id === datasetId));
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    // Poll training jobs every 8s so the pipeline bar stays live
+    useEffect(() => {
+        if (!params?.id || !token) return;
+        const interval = setInterval(() => fetchTrainingJobs(params.id), 8000);
+        return () => clearInterval(interval);
+    }, [params?.id, token]);
+
 
 
     // Safety timeout
@@ -100,7 +121,13 @@ export default function ProjectPage() {
     if (loading) return <div className="p-8">Loading project...</div>;
     if (!dataset) return <div className="p-8">Project not found</div>;
 
-    // Pipeline Stages Data
+    // Derived training job counts for pipeline
+    const completedJobs = trainingJobs.filter(j => j.status === 'completed' || j.status === 'success');
+    const runningJobs   = trainingJobs.filter(j => j.status === 'running');
+    const failedJobs    = trainingJobs.filter(j => j.status === 'failed');
+    const hasModels     = completedJobs.length > 0;
+    const isTraining    = runningJobs.length > 0;
+
     const pipelineStages = [
         {
             id: 'upload',
@@ -118,25 +145,37 @@ export default function ProjectPage() {
             meta: `${Math.round(stats?.completion_percentage || 0)}% Done`
         },
         {
+            id: 'generate',
+            label: 'Generate',
+            icon: Layers,
+            status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
+                    (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
+            meta: 'Version Snapshot'
+        },
+        {
             id: 'train',
             label: 'Train',
             icon: Cpu,
-            status: 'pending',
-            meta: 'No Models'
+            status: isTraining ? 'inprogress' :
+                    hasModels ? 'complete' :
+                    failedJobs.length > 0 && !hasModels ? 'failed' : 'pending',
+            meta: isTraining ? `${runningJobs[0] ? Math.round(runningJobs[0].progress || 0) + '%' : 'Running'}` :
+                  hasModels ? `${completedJobs.length} Model${completedJobs.length > 1 ? 's' : ''}` :
+                  failedJobs.length > 0 ? 'Failed' : 'No Jobs'
         },
         {
             id: 'versions',
             label: 'Registry',
-            icon: Layers,
-            status: 'pending',
-            meta: 'Trained Models'
+            icon: Grid,
+            status: hasModels ? 'complete' : 'pending',
+            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
         },
         {
             id: 'deploy',
             label: 'Deploy',
             icon: Code,
-            status: 'pending',
-            meta: 'Not Deployed'
+            status: hasModels ? 'complete' : 'pending',
+            meta: hasModels ? 'Ready' : 'Not Ready'
         },
         {
             id: 'active-learning',
@@ -186,8 +225,19 @@ export default function ProjectPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {isTraining && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium">
+                            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                            Training {Math.round(runningJobs[0]?.progress || 0)}%
+                        </div>
+                    )}
+                    {failedJobs.length > 0 && !isTraining && !hasModels && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
+                            Last training failed
+                        </div>
+                    )}
                     <Button size="sm" onClick={() => router.push(`/annotate?dataset=${dataset.id}`)}>
-                        Resmue Annotating
+                        Resume Annotating
                     </Button>
                 </div>
             </header>
@@ -205,7 +255,8 @@ export default function ProjectPage() {
                             className={`flex flex-col items-center gap-2 cursor-pointer group bg-background px-4 py-2 rounded-xl border transition-all hover:scale-105 ${activeTab === stage.id ? 'border-primary ring-2 ring-primary/20' : 'border-border'}`}
                         >
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 ${stage.status === 'complete' ? 'bg-green-500/10 border-green-500 text-green-500' :
-                                stage.status === 'inprogress' ? 'bg-amber-500/10 border-amber-500 text-amber-500' :
+                                stage.status === 'inprogress' ? 'bg-amber-500/10 border-amber-500 text-amber-500 animate-pulse' :
+                                stage.status === 'failed' ? 'bg-red-500/10 border-red-500 text-red-500' :
                                     'bg-muted border-muted-foreground/30 text-muted-foreground'
                                 }`}>
                                 <stage.icon className="w-5 h-5" />
@@ -248,11 +299,11 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="generate" className="mt-0 h-full">
-                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); handleTabChange('train'); }} />
+                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); setVersionRefreshKey(k => k + 1); handleTabChange('train'); }} />
                         </TabsContent>
 
                         <TabsContent value="train" className="mt-0 h-full">
-                            <ProjectTrain dataset={dataset} onTrainingStarted={() => handleTabChange('versions')} />
+                            <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} />
                         </TabsContent>
 
                         <TabsContent value="versions" className="mt-0 h-full">

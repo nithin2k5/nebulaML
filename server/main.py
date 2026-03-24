@@ -18,15 +18,15 @@ from app.core.logging import logger
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup
-    logger.info("🚀 Starting YOLO Generator API...")
+    logger.info("🚀 Starting NebulaML API...")
     initialize_database()
     yield
     # Shutdown (if needed, add cleanup code here)
-    logger.info("👋 Shutting down YOLO Generator API...")
+    logger.info("👋 Shutting down NebulaML API...")
 
 
 app = FastAPI(
-    title="YOLO Generator API",
+    title="NebulaML API",
     description="ML Model Training and Inference Platform",
     version="1.0.0",
     lifespan=lifespan
@@ -61,7 +61,7 @@ app.include_router(collaboration.router, prefix="/api/datasets", tags=["Collabor
 @app.get("/")
 async def root():
     return {
-        "message": "YOLO Generator API",
+        "message": "NebulaML API",
         "status": "running",
         "docs": "/docs"
     }

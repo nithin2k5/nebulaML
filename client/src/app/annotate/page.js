@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { toast } from 'sonner';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import AutoLabelModal from "@/components/project/AutoLabelModal";
 import { API_ENDPOINTS } from "@/lib/config";
+import { toast } from "sonner";
 import {
   Save, Trash2, Upload, ChevronLeft, ChevronRight, Home,
   Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu,
@@ -38,7 +40,7 @@ const isPointInPolygon = (px, py, points) => {
   return inside;
 };
 
-const isPointNearPolygon = (x, y, points, tolerance = 8) => {
+const isPointNearPolygon = (x, y, points, tolerance = 20) => {
   if (points.length < 2) return false;
   if (isPointInPolygon(x, y, points)) return true;
   for (let i = 0; i < points.length; i++) {
@@ -83,6 +85,9 @@ function AnnotationToolContent() {
   const [hoveredBoxIndex, setHoveredBoxIndex] = useState(-1);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState(-1);
   const [dragOffset, setDragOffset] = useState(null);
+  const cursorPosRef = useRef(null);  // ref, not state, to avoid re-renders on every mouse move
+  const scaleRef = useRef(1);          // cached canvas-to-display scale, updated by ResizeObserver
+  const animFrameRef = useRef(null);   // rAF handle for throttling mouse-move redraws
 
   // Filter images based on status
   const filteredImages = useMemo(() => {
@@ -159,6 +164,18 @@ function AnnotationToolContent() {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
       switch (e.key) {
+        case 'Escape':
+          if (activeTool === 'polygon' && isDrawing) {
+            setIsDrawing(false);
+            setCurrentPoints([]);
+            cursorPosRef.current = null;
+            showToast('Canceled drawing', 'info');
+          } else if (isDrawing) {
+            setIsDrawing(false);
+            setStartPos(null);
+            setCurrentBox(null);
+          }
+          break;
         case 'ArrowLeft':
           e.preventDefault();
           handleNavigation('prev');
@@ -348,6 +365,20 @@ function AnnotationToolContent() {
     }
   };
 
+  // Update scale cache whenever canvas is resized
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0 && canvas.width > 0) {
+        scaleRef.current = canvas.width / rect.width;
+      }
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
+
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
     if (!canvas || !e) return { x: 0, y: 0 };
@@ -480,12 +511,51 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'polygon') {
+      // Check if clicking near first point to close the polygon
+      if (isDrawing && currentPoints.length > 2) {
+        const firstPoint = currentPoints[0];
+        const dist = Math.sqrt((x - firstPoint.x) ** 2 + (y - firstPoint.y) ** 2);
+        // Using a 30px radius around first point to close
+        if (dist < 30) {
+          const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
+          const minX = Math.min(...currentPoints.map(p => p.x));
+          const maxX = Math.max(...currentPoints.map(p => p.x));
+          const minY = Math.min(...currentPoints.map(p => p.y));
+          const maxY = Math.max(...currentPoints.map(p => p.y));
+
+          const newBox = {
+            type: 'polygon',
+            points: [...currentPoints],
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY,
+            class_id: selectedClass,
+            class_name: className
+          };
+
+          setBoxHistory(prev => [...prev, boxesRef.current]);
+          const newBoxes = [...boxesRef.current, newBox];
+          boxesRef.current = newBoxes;
+          setBoxes(newBoxes);
+          setIsDrawing(false);
+          setCurrentPoints([]);
+          cursorPosRef.current = null;
+          drawCanvas();
+          return;
+        }
+      }
+
       // Add point
       if (!isDrawing) {
         setIsDrawing(true);
         setCurrentPoints([{ x, y }]);
       } else {
-        setCurrentPoints(prev => [...prev, { x, y }]);
+        // Prevent duplicate double-clicks
+        const lastPoint = currentPoints[currentPoints.length - 1];
+        if (Math.abs(lastPoint.x - x) > 5 || Math.abs(lastPoint.y - y) > 5) {
+          setCurrentPoints(prev => [...prev, { x, y }]);
+        }
       }
       drawCanvas();
       return;
@@ -548,21 +618,15 @@ function AnnotationToolContent() {
     if (!isDrawing) return;
 
     if (activeTool === 'polygon') {
-      // Just re-draw to update line to cursor
-      drawCanvas();
-      // To draw the line to cursor, we can temporarily add the point in drawCanvas or just keep it in local let
-      const ctx = canvasRef.current.getContext('2d');
-      drawCanvas();
-      ctx.beginPath();
-      const lastPoint = currentPoints[currentPoints.length - 1];
-      if (lastPoint) {
-        ctx.moveTo(lastPoint.x, lastPoint.y);
-        ctx.lineTo(x, y);
-        ctx.strokeStyle = '#a78bfa';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([6, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+      if (isDrawing) {
+        cursorPosRef.current = { x, y };
+        // Throttle redraws to ~60fps via rAF
+        if (!animFrameRef.current) {
+          animFrameRef.current = requestAnimationFrame(() => {
+            animFrameRef.current = null;
+            drawCanvas();
+          });
+        }
       }
       return;
     }
@@ -651,6 +715,7 @@ function AnnotationToolContent() {
         setBoxes(newBoxes);
         setIsDrawing(false);
         setCurrentPoints([]);
+        cursorPosRef.current = null;
         drawCanvas();
       }
     };
@@ -682,6 +747,10 @@ function AnnotationToolContent() {
     if (!canvas || !img || !img.complete || img.naturalWidth === 0) return;
 
     const ctx = canvas.getContext('2d');
+
+    // Use cached scale — avoids layout reflow on every call
+    const scale = scaleRef.current || 1;
+
     try {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -694,12 +763,13 @@ function AnnotationToolContent() {
 
         // Increase opacity substantially for selected and slightly for hovered
         let currentFill = color.fill;
-        if (isSelected) currentFill = currentFill.replace('0.35', '0.6');
-        else if (isHovered) currentFill = currentFill.replace('0.35', '0.45');
+        if (isSelected) currentFill = currentFill.replace('0.35', '0.85');
+        else if (isHovered) currentFill = currentFill.replace('0.35', '0.65');
+        else currentFill = currentFill.replace('0.35', '0.45');
         
         ctx.fillStyle = currentFill;
         ctx.strokeStyle = isSelected ? '#ffffff' : (isHovered ? `${color.stroke}FF` : color.stroke);
-        ctx.lineWidth = isSelected ? 4 : (isHovered ? 4 : 3);
+        ctx.lineWidth = (isSelected ? 5 : (isHovered ? 4 : 3)) * scale;
 
         if (box.type === 'polygon' || box.type === 'line') {
           if (box.points && box.points.length > 0) {
@@ -711,10 +781,18 @@ function AnnotationToolContent() {
             if (box.type === 'polygon') ctx.closePath();
             ctx.fill();
             ctx.stroke();
+
+            if (isSelected) {
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+              ctx.lineWidth = 1 * scale;
+              ctx.setLineDash([4 * scale, 4 * scale]);
+              ctx.strokeRect(box.x, box.y, box.width, box.height);
+              ctx.setLineDash([]);
+            }
           }
         } else if (box.type === 'joint') {
           ctx.beginPath();
-          ctx.arc(box.x, box.y, 6, 0, Math.PI * 2);
+          ctx.arc(box.x, box.y, 6 * scale, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else {
@@ -726,13 +804,14 @@ function AnnotationToolContent() {
 
         // Label with background
         const labelText = `${box.class_name}`;
-        ctx.font = 'bold 13px Inter, system-ui, sans-serif';
-        const labelWidth = ctx.measureText(labelText).width + 12;
-        const labelHeight = 22;
+        const fontSize = Math.round(13 * scale);
+        ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+        const labelWidth = ctx.measureText(labelText).width + 12 * scale;
+        const labelHeight = 22 * scale;
 
         // Label background
         ctx.fillStyle = color.stroke;
-        const radius = 4;
+        const radius = 4 * scale;
         const lx = box.x;
         const ly = box.y - labelHeight;
         ctx.beginPath();
@@ -748,35 +827,68 @@ function AnnotationToolContent() {
 
         // Label text
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(labelText, box.x + 6, box.y - 6);
+        ctx.fillText(labelText, box.x + 6 * scale, box.y - 6 * scale);
       });
 
       // Draw current polygon being drawn
       if (activeTool === 'polygon' && isDrawing && currentPoints.length > 0) {
-        ctx.strokeStyle = '#a78bfa';
-        ctx.lineWidth = 2;
-        ctx.fillStyle = 'rgba(167, 139, 250, 0.1)';
+        const color = getClassColor(selectedClass) || { stroke: '#8b5cf6', fill: 'rgba(139, 92, 246, 0.3)' };
+        ctx.strokeStyle = color.stroke;
+        ctx.lineWidth = 4 * scale; // Thicker lines, scaled
+        ctx.fillStyle = color.fill;
         ctx.beginPath();
         ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
         for (let i = 1; i < currentPoints.length; i++) {
           ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
         }
+        
+        // draw to cursor
+        const closeSnapDist = 30 * scale;
+        if (cursorPosRef.current) {
+          ctx.lineTo(cursorPosRef.current.x, cursorPosRef.current.y);
+          // Auto-preview closing line if close enough to start
+          const firstPoint = currentPoints[0];
+          if (currentPoints.length > 2) {
+            const dist = Math.sqrt((cursorPosRef.current.x - firstPoint.x) ** 2 + (cursorPosRef.current.y - firstPoint.y) ** 2);
+            if (dist < closeSnapDist) {
+               ctx.lineTo(firstPoint.x, firstPoint.y);
+               ctx.fillStyle = 'rgba(16, 185, 129, 0.4)'; // Turn green when closing
+            }
+          }
+        }
+        
+        ctx.fill();
         ctx.stroke();
 
-        // Draw little circles for vertices
-        currentPoints.forEach(p => {
+        // Draw circles for vertices — scaled so they always appear visible on screen
+        currentPoints.forEach((p, idx) => {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff';
-          ctx.fill();
+          if (idx === 0) {
+            // Starting dot: green with white ring, slightly larger
+            ctx.arc(p.x, p.y, 7 * scale, 0, Math.PI * 2);
+            ctx.fillStyle = '#10b981';
+            ctx.fill();
+            ctx.lineWidth = 2 * scale;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+          } else {
+            // Regular dot: red, smaller
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5 * scale, 0, Math.PI * 2);
+            ctx.fillStyle = '#ef4444';
+            ctx.fill();
+            ctx.lineWidth = 1.5 * scale;
+            ctx.strokeStyle = '#000000';
+            ctx.stroke();
+          }
         });
       }
 
       // Draw current box being drawn
       if (currentBox && isDrawing && activeTool === 'box') {
         ctx.strokeStyle = '#a78bfa';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 2 * scale;
+        ctx.setLineDash([6 * scale, 4 * scale]);
         ctx.strokeRect(currentBox.x, currentBox.y, currentBox.width, currentBox.height);
         ctx.fillStyle = 'rgba(167, 139, 250, 0.1)';
         ctx.fillRect(currentBox.x, currentBox.y, currentBox.width, currentBox.height);
@@ -1173,12 +1285,12 @@ function AnnotationToolContent() {
 
               {/* Empty section here since we replaced smart mode with AI mode in tool bar */}
               <div className="pt-2 border-t border-white/5">
-                <p className="text-[10px] text-gray-500 mt-1 text-center">
+                <p className="text-[10px] text-gray-500 mt-1 text-center h-8 flex items-center justify-center">
                   {activeTool === 'ai' ? "Click an object to auto-segment it" :
-                    activeTool === 'polygon' ? "Click points to define polygon, Double-click to finish" :
+                    activeTool === 'polygon' ? "Click points to define polygon, click start to finish" :
                       activeTool === 'box' ? "Click and drag to draw a bounding box" :
                         activeTool === 'joint' ? "Click to place a keypoint/joint" :
-                          "Click or drag on an annotation to select and move it"}
+                          "Click or drag on an annotation to move it"}
                 </p>
               </div>
 
@@ -1191,7 +1303,7 @@ function AnnotationToolContent() {
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => setActiveTool('select')}
-                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'select' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'select' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Select & Move: Click or drag shapes"
                   >
                     <MousePointer2 className="w-4 h-4 mb-1" />
@@ -1199,7 +1311,7 @@ function AnnotationToolContent() {
                   </button>
                   <button
                     onClick={() => { setActiveTool('box'); setIsDrawing(false); setCurrentBox(null); setStartPos(null); }}
-                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'box' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'box' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Bounding Box: Click and drag to draw a box"
                   >
                     <Square className="w-4 h-4 mb-1" />
@@ -1207,15 +1319,15 @@ function AnnotationToolContent() {
                   </button>
                   <button
                     onClick={() => { setActiveTool('polygon'); setIsDrawing(false); setCurrentPoints([]); }}
-                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'polygon' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
-                    title="Polygon/Line: Click to add points, double-click to finish"
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'polygon' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
+                    title="Polygon/Line: Click to add points, click start to finish"
                   >
                     <Hexagon className="w-4 h-4 mb-1" />
                     <span className="text-[10px] font-medium">Draw Lines</span>
                   </button>
                   <button
                     onClick={() => { setActiveTool('joint'); setIsDrawing(false); }}
-                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all ${activeTool === 'joint' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border border-white/5'}`}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'joint' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Joint Lines (Keypoints): Click to place a joint"
                   >
                     <GitCommit className="w-4 h-4 mb-1" />
@@ -1223,7 +1335,7 @@ function AnnotationToolContent() {
                   </button>
                   <button
                     onClick={() => { setActiveTool('ai'); setIsDrawing(false); setCurrentPoints([]); setCurrentBox(null); }}
-                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-2 ${activeTool === 'ai' ? 'bg-purple-600 text-white shadow-sm' : 'bg-black/40 text-purple-400 hover:text-purple-300 hover:bg-white/5 border border-white/5 border-dashed'}`}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-2 border border-dashed ${activeTool === 'ai' ? 'bg-purple-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-purple-400 hover:text-purple-300 hover:bg-white/5 border-white/5'}`}
                     title="AI Mode: Click an object to auto-segment"
                   >
                     <Wand2 className="w-4 h-4 mb-1" />
@@ -1316,7 +1428,7 @@ function AnnotationToolContent() {
                 <div className="relative w-full h-full flex items-center justify-center" style={{ transform: `scale(${zoom})`, transition: 'transform 0.2s ease' }}>
                   <img
                     ref={imageRef}
-                    src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, currentImage.filename)}
+                    src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, currentImage.filename, token)}
                     alt="Annotate"
                     className="hidden"
                     onLoad={(e) => {
@@ -1349,8 +1461,12 @@ function AnnotationToolContent() {
                     }}
                     onMouseLeave={() => {
                       if (annotationType === 'detection' && isDrawing && startPos) {
-                        setIsDrawing(false); setStartPos(null); setCurrentBox(null);
+                        setIsDrawing(false); setStartPos(null); setCurrentBox(null); cursorPosRef.current = null;
                         setTimeout(() => drawCanvas(), 0);
+                      }
+                      if (annotationType === 'detection' && isDrawing && activeTool === 'polygon') {
+                         cursorPosRef.current = null;
+                         setTimeout(() => drawCanvas(), 0);
                       }
                     }}
                     className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection' ? 'cursor-crosshair' : 'cursor-default pointer-events-none'}`}
@@ -1400,7 +1516,7 @@ function AnnotationToolContent() {
                         }`}
                     >
                       <img
-                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename)}
+                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token)}
                         alt={img.original_name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -1458,7 +1574,26 @@ function AnnotationToolContent() {
             </div>
 
             <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
+              {/* Split Selection */}
+              <div>
+                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Dataset Split</h3>
+                <Select value={selectedSplit || "unassigned"} onValueChange={(val) => {
+                  setSelectedSplit(val === "unassigned" ? null : val);
+                  showToast(`Assigned to ${val === "unassigned" ? "none" : val} split`);
+                }}>
+                  <SelectTrigger className="w-full h-8 text-xs bg-white/5 border-white/10">
+                    <SelectValue placeholder="Assign Split" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned">Unassigned (Auto)</SelectItem>
+                    <SelectItem value="train">Train</SelectItem>
+                    <SelectItem value="valid">Validation</SelectItem>
+                    <SelectItem value="test">Test</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mt-4">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1478,7 +1613,9 @@ function AnnotationToolContent() {
                   onClick={() => {
                     if (copiedBoxes) {
                       setBoxHistory(prev => [...prev, boxes]);
-                      setBoxes(prev => [...prev, ...copiedBoxes]);
+                      const merged = [...boxes, ...copiedBoxes];
+                      boxesRef.current = merged;
+                      setBoxes(merged);
                       showToast(`Pasted ${copiedBoxes.length} boxes`);
                     }
                   }}

@@ -4,19 +4,24 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Database, Image, Settings, BarChart2, Cpu, Layers, Code, Grid, Home, Upload, Zap } from "lucide-react";
+import Link from "next/link";
 import { Toaster } from 'sonner';
 
 export default function ProjectLayout({ children }) {
-    const { user, loading } = useAuth();
+    const { user, loading, hasPermission } = useAuth();
     const router = useRouter();
     const params = useParams();
     const searchParams = useSearchParams();
 
     useEffect(() => {
-        if (!loading && !user) {
-            router.push("/login");
+        if (!loading) {
+            if (!user) {
+                router.push("/login");
+            } else if (!hasPermission("view_dataset")) {
+                router.push("/unauthorized");
+            }
         }
-    }, [user, loading, router]);
+    }, [user, loading, router, hasPermission]);
 
     if (loading) {
         return (
@@ -26,7 +31,7 @@ export default function ProjectLayout({ children }) {
         );
     }
 
-    if (!user) return null;
+    if (!user || !hasPermission("view_dataset")) return null;
 
     return (
         <div className="min-h-screen bg-background flex">
@@ -83,7 +88,7 @@ export default function ProjectLayout({ children }) {
 
 function SidebarItem({ icon: Icon, label, href, active }) {
     return (
-        <a
+        <Link
             href={href}
             className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${active
                 ? "bg-primary/10 text-primary font-medium"
@@ -92,6 +97,6 @@ function SidebarItem({ icon: Icon, label, href, active }) {
         >
             <Icon className="text-xl md:text-lg" />
             <span className="hidden md:inline">{label}</span>
-        </a>
+        </Link>
     )
 }

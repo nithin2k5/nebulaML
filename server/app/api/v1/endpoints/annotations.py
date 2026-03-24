@@ -234,6 +234,19 @@ async def upload_images_to_dataset(
                 errors.append(f"{file.filename}: Failed to write file")
                 continue
             
+            # Pixel-level image validation — confirm the file is actually decodeable
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(file_path) as pil_img:
+                    pil_img.verify()  # raises if corrupt
+            except Exception:
+                try:
+                    file_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                errors.append(f"{file.filename}: Image is corrupt or unreadable (failed pixel validation)")
+                continue
+            
             # Add to database
             DatasetService.add_image(
                 dataset_id=dataset_id,
@@ -290,23 +303,12 @@ async def upload_images_to_dataset(
     return JSONResponse(content=response_data)
 
 @router.post("/save")
-@router.post("/annotations/save")  # Legacy alias to handle potential caching/old frontend
-async def save_annotation(request: dict = Body(...)):
+@router.post("/annotations/save")
+async def save_annotation(request: dict = Body(...), current_user: dict = Depends(get_current_user)):
     """
     Save image annotations
     """
     dataset_id = request.get("dataset_id")
-    
-    # Check authorization first
-    try:
-        from app.api.v1.endpoints.auth import get_current_user, security
-        # We need to manually extract the user here or change this to depend on current user
-        # Note: Depending on current_user via dependency injection is better, but since
-        # this endpoint was written flexibly, let's keep it functionally sound.
-        # As it has @router.post, let's just make the changes to the def directly.
-    except Exception as e:
-        pass
-    
     image_id = request.get("image_id")
     image_name = request.get("image_name")
     width = request.get("width")
@@ -315,6 +317,31 @@ async def save_annotation(request: dict = Body(...)):
     status = request.get("status", "annotated") # Default to annotated if manually saved
     split = request.get("split")
     annotation_type = request.get("annotation_type", "detection")  # 'detection' or 'classification'
+
+    if not dataset_id or not image_id:
+        raise HTTPException(status_code=400, detail="dataset_id and image_id are required")
+
+    # Verify dataset exists and caller owns it (or is a project member)
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if db_dataset.get("user_id") and db_dataset["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to annotate this dataset")
+
+    # Verify image belongs to this dataset
+    image_belongs = any(img["id"] == image_id for img in db_dataset.get("images", []))
+    if not image_belongs:
+        raise HTTPException(status_code=404, detail="Image not found in this dataset")
+
+    # Validate class_ids are within dataset class range
+    num_classes = len(db_dataset.get("classes", []))
+    for box in boxes:
+        cid = box.get("class_id", 0)
+        if num_classes > 0 and (cid < 0 or cid >= num_classes):
+            raise HTTPException(
+                status_code=400,
+                detail=f"class_id {cid} is out of range for this dataset ({num_classes} classes)"
+            )
 
     # Validate split if provided
     if split and split not in ["train", "val", "test"]:
@@ -885,7 +912,7 @@ async def get_auto_label_status(dataset_id: str, job_id: str):
     return auto_label_jobs[job_id]
 
 
-@router.post("/annotations/auto-label")
+@router.post("/auto-label")
 async def auto_label_images(
     background_tasks: BackgroundTasks,
     dataset_id: str = Form(...),
@@ -941,11 +968,15 @@ async def auto_label_images(
 
 
 @router.get("/image/{dataset_id}/{image_filename}")
-async def serve_image(dataset_id: str, image_filename: str):
+async def serve_image(dataset_id: str, image_filename: str, token: Optional[str] = None):
     """
-    Serve an image file directly
+    Serve an image file.
+    Accepts auth via Bearer header OR ?token= query param so <img src> tags work.
     """
-    # Construct the file path
+    from app.core.rbac import decode_access_token
+    if not token or not decode_access_token(token):
+        raise HTTPException(status_code=401, detail="Authentication required to view images")
+
     image_path = Path(f"datasets/{dataset_id}/images/{image_filename}")
     
     if not image_path.exists():

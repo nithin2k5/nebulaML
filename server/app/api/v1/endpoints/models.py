@@ -1,12 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pathlib import Path
 from typing import List, Dict
 
+from app.api.v1.endpoints.auth import get_current_user
+
 router = APIRouter()
 
 @router.get("/list")
-async def list_models():
+async def list_models(current_user: dict = Depends(get_current_user)):
     """
     List all available trained models
     """
@@ -32,10 +34,14 @@ async def list_models():
     return {"models": models}
 
 @router.get("/download/{model_name}")
-async def download_model(model_name: str):
+async def download_model(model_name: str, current_user: dict = Depends(get_current_user)):
     """
     Download a trained model
     """
+    # Prevent path traversal
+    if ".." in model_name or "/" in model_name or "\\" in model_name:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
     model_path = Path(f"runs/detect/{model_name}/weights/best.pt")
     
     if not model_path.exists():
@@ -48,10 +54,13 @@ async def download_model(model_name: str):
     )
 
 @router.delete("/delete/{model_name}")
-async def delete_model(model_name: str):
+async def delete_model(model_name: str, current_user: dict = Depends(get_current_user)):
     """
     Delete a trained model
     """
+    if ".." in model_name or "/" in model_name or "\\" in model_name:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
     model_dir = Path(f"runs/detect/{model_name}")
     
     if not model_dir.exists():
@@ -63,10 +72,13 @@ async def delete_model(model_name: str):
     return {"success": True, "message": f"Model {model_name} deleted"}
 
 @router.get("/info/{model_name}")
-async def get_model_info(model_name: str):
+async def get_model_info(model_name: str, current_user: dict = Depends(get_current_user)):
     """
     Get detailed information about a model
     """
+    if ".." in model_name or "/" in model_name or "\\" in model_name:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
     model_dir = Path(f"runs/detect/{model_name}")
     
     if not model_dir.exists():
@@ -131,10 +143,18 @@ async def get_model_info(model_name: str):
     return info
 
 @router.post("/export/{model_name}")
-async def export_model(model_name: str, format: str = "onnx"):
+async def export_model(model_name: str, format: str = "onnx", current_user: dict = Depends(get_current_user)):
     """
     Export a trained model to a different format (e.g., onnx, engine, openvino, coreml, torchscript)
     """
+    if ".." in model_name or "/" in model_name or "\\" in model_name:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
+    # Whitelist export formats
+    allowed_formats = {"onnx", "torchscript", "openvino", "coreml", "engine", "tflite", "paddle", "ncnn"}
+    if format not in allowed_formats:
+        raise HTTPException(status_code=400, detail=f"Unsupported format '{format}'. Allowed: {sorted(allowed_formats)}")
+
     model_path = Path(f"runs/detect/{model_name}/weights/best.pt")
     
     if not model_path.exists():
@@ -157,4 +177,6 @@ async def export_model(model_name: str, format: str = "onnx"):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
 

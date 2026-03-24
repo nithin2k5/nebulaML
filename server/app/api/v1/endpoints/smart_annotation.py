@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Form
+from fastapi import APIRouter, HTTPException, Form, Depends
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import cv2
@@ -10,11 +10,8 @@ import logging
 import sys
 import os
 
-# Add parent directory to path to find services
-# Add parent directory to path to find services
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from app.services.database import DatasetService
+from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -24,8 +21,10 @@ async def segment_point(
     dataset_id: str = Form(...),
     image_id: str = Form(...),
     x: float = Form(...), 
-    y: float = Form(...)
+    y: float = Form(...),
+    current_user: dict = Depends(get_current_user)
 ):
+
     try:
         # Get image path from DB
         # DatasetService.get_dataset_image returns the image dict {id, filename, path, ...}

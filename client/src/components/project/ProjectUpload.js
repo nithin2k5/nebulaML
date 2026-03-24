@@ -75,6 +75,11 @@ export default function ProjectUpload({ dataset, onUploadComplete }) {
                 body: formData,
             });
 
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(errText || `Server error ${response.status}`);
+            }
+
             const data = await response.json();
 
             if (data.success) {
