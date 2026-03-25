@@ -4,9 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Activity, TrendingUp, CheckCircle2, XCircle, Loader2, BarChart3 } from "lucide-react";
+import { ArrowLeft, Activity, TrendingUp, CheckCircle2, XCircle, Loader2, BarChart3, Square } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import { toast } from "sonner";
 
 export default function TrainingLive({ jobId, dataset, onBack }) {
     const { token } = useAuth();
@@ -14,6 +15,7 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
     const [metrics, setMetrics] = useState([]);
     const [perClass, setPerClass] = useState([]);
     const [confusionMatrix, setConfusionMatrix] = useState(null);
+    const [cancelling, setCancelling] = useState(false);
     const pollRef = useRef(null);
     const canvasRef = useRef(null);
 
@@ -29,11 +31,9 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                     const data = await statusRes.json();
                     setJob(data);
 
-                    // Stop polling if done
-                    if (data.status === "completed" || data.status === "failed") {
+                    if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
                         clearInterval(pollRef.current);
-                        // Fetch per-class metrics & confusion matrix
-                        fetchPostTraining();
+                        if (data.status === "completed") fetchPostTraining();
                     }
                 }
 
@@ -52,6 +52,27 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
         pollRef.current = setInterval(poll, 3000);
         return () => clearInterval(pollRef.current);
     }, [jobId, token]);
+
+    const handleCancelTraining = async () => {
+        if (!window.confirm("Stop training? The run ends after the current epoch finishes.")) return;
+        setCancelling(true);
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                toast.success(data.message || "Cancellation requested");
+            } else {
+                toast.error(data.detail || "Could not cancel");
+            }
+        } catch (e) {
+            toast.error(e.message || "Cancel failed");
+        } finally {
+            setCancelling(false);
+        }
+    };
 
     const fetchPostTraining = async () => {
         try {
@@ -127,12 +148,20 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
 
     }, [metrics]);
 
+    const flatMetrics =
+        job?.metrics && typeof job.metrics === "object"
+            ? job.metrics.metrics && typeof job.metrics.metrics === "object"
+                ? job.metrics.metrics
+                : job.metrics
+            : null;
+
     const progress = job?.progress || 0;
     const currentEpoch = job?.current_epoch || 0;
     const totalEpochs = job?.config?.epochs || 0;
     const isRunning = job?.status === "running" || job?.status === "pending";
     const isCompleted = job?.status === "completed";
     const isFailed = job?.status === "failed";
+    const isCancelled = job?.status === "cancelled";
 
     return (
         <div className="space-y-6">
@@ -147,12 +176,21 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                         {isRunning && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
                         {isCompleted && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
                         {isFailed && <XCircle className="w-5 h-5 text-red-500" />}
+                        {isCancelled && <Square className="w-5 h-5 text-amber-500" />}
                     </h2>
                     <p className="text-sm text-muted-foreground">Job ID: {jobId.slice(0, 8)}...</p>
                 </div>
-                <Badge variant={isRunning ? "default" : isCompleted ? "outline" : "destructive"}>
-                    {job?.status || "loading..."}
-                </Badge>
+                <div className="flex items-center gap-2">
+                    {isRunning && (
+                        <Button variant="outline" size="sm" className="border-amber-500/40 text-amber-600 hover:bg-amber-500/10" disabled={cancelling} onClick={handleCancelTraining}>
+                            {cancelling ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Square className="w-4 h-4 mr-1" />}
+                            Cancel training
+                        </Button>
+                    )}
+                    <Badge variant={isRunning ? "default" : isCompleted ? "outline" : isCancelled ? "secondary" : "destructive"}>
+                        {job?.status || "loading..."}
+                    </Badge>
+                </div>
             </div>
 
             {/* Progress */}
@@ -168,23 +206,23 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                             style={{ width: `${progress}%` }}
                         />
                     </div>
-                    {job?.metrics && (
+                    {flatMetrics && (
                         <div className="grid grid-cols-4 gap-3 mt-4 text-center">
                             <div>
                                 <p className="text-xs text-muted-foreground">mAP50</p>
-                                <p className="font-semibold text-sm">{(job.metrics.map50 * 100 || 0).toFixed(1)}%</p>
+                                <p className="font-semibold text-sm">{((typeof flatMetrics.map50 === "number" ? flatMetrics.map50 : Number(flatMetrics.map50) || 0) * 100).toFixed(1)}%</p>
                             </div>
                             <div>
                                 <p className="text-xs text-muted-foreground">mAP50-95</p>
-                                <p className="font-semibold text-sm">{(job.metrics["map50-95"] * 100 || 0).toFixed(1)}%</p>
+                                <p className="font-semibold text-sm">{((typeof flatMetrics["map50-95"] === "number" ? flatMetrics["map50-95"] : typeof flatMetrics.map50_95 === "number" ? flatMetrics.map50_95 : 0) * 100).toFixed(1)}%</p>
                             </div>
                             <div>
                                 <p className="text-xs text-muted-foreground">Precision</p>
-                                <p className="font-semibold text-sm">{(job.metrics.precision * 100 || 0).toFixed(1)}%</p>
+                                <p className="font-semibold text-sm">{(typeof flatMetrics.precision === "number" ? flatMetrics.precision * 100 : 0).toFixed(1)}%</p>
                             </div>
                             <div>
                                 <p className="text-xs text-muted-foreground">Recall</p>
-                                <p className="font-semibold text-sm">{(job.metrics.recall * 100 || 0).toFixed(1)}%</p>
+                                <p className="font-semibold text-sm">{(typeof flatMetrics.recall === "number" ? flatMetrics.recall * 100 : 0).toFixed(1)}%</p>
                             </div>
                         </div>
                     )}

@@ -123,7 +123,7 @@ export default function ProjectPage() {
 
     // Derived training job counts for pipeline
     const completedJobs = trainingJobs.filter(j => j.status === 'completed' || j.status === 'success');
-    const runningJobs   = trainingJobs.filter(j => j.status === 'running');
+    const runningJobs   = trainingJobs.filter(j => j.status === 'running' || j.status === 'pending');
     const failedJobs    = trainingJobs.filter(j => j.status === 'failed');
     const hasModels     = completedJobs.length > 0;
     const isTraining    = runningJobs.length > 0;

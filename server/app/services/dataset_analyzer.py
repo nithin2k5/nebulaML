@@ -502,27 +502,52 @@ class DatasetAnalyzer:
                         continue
                     
                     parts = line.split()
-                    if len(parts) != 5:
-                        issues.append(f"{label_filename}: line {line_num} has invalid format (expected 5 values)")
-                        continue
-                    
+                    n = len(parts)
+
                     try:
-                        class_id = int(parts[0])
-                        x_center = float(parts[1])
-                        y_center = float(parts[2])
-                        width = float(parts[3])
-                        height = float(parts[4])
-                        
-                        # Validate normalized coordinates (0-1)
-                        if not (0 <= x_center <= 1 and 0 <= y_center <= 1 and 
-                                0 <= width <= 1 and 0 <= height <= 1):
-                            issues.append(f"{label_filename}: line {line_num} has coordinates out of range [0,1]")
-                        
-                        # Validate box doesn't extend beyond boundaries
-                        if (x_center - width/2 < 0 or x_center + width/2 > 1 or
-                            y_center - height/2 < 0 or y_center + height/2 > 1):
-                            issues.append(f"{label_filename}: line {line_num} box extends beyond image boundaries")
-                        
+                        if n == 1:
+                            int(parts[0])
+                            continue
+
+                        if n == 5:
+                            int(parts[0])
+                            a, b, c, d = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+                            if not all(0 <= x <= 1 for x in (a, b, c, d)):
+                                issues.append(
+                                    f"{label_filename}: line {line_num} has coordinates out of range [0,1]"
+                                )
+                                continue
+                            cx, cy, w, h = a, b, c, d
+                            looks_like_bbox = (
+                                w > 0
+                                and h > 0
+                                and (cx - w / 2 >= -1e-6)
+                                and (cx + w / 2 <= 1 + 1e-6)
+                                and (cy - h / 2 >= -1e-6)
+                                and (cy + h / 2 <= 1 + 1e-6)
+                            )
+                            if looks_like_bbox:
+                                if (cx - w / 2 < 0 or cx + w / 2 > 1 or cy - h / 2 < 0 or cy + h / 2 > 1):
+                                    issues.append(
+                                        f"{label_filename}: line {line_num} box extends beyond image boundaries"
+                                    )
+                            continue
+
+                        if n >= 7 and n % 2 == 1:
+                            int(parts[0])
+                            for i in range(1, n):
+                                v = float(parts[i])
+                                if not 0 <= v <= 1:
+                                    issues.append(
+                                        f"{label_filename}: line {line_num} has coordinates out of range [0,1]"
+                                    )
+                                    break
+                            continue
+
+                        issues.append(
+                            f"{label_filename}: line {line_num} has invalid format "
+                            f"(expected 1 class id, 5 values for bbox, or odd count ≥7 for YOLO segmentation)"
+                        )
                     except ValueError:
                         issues.append(f"{label_filename}: line {line_num} has invalid numeric values")
                         

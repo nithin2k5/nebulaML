@@ -19,150 +19,6 @@ import {
   MousePointer2, Square, Hexagon, GitCommit, Wand2
 } from "lucide-react";
 
-// ─── AI Edge-Detection Helpers ───────────────────────────────────────────────
-
-function aiComputeSobel(data, w, h) {
-  const gray = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
-  }
-  const mag = new Float32Array(w * h);
-  const gxK = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-  const gyK = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      let sx = 0, sy = 0;
-      for (let ky = -1; ky <= 1; ky++) {
-        for (let kx = -1; kx <= 1; kx++) {
-          const v = gray[(y + ky) * w + (x + kx)];
-          const ki = (ky + 1) * 3 + (kx + 1);
-          sx += gxK[ki] * v;
-          sy += gyK[ki] * v;
-        }
-      }
-      mag[y * w + x] = Math.sqrt(sx * sx + sy * sy);
-    }
-  }
-  return mag;
-}
-
-function aiAdaptiveThreshold(mag, percentile) {
-  const vals = Array.from(mag).filter(v => v > 0).sort((a, b) => a - b);
-  if (vals.length === 0) return 30;
-  return vals[Math.floor(vals.length * percentile)] || 30;
-}
-
-// Combined color + edge flood fill:
-// stops at a pixel when EITHER the color deviates too much from the seed
-// OR the Sobel edge magnitude is above the threshold.
-// Use squared color distance to skip sqrt in the hot loop.
-function aiCombinedFloodFill(pixelData, edges, clickX, clickY, w, h, colorTol, edgeThresh) {
-  const region = new Uint8Array(w * h);
-  const visited = new Uint8Array(w * h);
-  const i0 = (clickY * w + clickX) * 4;
-  const sr = pixelData[i0], sg = pixelData[i0 + 1], sb = pixelData[i0 + 2];
-  const colorTol2 = colorTol * colorTol;
-  const stack = [[clickX, clickY]];
-  visited[clickY * w + clickX] = 1;
-  while (stack.length > 0) {
-    const item = stack.pop();
-    const x = item[0], y = item[1];
-    const i = (y * w + x) * 4;
-    const dr = pixelData[i] - sr, dg = pixelData[i + 1] - sg, db = pixelData[i + 2] - sb;
-    if ((dr * dr + dg * dg + db * db) > colorTol2) continue; // color boundary
-    if (edges[y * w + x] >= edgeThresh) continue;            // edge boundary
-    region[y * w + x] = 1;
-    for (let n = 0; n < 4; n++) {
-      const nx = x + (n === 0 ? 1 : n === 1 ? -1 : 0);
-      const ny = y + (n === 2 ? 1 : n === 3 ? -1 : 0);
-      if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny * w + nx]) {
-        visited[ny * w + nx] = 1;
-        stack.push([nx, ny]);
-      }
-    }
-  }
-  return region;
-}
-
-// Kept for legacy paths only
-function aiColorFloodFill(data, clickX, clickY, w, h, tolerance) {
-  const region = new Uint8Array(w * h);
-  const visited = new Uint8Array(w * h);
-  const idx0 = (clickY * w + clickX) * 4;
-  const sr = data[idx0], sg = data[idx0 + 1], sb = data[idx0 + 2];
-  const tol2 = tolerance * tolerance;
-  const stack = [[clickX, clickY]];
-  visited[clickY * w + clickX] = 1;
-  while (stack.length > 0) {
-    const item = stack.pop();
-    const x = item[0], y = item[1];
-    const i = (y * w + x) * 4;
-    const dr = data[i] - sr, dg = data[i + 1] - sg, db = data[i + 2] - sb;
-    if ((dr * dr + dg * dg + db * db) > tol2) continue;
-    region[y * w + x] = 1;
-    for (let n = 0; n < 4; n++) {
-      const nx = x + (n === 0 ? 1 : n === 1 ? -1 : 0);
-      const ny = y + (n === 2 ? 1 : n === 3 ? -1 : 0);
-      if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny * w + nx]) {
-        visited[ny * w + nx] = 1;
-        stack.push([nx, ny]);
-      }
-    }
-  }
-  return region;
-}
-
-function aiExtractPolygon(region, w, h, numRays) {
-  let sumX = 0, sumY = 0, count = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (region[y * w + x]) { sumX += x; sumY += y; count++; }
-    }
-  }
-  if (count === 0) return null;
-  const cx = sumX / count, cy = sumY / count;
-  const pts = [];
-  const maxR = Math.max(w, h);
-  for (let i = 0; i < numRays; i++) {
-    const angle = (i / numRays) * Math.PI * 2;
-    const dx = Math.cos(angle), dy = Math.sin(angle);
-    let bx = Math.round(cx), by = Math.round(cy);
-    for (let r = 1; r < maxR; r++) {
-      const nx = Math.round(cx + r * dx);
-      const ny = Math.round(cy + r * dy);
-      if (nx < 0 || nx >= w || ny < 0 || ny >= h) break;
-      if (!region[ny * w + nx]) break;
-      bx = nx; by = ny;
-    }
-    pts.push({ x: bx, y: by });
-  }
-  return pts;
-}
-
-function aiPointToLineDist(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  if (dx === 0 && dy === 0) return Math.sqrt((p.x - a.x) ** 2 + (p.y - a.y) ** 2);
-  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
-  const cx = a.x + t * dx, cy = a.y + t * dy;
-  return Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
-}
-
-function aiDouglasPeucker(points, epsilon) {
-  if (points.length <= 2) return points;
-  const first = points[0], last = points[points.length - 1];
-  let maxDist = 0, maxIdx = 0;
-  for (let i = 1; i < points.length - 1; i++) {
-    const d = aiPointToLineDist(points[i], first, last);
-    if (d > maxDist) { maxDist = d; maxIdx = i; }
-  }
-  if (maxDist > epsilon) {
-    const left = aiDouglasPeucker(points.slice(0, maxIdx + 1), epsilon);
-    const right = aiDouglasPeucker(points.slice(maxIdx), epsilon);
-    return [...left.slice(0, -1), ...right];
-  }
-  return [first, last];
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Helpers for polygon selection
@@ -235,14 +91,29 @@ function AnnotationToolContent() {
   const animFrameRef = useRef(null);   // rAF handle for throttling mouse-move redraws
   const currentPointsRef = useRef([]); // sync with polygon clicks — state updates async; 2nd click used to see stale []
 
-  const [aiSensitivity, setAiSensitivity] = useState(55);
+  const [aiSubTool, setAiSubTool] = useState('box'); // 'box' | 'fg' | 'bg'
   const [aiProcessing, setAiProcessing] = useState(false);
+  const [aiStateVersion, setAiStateVersion] = useState(0);
 
-  // AI hover-prediction refs
-  const aiEdgeCacheRef = useRef(null);    // { edges, sortedEdgeVals, w, h, downScale, imageKey }
-  const aiPreviewPolygonRef = useRef(null); // [{x,y},...] in natural-image coords, or null
-  const aiHoverRafRef = useRef(null);     // pending rAF handle for hover throttle
-  const aiCancelRef = useRef(0);          // increment to cancel in-flight fetch
+  const aiRoughBoxRef = useRef(null);       // {x1,y1,x2,y2} confirmed rough box in image px
+  const aiBoxStartRef = useRef(null);       // drag start point {x,y}
+  const aiCurrentBoxRef = useRef(null);     // live box while mouse is dragged
+  const aiIsDrawingBoxRef = useRef(false);  // true while dragging rough box
+  const aiPointsRef = useRef([]);           // [{x,y,type:'fg'|'bg'}] in image px
+  const aiMaskPolygonRef = useRef(null);    // [{x,y}] contour from server
+  const aiHistoryRef = useRef([]);          // undo stack
+
+  // Render-sync refs so drawCanvas always reads current values without dep-array churn
+  const activeToolRef = useRef(activeTool);
+  const selectedBoxIndexRef = useRef(selectedBoxIndex);
+  const hoveredBoxIndexRef = useRef(hoveredBoxIndex);
+  const selectedClassRef = useRef(selectedClass);
+
+  // Keep render-sync refs up to date every render (no useEffect needed)
+  activeToolRef.current = activeTool;
+  selectedBoxIndexRef.current = selectedBoxIndex;
+  hoveredBoxIndexRef.current = hoveredBoxIndex;
+  selectedClassRef.current = selectedClass;
 
   // Filter images based on status
   const filteredImages = useMemo(() => {
@@ -320,7 +191,17 @@ function AnnotationToolContent() {
 
       switch (e.key) {
         case 'Escape':
-          if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
+          if (activeTool === 'ai') {
+            aiRoughBoxRef.current = null;
+            aiCurrentBoxRef.current = null;
+            aiBoxStartRef.current = null;
+            aiIsDrawingBoxRef.current = false;
+            aiPointsRef.current = [];
+            aiMaskPolygonRef.current = null;
+            aiHistoryRef.current = [];
+            setAiStateVersion(v => v + 1);
+            drawCanvas();
+          } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
             setIsDrawing(false);
             currentPointsRef.current = [];
             setCurrentPoints([]);
@@ -535,60 +416,134 @@ function AnnotationToolContent() {
     return () => ro.disconnect();
   }, []);
 
-  // Pre-compute Sobel edges when AI mode is active so hover is fast (only flood-fill per frame)
   useEffect(() => {
     if (activeTool !== 'ai') {
-      aiPreviewPolygonRef.current = null;
-      aiEdgeCacheRef.current = null;
-      return;
+      aiRoughBoxRef.current = null;
+      aiCurrentBoxRef.current = null;
+      aiBoxStartRef.current = null;
+      aiIsDrawingBoxRef.current = false;
+      aiPointsRef.current = [];
+      aiMaskPolygonRef.current = null;
+      aiHistoryRef.current = [];
     }
-    const img = images[currentImageIndex];
-    if (!img || !datasetId || !token) return;
-
-    const cancelToken = ++aiCancelRef.current;
-    aiEdgeCacheRef.current = null; // clear stale cache while loading
-
-    const imgUrl = API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token);
-    // Safest path: fetch → blob → FileReader base64 data-URL → new Image()
-    // A data: URL is always same-origin so the offscreen canvas is never tainted
-    // and getImageData is always allowed regardless of server CORS headers.
-    fetch(imgUrl, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
-      .then(blob => new Promise((resolve, reject) => {
-        if (aiCancelRef.current !== cancelToken) { resolve(null); return; }
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      }))
-      .then(dataUrl => new Promise((resolve, reject) => {
-        if (!dataUrl || aiCancelRef.current !== cancelToken) { resolve(null); return; }
-        const imgEl = new Image();
-        imgEl.onload = () => resolve(imgEl);
-        imgEl.onerror = reject;
-        imgEl.src = dataUrl;   // data: URL — guaranteed same-origin, never taints canvas
-      }))
-      .then(imgEl => {
-        if (!imgEl || aiCancelRef.current !== cancelToken) return;
-        const maxSide = 450;
-        const ds = Math.min(1, maxSide / Math.max(imgEl.naturalWidth, imgEl.naturalHeight));
-        const w = Math.max(2, Math.floor(imgEl.naturalWidth * ds));
-        const h = Math.max(2, Math.floor(imgEl.naturalHeight * ds));
-        const oc = document.createElement('canvas');
-        oc.width = w; oc.height = h;
-        const octx = oc.getContext('2d', { willReadFrequently: true });
-        octx.drawImage(imgEl, 0, 0, w, h);
-        const { data } = octx.getImageData(0, 0, w, h); // safe — data: URL is same-origin
-        const edges = aiComputeSobel(data, w, h);
-        const sortedEdgeVals = Array.from(edges).filter(v => v > 0).sort((a, b) => a - b);
-        const pixelData = new Uint8ClampedArray(data.buffer.slice(0));
-        aiEdgeCacheRef.current = { edges, sortedEdgeVals, pixelData, w, h, downScale: ds, imageKey: img.id };
-      })
-      .catch(() => {});
-
-    return () => { aiCancelRef.current++; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTool, currentImageIndex]);
+
+  const callSmartSegment = useCallback(async () => {
+    if (!token || !datasetId) return;
+    const img = images[currentImageIndex];
+    if (!img) return;
+    const roughBox = aiRoughBoxRef.current;
+    const points = aiPointsRef.current;
+    if (!roughBox && !points.some(p => p.type === 'fg')) return;
+    const naturalWidth = imageRef.current?.naturalWidth || 1;
+    const naturalHeight = imageRef.current?.naturalHeight || 1;
+    setAiProcessing(true);
+    try {
+      const form = new FormData();
+      form.append('dataset_id', datasetId);
+      form.append('image_id', String(img.id));
+      if (roughBox) {
+        form.append('box', JSON.stringify({
+          x1: roughBox.x1 / naturalWidth,
+          y1: roughBox.y1 / naturalHeight,
+          x2: roughBox.x2 / naturalWidth,
+          y2: roughBox.y2 / naturalHeight,
+        }));
+        form.append('x', String((roughBox.x1 + roughBox.x2) / 2 / naturalWidth));
+        form.append('y', String((roughBox.y1 + roughBox.y2) / 2 / naturalHeight));
+      } else if (points.length > 0) {
+        const first = points.find(p => p.type === 'fg') || points[0];
+        form.append('x', String(first.x / naturalWidth));
+        form.append('y', String(first.y / naturalHeight));
+      }
+      const fgPts = points.filter(p => p.type === 'fg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
+      const bgPts = points.filter(p => p.type === 'bg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
+      if (fgPts.length > 0) form.append('fg_points', JSON.stringify(fgPts));
+      if (bgPts.length > 0) form.append('bg_points', JSON.stringify(bgPts));
+      const res = await fetch(API_ENDPOINTS.SMART.SEGMENT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error('Server error');
+      const data = await res.json();
+      if (data.polygon && data.polygon.length >= 3) {
+        aiMaskPolygonRef.current = data.polygon;
+      } else if (data.box) {
+        const b = data.box;
+        aiMaskPolygonRef.current = [
+          { x: b.x, y: b.y },
+          { x: b.x + b.width, y: b.y },
+          { x: b.x + b.width, y: b.y + b.height },
+          { x: b.x, y: b.y + b.height },
+        ];
+      }
+      setAiStateVersion(v => v + 1);
+      drawCanvas();
+    } catch (err) {
+      toast.error('Smart selection failed — try again');
+    } finally {
+      setAiProcessing(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, datasetId, images, currentImageIndex]);
+
+  const handleAiAccept = useCallback(() => {
+    const polygon = aiMaskPolygonRef.current;
+    if (!polygon || polygon.length < 3) { toast.info('No selection to accept'); return; }
+    const className = (dataset?.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
+    const minX = Math.min(...polygon.map(p => p.x));
+    const maxX = Math.max(...polygon.map(p => p.x));
+    const minY = Math.min(...polygon.map(p => p.y));
+    const maxY = Math.max(...polygon.map(p => p.y));
+    const newBox = { type: 'polygon', points: [...polygon], x: minX, y: minY, width: maxX - minX, height: maxY - minY, class_id: selectedClass, class_name: className };
+    setBoxHistory(prev => [...prev, boxesRef.current]);
+    const newBoxes = [...boxesRef.current, newBox];
+    boxesRef.current = newBoxes;
+    setBoxes(newBoxes);
+    aiRoughBoxRef.current = null;
+    aiCurrentBoxRef.current = null;
+    aiPointsRef.current = [];
+    aiMaskPolygonRef.current = null;
+    aiHistoryRef.current = [];
+    setAiStateVersion(v => v + 1);
+    setAiSubTool('box');
+    toast.success('Smart selection saved!');
+    drawCanvas();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset, selectedClass]);
+
+  const handleAiReset = useCallback(() => {
+    aiRoughBoxRef.current = null;
+    aiCurrentBoxRef.current = null;
+    aiBoxStartRef.current = null;
+    aiIsDrawingBoxRef.current = false;
+    aiPointsRef.current = [];
+    aiMaskPolygonRef.current = null;
+    aiHistoryRef.current = [];
+    setAiStateVersion(v => v + 1);
+    drawCanvas();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleAiUndo = useCallback(() => {
+    const hist = aiHistoryRef.current;
+    if (hist.length === 0) { toast.info('Nothing to undo'); return; }
+    const prev = hist[hist.length - 1];
+    aiHistoryRef.current = hist.slice(0, -1);
+    aiRoughBoxRef.current = prev.roughBox;
+    aiPointsRef.current = prev.points;
+    aiMaskPolygonRef.current = prev.maskPolygon;
+    setAiStateVersion(v => v + 1);
+    if (prev.roughBox || prev.points.some(p => p.type === 'fg')) {
+      callSmartSegment();
+    } else {
+      aiMaskPolygonRef.current = null;
+      drawCanvas();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callSmartSegment]);
 
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -658,32 +613,30 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'ai') {
-      const preview = aiPreviewPolygonRef.current;
-      if (!preview || preview.length < 3) {
-        toast.info("Hover over an object first — the outline will appear, then click to confirm");
+      if (aiSubTool === 'box') {
+        aiHistoryRef.current = [...aiHistoryRef.current, {
+          roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+          points: [...aiPointsRef.current],
+          maskPolygon: aiMaskPolygonRef.current,
+        }];
+        aiBoxStartRef.current = { x, y };
+        aiCurrentBoxRef.current = null;
+        aiIsDrawingBoxRef.current = true;
+        drawCanvas();
         return;
       }
-      const minX = Math.min(...preview.map(p => p.x));
-      const maxX = Math.max(...preview.map(p => p.x));
-      const minY = Math.min(...preview.map(p => p.y));
-      const maxY = Math.max(...preview.map(p => p.y));
-      const className = (dataset.classes && dataset.classes[selectedClass])
-        ? dataset.classes[selectedClass] : `class_${selectedClass}`;
-      const newBox = {
-        type: 'polygon',
-        points: [...preview],
-        x: minX, y: minY,
-        width: maxX - minX, height: maxY - minY,
-        class_id: selectedClass,
-        class_name: className
-      };
-      setBoxHistory(prev => [...prev, boxesRef.current]);
-      const newBoxes = [...boxesRef.current, newBox];
-      boxesRef.current = newBoxes;
-      setBoxes(newBoxes);
-      toast.success(`Annotation saved! (${preview.length} pts)`);
-      drawCanvas();
-      return;
+      if (aiSubTool === 'fg' || aiSubTool === 'bg') {
+        aiHistoryRef.current = [...aiHistoryRef.current, {
+          roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+          points: [...aiPointsRef.current],
+          maskPolygon: aiMaskPolygonRef.current,
+        }];
+        aiPointsRef.current = [...aiPointsRef.current, { x, y, type: aiSubTool }];
+        setAiStateVersion(v => v + 1);
+        drawCanvas();
+        callSmartSegment();
+        return;
+      }
     }
 
     if (activeTool === 'joint') {
@@ -817,56 +770,20 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'ai') {
-      if (aiHoverRafRef.current) cancelAnimationFrame(aiHoverRafRef.current);
-      const hx = x, hy = y;
-      const sensitivitySnap = aiSensitivity;
-      aiHoverRafRef.current = requestAnimationFrame(() => {
-        aiHoverRafRef.current = null;
-        const cache = aiEdgeCacheRef.current;
-        if (!cache) { drawCanvas(); return; }
-
-        const sx = Math.max(1, Math.min(cache.w - 2, Math.floor(hx * cache.downScale)));
-        const sy = Math.max(1, Math.min(cache.h - 2, Math.floor(hy * cache.downScale)));
-
-        // Sensitivity slider maps to both edge threshold (permissive = higher) and
-        // color tolerance (permissive = larger). Both signals combined via AND.
-        const pct = 1 - (sensitivitySnap / 100) * 0.6;        // 0.40–1.00
-        const vals = cache.sortedEdgeVals;
-        const edgeThresh = vals[Math.floor(vals.length * pct)] || 30;
-        const colorTol  = 22 + (sensitivitySnap / 100) * 44;  // 22–66
-
-        let region = aiCombinedFloodFill(cache.pixelData, cache.edges, sx, sy, cache.w, cache.h, colorTol, edgeThresh);
-        let regionCount = 0;
-        for (let i = 0; i < region.length; i++) regionCount += region[i];
-
-        // Relax both thresholds if region is too small
-        if (regionCount < 50) {
-          region = aiCombinedFloodFill(cache.pixelData, cache.edges, sx, sy, cache.w, cache.h, colorTol * 1.5, edgeThresh * 1.6);
-          regionCount = 0;
-          for (let i = 0; i < region.length; i++) regionCount += region[i];
+      if (aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
+        const sx = aiBoxStartRef.current.x;
+        const sy = aiBoxStartRef.current.y;
+        aiCurrentBoxRef.current = {
+          x1: Math.min(sx, x), y1: Math.min(sy, y),
+          x2: Math.max(sx, x), y2: Math.max(sy, y),
+        };
+        if (!animFrameRef.current) {
+          animFrameRef.current = requestAnimationFrame(() => {
+            animFrameRef.current = null;
+            drawCanvas();
+          });
         }
-
-        // Last resort: color-only fill with a generous tolerance
-        if (regionCount < 50) {
-          region = aiColorFloodFill(cache.pixelData, sx, sy, cache.w, cache.h, colorTol * 2);
-          regionCount = 0;
-          for (let i = 0; i < region.length; i++) regionCount += region[i];
-        }
-
-        if (regionCount < 30) {
-          aiPreviewPolygonRef.current = null;
-          drawCanvas();
-          return;
-        }
-
-        const rawPts = aiExtractPolygon(region, cache.w, cache.h, 52);
-        if (!rawPts || rawPts.length < 3) { aiPreviewPolygonRef.current = null; drawCanvas(); return; }
-
-        const scaledPts = rawPts.map(p => ({ x: p.x / cache.downScale, y: p.y / cache.downScale }));
-        const simplified = aiDouglasPeucker(scaledPts, 3 / cache.downScale);
-        aiPreviewPolygonRef.current = simplified.length >= 3 ? simplified : null;
-        drawCanvas();
-      });
+      }
       return;
     }
 
@@ -890,6 +807,30 @@ function AnnotationToolContent() {
       }
       setIsDrawing(false);
       setDragOffset(null);
+      return;
+    }
+
+    if (activeTool === 'ai' && aiSubTool === 'box') {
+      if (aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
+        aiIsDrawingBoxRef.current = false;
+        const { x, y } = getCanvasCoordinates(e);
+        const startPt = aiBoxStartRef.current;
+        const bw = Math.abs(x - startPt.x);
+        const bh = Math.abs(y - startPt.y);
+        if (bw > 10 && bh > 10) {
+          aiRoughBoxRef.current = {
+            x1: Math.min(startPt.x, x), y1: Math.min(startPt.y, y),
+            x2: Math.max(startPt.x, x), y2: Math.max(startPt.y, y),
+          };
+          aiCurrentBoxRef.current = null;
+          setAiStateVersion(v => v + 1);
+          callSmartSegment();
+        } else {
+          aiCurrentBoxRef.current = null;
+          drawCanvas();
+        }
+        aiBoxStartRef.current = null;
+      }
       return;
     }
 
@@ -996,6 +937,12 @@ function AnnotationToolContent() {
     try {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // Read render-sync refs so drawCanvas never has stale state in its closure
+      const activeTool = activeToolRef.current;
+      const selectedBoxIndex = selectedBoxIndexRef.current;
+      const hoveredBoxIndex = hoveredBoxIndexRef.current;
+      const selectedClass = selectedClassRef.current;
 
       // Draw existing boxes with colored fills using the latest ref state
       boxesRef.current.forEach((box, index) => {
@@ -1124,28 +1071,55 @@ function AnnotationToolContent() {
         });
       }
 
-      // Draw AI hover preview polygon
-      const aiPreview = aiPreviewPolygonRef.current;
-      if (aiPreview && aiPreview.length >= 3) {
-        ctx.save();
-        ctx.strokeStyle = '#c084fc';
-        ctx.lineWidth = 1.5 * scale;
-        ctx.fillStyle = 'rgba(192, 132, 252, 0.18)';
-        ctx.setLineDash([4 * scale, 3 * scale]);
-        ctx.beginPath();
-        ctx.moveTo(aiPreview[0].x, aiPreview[0].y);
-        for (let i = 1; i < aiPreview.length; i++) ctx.lineTo(aiPreview[i].x, aiPreview[i].y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.setLineDash([]);
-        const labelFs = Math.round(11 * scale);
-        ctx.font = `600 ${labelFs}px Inter, sans-serif`;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(aiPreview[0].x, aiPreview[0].y - labelFs - 4 * scale, ctx.measureText('Click to confirm').width + 10 * scale, labelFs + 6 * scale);
-        ctx.fillStyle = '#e9d5ff';
-        ctx.fillText('Click to confirm', aiPreview[0].x + 5 * scale, aiPreview[0].y - 5 * scale);
-        ctx.restore();
+      if (activeTool === 'ai') {
+        const roughBox = aiCurrentBoxRef.current || aiRoughBoxRef.current;
+        const maskPolygon = aiMaskPolygonRef.current;
+        const aiPts = aiPointsRef.current;
+
+        if (roughBox) {
+          ctx.save();
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 1.5 * scale;
+          ctx.setLineDash([5 * scale, 4 * scale]);
+          ctx.strokeRect(roughBox.x1, roughBox.y1, roughBox.x2 - roughBox.x1, roughBox.y2 - roughBox.y1);
+          ctx.fillStyle = 'rgba(249, 115, 22, 0.06)';
+          ctx.fillRect(roughBox.x1, roughBox.y1, roughBox.x2 - roughBox.x1, roughBox.y2 - roughBox.y1);
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+
+        if (maskPolygon && maskPolygon.length >= 3) {
+          ctx.save();
+          ctx.strokeStyle = '#c084fc';
+          ctx.lineWidth = 2 * scale;
+          ctx.fillStyle = 'rgba(192, 132, 252, 0.22)';
+          ctx.beginPath();
+          ctx.moveTo(maskPolygon[0].x, maskPolygon[0].y);
+          for (let i = 1; i < maskPolygon.length; i++) ctx.lineTo(maskPolygon[i].x, maskPolygon[i].y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        aiPts.forEach(pt => {
+          ctx.save();
+          const isFg = pt.type === 'fg';
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 7 * scale, 0, Math.PI * 2);
+          ctx.fillStyle = isFg ? 'rgba(16, 185, 129, 0.9)' : 'rgba(239, 68, 68, 0.9)';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5 * scale;
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          const dotFs = Math.round(11 * scale);
+          ctx.font = `bold ${dotFs}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(isFg ? '+' : '−', pt.x, pt.y);
+          ctx.restore();
+        });
       }
 
       // Draw current box being drawn
@@ -1549,25 +1523,78 @@ function AnnotationToolContent() {
 
               <div className="pt-2 border-t border-white/5 space-y-2">
                 {activeTool === 'ai' ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-[10px] text-purple-400 font-medium uppercase tracking-wider">Edge Sensitivity</span>
-                      <span className="text-[10px] font-mono text-purple-300">{aiSensitivity}</span>
+                  <div className="space-y-3" key={aiStateVersion}>
+                    <p className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider px-1">Smart Selection</p>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'box', label: 'Draw Box', icon: '⬚', desc: 'Rough region' },
+                        { id: 'fg', label: 'Foreground', icon: '+', desc: 'Mark object' },
+                        { id: 'bg', label: 'Background', icon: '−', desc: 'Mark outside' },
+                      ].map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => setAiSubTool(t.id)}
+                          className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${aiSubTool === t.id
+                            ? t.id === 'fg' ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300'
+                              : t.id === 'bg' ? 'bg-red-600/30 border-red-500/60 text-red-300'
+                                : 'bg-orange-600/30 border-orange-500/60 text-orange-300'
+                            : 'bg-black/30 border-white/5 text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+                        >
+                          <span className="text-sm font-bold leading-none mb-0.5">{t.icon}</span>
+                          <span className="text-[9px] font-medium">{t.label}</span>
+                        </button>
+                      ))}
                     </div>
-                    <input
-                      type="range" min="5" max="95" value={aiSensitivity}
-                      onChange={e => setAiSensitivity(Number(e.target.value))}
-                      className="w-full h-1 rounded-full appearance-none bg-white/10 accent-purple-500 cursor-pointer"
-                    />
-                    <div className="flex justify-between px-1">
-                      <span className="text-[9px] text-gray-600">Strict</span>
-                      <span className="text-[9px] text-gray-600">Permissive</span>
+
+                    <div className="px-1 py-1.5 bg-black/30 rounded-lg border border-white/5 text-center">
+                      {aiProcessing ? (
+                        <span className="text-[10px] text-purple-400 animate-pulse">Analyzing...</span>
+                      ) : aiMaskPolygonRef.current ? (
+                        <span className="text-[10px] text-purple-300">Selection ready · refine or accept</span>
+                      ) : aiRoughBoxRef.current ? (
+                        <span className="text-[10px] text-orange-300">Add fg/bg points to refine</span>
+                      ) : (
+                        <span className="text-[10px] text-gray-500">
+                          {aiSubTool === 'box' ? 'Drag to draw a rough region' : aiSubTool === 'fg' ? 'Click the object to select' : 'Click areas to exclude'}
+                        </span>
+                      )}
                     </div>
-                    {aiEdgeCacheRef.current ? (
-                      <p className="text-[10px] text-gray-400 text-center">Hover to preview · Click to save</p>
-                    ) : (
-                      <p className="text-[10px] text-purple-400 text-center animate-pulse">Analyzing image edges...</p>
+
+                    {(aiPointsRef.current.length > 0 || aiRoughBoxRef.current) && (
+                      <div className="flex gap-1 text-[9px] text-gray-500 px-1">
+                        {aiRoughBoxRef.current && <span className="px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/20 rounded text-orange-400">box</span>}
+                        {aiPointsRef.current.filter(p => p.type === 'fg').length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400">+{aiPointsRef.current.filter(p => p.type === 'fg').length} fg</span>
+                        )}
+                        {aiPointsRef.current.filter(p => p.type === 'bg').length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-red-400">−{aiPointsRef.current.filter(p => p.type === 'bg').length} bg</span>
+                        )}
+                      </div>
                     )}
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        onClick={handleAiAccept}
+                        disabled={!aiMaskPolygonRef.current || aiProcessing}
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-purple-500/40 bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 disabled:opacity-30 disabled:cursor-not-allowed text-[9px] font-medium transition-all"
+                      >
+                        <span className="text-base leading-none mb-0.5">✓</span>Accept
+                      </button>
+                      <button
+                        onClick={handleAiUndo}
+                        disabled={aiHistoryRef.current.length === 0 || aiProcessing}
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-white/10 bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-[9px] font-medium transition-all"
+                      >
+                        <span className="text-base leading-none mb-0.5">↩</span>Undo
+                      </button>
+                      <button
+                        onClick={handleAiReset}
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-white/10 bg-white/5 text-gray-400 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 text-[9px] font-medium transition-all"
+                      >
+                        <span className="text-base leading-none mb-0.5">✕</span>Reset
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-[10px] text-gray-500 mt-1 text-center flex items-center justify-center h-8">
@@ -1753,13 +1780,18 @@ function AnnotationToolContent() {
                         cursorPosRef.current = null;
                         setTimeout(() => drawCanvas(), 0);
                       }
-                      if (annotationType === 'detection' && activeTool === 'ai') {
-                        if (aiHoverRafRef.current) { cancelAnimationFrame(aiHoverRafRef.current); aiHoverRafRef.current = null; }
-                        aiPreviewPolygonRef.current = null;
+                      if (annotationType === 'detection' && activeTool === 'ai' && aiIsDrawingBoxRef.current) {
+                        aiIsDrawingBoxRef.current = false;
+                        aiCurrentBoxRef.current = null;
+                        aiBoxStartRef.current = null;
                         setTimeout(() => drawCanvas(), 0);
                       }
                     }}
-                    className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection' ? 'cursor-crosshair' : 'cursor-default pointer-events-none'}`}
+                    className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection'
+                        ? activeTool === 'ai'
+                          ? aiSubTool === 'fg' ? 'cursor-cell' : aiSubTool === 'bg' ? 'cursor-cell' : 'cursor-crosshair'
+                          : 'cursor-crosshair'
+                        : 'cursor-default pointer-events-none'}`}
                     style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }}
                   />
                 </div>

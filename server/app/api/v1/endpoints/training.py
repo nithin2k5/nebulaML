@@ -50,6 +50,13 @@ def _persist_job(job_id: str):
     except Exception as e:
         logger.warning(f"Could not persist job {job_id}: {e}")
 
+
+def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
+    uid = job.get("user_id")
+    if uid is None:
+        return True
+    return uid == current_user.get("id")
+
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
     batch_size: int = Field(default=16, ge=1, le=128, description="Batch size (1-128)")
@@ -223,7 +230,8 @@ async def start_training(
             "progress": 0,
             "dataset_id": None,
             "created_at": datetime.now().isoformat(),
-            "user_id": current_user["id"]
+            "user_id": current_user["id"],
+            "cancel_requested": False,
         }
         _persist_job(job_id)
 
@@ -289,7 +297,9 @@ async def start_micro_training(
             "metrics": {},
             "progress": 0,
             "dataset_id": dataset_id,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
+            "user_id": current_user["id"],
+            "cancel_requested": False,
         }
         _persist_job(job_id)
 
@@ -310,7 +320,17 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         training_jobs[job_id]["status"] = "running"
         training_jobs[job_id]["progress"] = 0
         training_jobs[job_id]["current_epoch"] = 0
+        training_jobs[job_id]["cancel_requested"] = training_jobs[job_id].get("cancel_requested", False)
         _persist_job(job_id)
+
+        if training_jobs[job_id].get("cancel_requested"):
+            training_jobs[job_id].update({
+                "status": "cancelled",
+                "cancelled_at": datetime.now().isoformat(),
+            })
+            _persist_job(job_id)
+            logger.info(f"Training job {job_id} cancelled before start")
+            return
         
         logger.info(f"Starting training job {job_id} with {config.epochs} epochs")
         
@@ -365,26 +385,43 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
                     training_jobs[job_id]["current_epoch"] = epoch
                     if metrics:
                         training_jobs[job_id]["metrics"] = metrics
+                    if training_jobs[job_id].get("cancel_requested"):
+                        trainer_obj.stop = True
                     _persist_job(job_id)
             except Exception as e:
                 logger.error(f"Error in training callback: {e}")
                 
         train_params["on_train_epoch_end"] = epoch_end_callback
         
-        # Run training
         logger.info(f"Training parameters: {train_params}")
         results = trainer.train(**train_params)
-        
-        # Update job status
+
+        if training_jobs[job_id].get("cancel_requested"):
+            upd = {
+                "status": "cancelled",
+                "progress": training_jobs[job_id].get("progress", 0),
+                "current_epoch": training_jobs[job_id].get("current_epoch", 0),
+                "cancelled_at": datetime.now().isoformat(),
+            }
+            if isinstance(results, dict):
+                if results.get("model_path"):
+                    upd["model_path"] = results.get("model_path", "")
+                if results.get("metrics"):
+                    upd["metrics"] = results.get("metrics", {})
+            training_jobs[job_id].update(upd)
+            _persist_job(job_id)
+            logger.info(f"Training job {job_id} stopped by user")
+            return
+
         training_jobs[job_id].update({
             "status": "completed",
             "progress": 100,
             "current_epoch": config.epochs,
             "results": results,
-            "model_path": results.get("model_path", ""),
-            "metrics": results.get("metrics", {}),
-            "per_class_metrics": results.get("per_class_metrics", []),
-            "confusion_matrix_path": results.get("confusion_matrix_path"),
+            "model_path": results.get("model_path", "") if isinstance(results, dict) else "",
+            "metrics": results.get("metrics", {}) if isinstance(results, dict) else {},
+            "per_class_metrics": results.get("per_class_metrics", []) if isinstance(results, dict) else [],
+            "confusion_matrix_path": results.get("confusion_matrix_path") if isinstance(results, dict) else None,
             "completed_at": datetime.now().isoformat(),
         })
         _persist_job(job_id)
@@ -392,12 +429,19 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         
     except Exception as e:
         logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
-        training_jobs[job_id].update({
-            "status": "failed",
-            "error": str(e),
-            "progress": training_jobs[job_id].get("progress", 0),
-            "failed_at": datetime.now().isoformat(),
-        })
+        if training_jobs.get(job_id, {}).get("cancel_requested"):
+            training_jobs[job_id].update({
+                "status": "cancelled",
+                "progress": training_jobs[job_id].get("progress", 0),
+                "cancelled_at": datetime.now().isoformat(),
+            })
+        else:
+            training_jobs[job_id].update({
+                "status": "failed",
+                "error": str(e),
+                "progress": training_jobs[job_id].get("progress", 0),
+                "failed_at": datetime.now().isoformat(),
+            })
         _persist_job(job_id)
 
 @router.get("/status/{job_id}")
@@ -410,6 +454,30 @@ async def get_training_status(job_id: str, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=404, detail="Job not found")
     
     return training_jobs[job_id]
+
+
+@router.get("/job/{job_id}")
+async def get_training_job_by_id(job_id: str, current_user: dict = Depends(get_current_user)):
+    _ensure_jobs_loaded()
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return training_jobs[job_id]
+
+
+@router.post("/cancel/{job_id}")
+async def cancel_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
+    _ensure_jobs_loaded()
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = training_jobs[job_id]
+    if not _job_owner_ok(job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to cancel this job")
+    status = job.get("status")
+    if status not in ("running", "pending"):
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job with status '{status}'")
+    job["cancel_requested"] = True
+    _persist_job(job_id)
+    return {"success": True, "message": "Cancellation requested; training stops after the current epoch completes"}
 
 @router.get("/jobs")
 async def list_training_jobs(current_user: dict = Depends(get_current_user)):
@@ -427,13 +495,17 @@ async def list_training_jobs(current_user: dict = Depends(get_current_user)):
 @router.delete("/job/{job_id}")
 async def delete_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Delete a training job
+    Remove a finished training job from the list. Use POST /cancel while running.
     """
-    if job_id in training_jobs:
-        del training_jobs[job_id]
-        return {"success": True, "message": "Job deleted"}
-    
-    raise HTTPException(status_code=404, detail="Job not found")
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = training_jobs[job_id]
+    if not _job_owner_ok(job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if job.get("status") in ("running", "pending"):
+        raise HTTPException(status_code=400, detail="Cancel the job first; training is still in progress")
+    del training_jobs[job_id]
+    return {"success": True, "message": "Job deleted"}
 
 @router.get("/job/{job_id}/metrics")
 async def get_training_metrics(job_id: str, current_user: dict = Depends(get_current_user)):
@@ -724,7 +796,9 @@ async def start_training_from_dataset(
             "progress": 0,
             "version_id": request.version_id,
             "dataset_id": request.dataset_id,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
+            "user_id": current_user["id"],
+            "cancel_requested": False,
         }
         _persist_job(job_id)
         
@@ -785,7 +859,8 @@ async def start_training_from_dataset(
 @router.post("/export-and-train")
 async def export_and_train(
     background_tasks: BackgroundTasks,
-    request: ExportAndTrainRequest
+    request: ExportAndTrainRequest,
+    current_user: dict = Depends(get_current_user)
 ):
     """
     Export dataset and start training in one operation (strict training mode)
@@ -842,6 +917,8 @@ async def export_and_train(
             "dataset_id": request.dataset_id,
             "strict_mode": True,
             "created_at": datetime.now().isoformat(),
+            "user_id": current_user["id"],
+            "cancel_requested": False,
         }
         _persist_job(job_id)
         
