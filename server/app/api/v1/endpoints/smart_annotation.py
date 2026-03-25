@@ -164,7 +164,12 @@ async def segment_object(
                     {"x": fallback_box["x"] + fallback_box["width"], "y": fallback_box["y"] + fallback_box["height"]},
                     {"x": fallback_box["x"], "y": fallback_box["y"] + fallback_box["height"]},
                 ],
-                "box": fallback_box, "image_width": w, "image_height": h,
+                "box": fallback_box,
+                "image_width": w,
+                "image_height": h,
+                "algo_version": "smart_seg_v3_strict",
+                "area": fallback_box["width"] * fallback_box["height"],
+                "confidence": 0.2,
             }
 
         largest = max(contours, key=cv2.contourArea)
@@ -174,6 +179,7 @@ async def segment_object(
             bx, by, bw_c, bh_c = max(0, px - box_size // 2), max(0, py - box_size // 2), box_size, box_size
 
         polygon = _contour_to_polygon(largest)
+        area_px = int(cv2.contourArea(largest))
 
         return {
             "success": True,
@@ -181,6 +187,9 @@ async def segment_object(
             "box": {"x": int(bx), "y": int(by), "width": int(bw_c), "height": int(bh_c)},
             "image_width": w,
             "image_height": h,
+            "algo_version": "smart_seg_v3_strict",
+            "area": area_px,
+            "confidence": min(1.0, area_px / (w * h * 0.05)),
         }
 
     except Exception as e:
@@ -197,4 +206,7 @@ async def segment_object(
                 {"x": fallback_x, "y": fallback_y + 50},
             ],
             "box": {"x": fallback_x, "y": fallback_y, "width": 50, "height": 50},
+            "algo_version": "smart_seg_v3_strict",
+            "area": 2500,
+            "confidence": 0.1,
         }

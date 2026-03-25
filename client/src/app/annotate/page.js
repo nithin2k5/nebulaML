@@ -101,7 +101,9 @@ function AnnotationToolContent() {
   const aiIsDrawingBoxRef = useRef(false);  // true while dragging rough box
   const aiPointsRef = useRef([]);           // [{x,y,type:'fg'|'bg'}] in image px
   const aiMaskPolygonRef = useRef(null);    // [{x,y}] contour from server
-  const aiHistoryRef = useRef([]);          // undo stack
+  const aiHistoryRef = useRef([]);          // undo stack: [{roughBox, points, maskPolygon}]
+  const aiRequestIdRef = useRef(0);         // incremented per request to ignore stale responses
+  const aiMetadataRef = useRef(null);       // {algo_version, area, etc} from last server response
 
   // Render-sync refs so drawCanvas always reads current values without dep-array churn
   const activeToolRef = useRef(activeTool);
@@ -199,6 +201,8 @@ function AnnotationToolContent() {
             aiPointsRef.current = [];
             aiMaskPolygonRef.current = null;
             aiHistoryRef.current = [];
+            aiMetadataRef.current = null;
+            aiRequestIdRef.current++;
             setAiStateVersion(v => v + 1);
             drawCanvas();
           } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
@@ -425,51 +429,82 @@ function AnnotationToolContent() {
       aiPointsRef.current = [];
       aiMaskPolygonRef.current = null;
       aiHistoryRef.current = [];
+      aiRequestIdRef.current = 0;
+      aiMetadataRef.current = null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTool, currentImageIndex]);
 
-  const callSmartSegment = useCallback(async () => {
+  const callSmartSegment = useCallback(async (explicitSnapshot = null) => {
     if (!token || !datasetId) return;
     const img = images[currentImageIndex];
     if (!img) return;
-    const roughBox = aiRoughBoxRef.current;
-    const points = aiPointsRef.current;
-    if (!roughBox && !points.some(p => p.type === 'fg')) return;
+
+    const snapshot = explicitSnapshot || {
+      roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+      points: [...aiPointsRef.current],
+    };
+
+    if (!snapshot.roughBox && !snapshot.points.some(p => p.type === 'fg')) {
+      toast.info('Draw a box or add foreground points first');
+      return;
+    }
+
     const naturalWidth = imageRef.current?.naturalWidth || 1;
     const naturalHeight = imageRef.current?.naturalHeight || 1;
+
+    const requestId = ++aiRequestIdRef.current;
     setAiProcessing(true);
+
     try {
       const form = new FormData();
       form.append('dataset_id', datasetId);
       form.append('image_id', String(img.id));
-      if (roughBox) {
+
+      if (snapshot.roughBox) {
         form.append('box', JSON.stringify({
-          x1: roughBox.x1 / naturalWidth,
-          y1: roughBox.y1 / naturalHeight,
-          x2: roughBox.x2 / naturalWidth,
-          y2: roughBox.y2 / naturalHeight,
+          x1: snapshot.roughBox.x1 / naturalWidth,
+          y1: snapshot.roughBox.y1 / naturalHeight,
+          x2: snapshot.roughBox.x2 / naturalWidth,
+          y2: snapshot.roughBox.y2 / naturalHeight,
         }));
-        form.append('x', String((roughBox.x1 + roughBox.x2) / 2 / naturalWidth));
-        form.append('y', String((roughBox.y1 + roughBox.y2) / 2 / naturalHeight));
-      } else if (points.length > 0) {
-        const first = points.find(p => p.type === 'fg') || points[0];
+        form.append('x', String((snapshot.roughBox.x1 + snapshot.roughBox.x2) / 2 / naturalWidth));
+        form.append('y', String((snapshot.roughBox.y1 + snapshot.roughBox.y2) / 2 / naturalHeight));
+      } else if (snapshot.points.length > 0) {
+        const first = snapshot.points.find(p => p.type === 'fg') || snapshot.points[0];
         form.append('x', String(first.x / naturalWidth));
         form.append('y', String(first.y / naturalHeight));
       }
-      const fgPts = points.filter(p => p.type === 'fg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
-      const bgPts = points.filter(p => p.type === 'bg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
+
+      const fgPts = snapshot.points.filter(p => p.type === 'fg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
+      const bgPts = snapshot.points.filter(p => p.type === 'bg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
       if (fgPts.length > 0) form.append('fg_points', JSON.stringify(fgPts));
       if (bgPts.length > 0) form.append('bg_points', JSON.stringify(bgPts));
+
       const res = await fetch(API_ENDPOINTS.SMART.SEGMENT, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: form,
       });
+
+      if (requestId !== aiRequestIdRef.current) {
+        return;
+      }
+
       if (!res.ok) throw new Error('Server error');
       const data = await res.json();
+
+      if (requestId !== aiRequestIdRef.current) {
+        return;
+      }
+
       if (data.polygon && data.polygon.length >= 3) {
         aiMaskPolygonRef.current = data.polygon;
+        aiMetadataRef.current = {
+          algo_version: data.algo_version || 'smart_seg_v3_strict',
+          area: data.area || 0,
+          confidence: data.confidence || 1.0,
+        };
       } else if (data.box) {
         const b = data.box;
         aiMaskPolygonRef.current = [
@@ -478,37 +513,84 @@ function AnnotationToolContent() {
           { x: b.x + b.width, y: b.y + b.height },
           { x: b.x, y: b.y + b.height },
         ];
+        aiMetadataRef.current = {
+          algo_version: data.algo_version || 'smart_seg_v3_strict',
+          area: b.width * b.height,
+          confidence: 0.5,
+        };
       }
+
       setAiStateVersion(v => v + 1);
       drawCanvas();
     } catch (err) {
-      toast.error('Smart selection failed — try again');
+      if (requestId === aiRequestIdRef.current) {
+        toast.error('Smart selection failed — try again');
+      }
     } finally {
-      setAiProcessing(false);
+      if (requestId === aiRequestIdRef.current) {
+        setAiProcessing(false);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, datasetId, images, currentImageIndex]);
 
   const handleAiAccept = useCallback(() => {
     const polygon = aiMaskPolygonRef.current;
-    if (!polygon || polygon.length < 3) { toast.info('No selection to accept'); return; }
+    const metadata = aiMetadataRef.current;
+    const fgCount = aiPointsRef.current.filter(p => p.type === 'fg').length;
+    const hasBox = !!aiRoughBoxRef.current;
+
+    if (!polygon || polygon.length < 3) {
+      toast.info('No selection to accept');
+      return;
+    }
+
+    if (!hasBox && fgCount === 0) {
+      toast.warning('Add at least one foreground point or draw a box first');
+      return;
+    }
+
+    if (metadata && metadata.area < 100) {
+      toast.warning('Selection too small — refine with foreground points');
+      return;
+    }
+
     const className = (dataset?.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
     const minX = Math.min(...polygon.map(p => p.x));
     const maxX = Math.max(...polygon.map(p => p.x));
     const minY = Math.min(...polygon.map(p => p.y));
     const maxY = Math.max(...polygon.map(p => p.y));
-    const newBox = { type: 'polygon', points: [...polygon], x: minX, y: minY, width: maxX - minX, height: maxY - minY, class_id: selectedClass, class_name: className };
+
+    const newBox = {
+      type: 'polygon',
+      points: [...polygon],
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      class_id: selectedClass,
+      class_name: className,
+      ai_metadata: metadata ? {
+        algo_version: metadata.algo_version,
+        area: metadata.area,
+        confidence: metadata.confidence,
+      } : null,
+    };
+
     setBoxHistory(prev => [...prev, boxesRef.current]);
     const newBoxes = [...boxesRef.current, newBox];
     boxesRef.current = newBoxes;
     setBoxes(newBoxes);
+
     aiRoughBoxRef.current = null;
     aiCurrentBoxRef.current = null;
     aiPointsRef.current = [];
     aiMaskPolygonRef.current = null;
     aiHistoryRef.current = [];
+    aiMetadataRef.current = null;
     setAiStateVersion(v => v + 1);
     setAiSubTool('box');
+
     toast.success('Smart selection saved!');
     drawCanvas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -522,6 +604,8 @@ function AnnotationToolContent() {
     aiPointsRef.current = [];
     aiMaskPolygonRef.current = null;
     aiHistoryRef.current = [];
+    aiMetadataRef.current = null;
+    aiRequestIdRef.current++;
     setAiStateVersion(v => v + 1);
     drawCanvas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -529,17 +613,22 @@ function AnnotationToolContent() {
 
   const handleAiUndo = useCallback(() => {
     const hist = aiHistoryRef.current;
-    if (hist.length === 0) { toast.info('Nothing to undo'); return; }
+    if (hist.length === 0) {
+      toast.info('Nothing to undo');
+      return;
+    }
+
     const prev = hist[hist.length - 1];
     aiHistoryRef.current = hist.slice(0, -1);
     aiRoughBoxRef.current = prev.roughBox;
     aiPointsRef.current = prev.points;
-    aiMaskPolygonRef.current = prev.maskPolygon;
+    aiMaskPolygonRef.current = null;
+    aiMetadataRef.current = null;
     setAiStateVersion(v => v + 1);
+
     if (prev.roughBox || prev.points.some(p => p.type === 'fg')) {
-      callSmartSegment();
+      callSmartSegment({ roughBox: prev.roughBox, points: prev.points });
     } else {
-      aiMaskPolygonRef.current = null;
       drawCanvas();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
