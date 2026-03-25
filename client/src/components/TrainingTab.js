@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, formatMetricValue } from "@/lib/utils";
 import { toast } from 'sonner';
 import {
   Upload, Play, Square, RefreshCw, Terminal,
@@ -95,12 +95,6 @@ export default function TrainingTab() {
   const [selectedJobs, setSelectedJobs] = useState([]);
   const logEndRef = useRef(null);
 
-  useEffect(() => {
-    if (token) fetchJobs();
-    const interval = setInterval(() => { if (token) fetchJobs(); }, 5000);
-    return () => clearInterval(interval);
-  }, [token, fetchJobs]);
-
   const fetchJobs = useCallback(async () => {
     if (!token) return;
     try {
@@ -109,14 +103,18 @@ export default function TrainingTab() {
       });
       if (response.ok) {
         const data = await response.json();
-        // Sort jobs by created time descending if possible, or just reverse
-        // Assuming the list is chronological, we want newest first
         setJobs((data.jobs || []).reverse());
       }
     } catch (error) {
       console.error("Error fetching jobs:", error);
     }
   }, [token]);
+
+  useEffect(() => {
+    if (token) fetchJobs();
+    const interval = setInterval(() => { if (token) fetchJobs(); }, 5000);
+    return () => clearInterval(interval);
+  }, [token, fetchJobs]);
 
   const handleStartTraining = async () => {
     if (!config.dataset_yaml) {
@@ -156,17 +154,18 @@ export default function TrainingTab() {
   };
 
   const handleTerminateJob = async (jobId) => {
-    if (!window.confirm("Terminate this training job? The current progress will be lost.")) return;
+    if (!window.confirm("Stop training? The run ends after the current epoch; partial weights may be saved.")) return;
     try {
-      const response = await fetch(API_ENDPOINTS.TRAINING.TERMINATE(jobId), { 
-        method: "DELETE",
+      const response = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
+        method: "POST",
         headers: { "Authorization": `Bearer ${token}` }
       });
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
-        toast.success("Training job terminated");
+        toast.success(data.message || "Cancellation requested");
         fetchJobs();
       } else {
-        toast.error("Failed to terminate job");
+        toast.error(data.detail || "Failed to cancel job");
       }
     } catch (error) {
       toast.error("Error: " + error.message);
@@ -179,6 +178,8 @@ export default function TrainingTab() {
         return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Clock className="mr-1" /> Running</Badge>;
       case "completed":
         return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle className="mr-1" /> Done</Badge>;
+      case "cancelled":
+        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><Square className="mr-1" /> Stopped</Badge>;
       case "failed":
         return <Badge className="bg-red-500/20 text-red-400 border-red-500/30"><XCircle className="mr-1" /> Failed</Badge>;
       default:
@@ -429,9 +430,9 @@ export default function TrainingTab() {
                     )}
                     {getStatusBadge(job.status)}
                     {/* Early Stopping Indicator */}
-                    {job.status === "completed" && job.metrics?.epoch < job.config?.epochs && (
+                    {job.status === "completed" && typeof job.metrics?.epoch === "number" && job.metrics.epoch < job.config?.epochs && (
                       <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20" title="Model stopped training to prevent overfitting since loss stopped improving.">
-                        Stopped Early (Ep {job.metrics.epoch})
+                        Stopped Early (Ep {formatMetricValue(job.metrics.epoch)})
                       </Badge>
                     )}
                     <div className="ml-2">
@@ -442,7 +443,7 @@ export default function TrainingTab() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {job.status === "running" && (
+                    {(job.status === "running" || job.status === "pending") && (
                       <Button
                         onClick={() => handleTerminateJob(job.job_id)}
                         variant="ghost"
@@ -475,22 +476,22 @@ export default function TrainingTab() {
 
                     {job.metrics && (
                       <div className="grid grid-cols-3 gap-4 pt-2">
-                        {job.metrics.loss !== undefined && (
+                        {job.metrics.loss !== undefined && typeof job.metrics.loss === "number" && (
                           <div className="text-center p-2 rounded-lg bg-white/[0.03]">
                             <p className="text-[10px] text-gray-500 uppercase">Loss</p>
                             <p className="text-sm font-mono text-amber-400">{Number(job.metrics.loss).toFixed(4)}</p>
                           </div>
                         )}
-                        {job.metrics.mAP50 !== undefined && (
+                        {(job.metrics.mAP50 !== undefined || job.metrics.map50 !== undefined) && (
                           <div className="text-center p-2 rounded-lg bg-white/[0.03]">
                             <p className="text-[10px] text-gray-500 uppercase">mAP@50</p>
-                            <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50).toFixed(3)}</p>
+                            <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}</p>
                           </div>
                         )}
                         {job.metrics.epoch !== undefined && (
                           <div className="text-center p-2 rounded-lg bg-white/[0.03]">
                             <p className="text-[10px] text-gray-500 uppercase">Epoch</p>
-                            <p className="text-sm font-mono text-blue-400">{job.metrics.epoch}</p>
+                            <p className="text-sm font-mono text-blue-400">{formatMetricValue(job.metrics.epoch)}</p>
                           </div>
                         )}
                       </div>

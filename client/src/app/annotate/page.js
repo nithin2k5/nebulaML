@@ -13,12 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import AutoLabelModal from "@/components/project/AutoLabelModal";
 import { API_ENDPOINTS } from "@/lib/config";
-import { toast } from "sonner";
 import {
   Save, Trash2, Upload, ChevronLeft, ChevronRight, Home,
   Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu,
   MousePointer2, Square, Hexagon, GitCommit, Wand2
 } from "lucide-react";
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Helpers for polygon selection
 const ptToSegmentDist = (px, py, vx, vy, wx, wy) => {
@@ -88,6 +89,33 @@ function AnnotationToolContent() {
   const cursorPosRef = useRef(null);  // ref, not state, to avoid re-renders on every mouse move
   const scaleRef = useRef(1);          // cached canvas-to-display scale, updated by ResizeObserver
   const animFrameRef = useRef(null);   // rAF handle for throttling mouse-move redraws
+  const currentPointsRef = useRef([]); // sync with polygon clicks — state updates async; 2nd click used to see stale []
+
+  const [aiSubTool, setAiSubTool] = useState('box'); // 'box' | 'fg' | 'bg'
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [aiStateVersion, setAiStateVersion] = useState(0);
+
+  const aiRoughBoxRef = useRef(null);       // {x1,y1,x2,y2} confirmed rough box in image px
+  const aiBoxStartRef = useRef(null);       // drag start point {x,y}
+  const aiCurrentBoxRef = useRef(null);     // live box while mouse is dragged
+  const aiIsDrawingBoxRef = useRef(false);  // true while dragging rough box
+  const aiPointsRef = useRef([]);           // [{x,y,type:'fg'|'bg'}] in image px
+  const aiMaskPolygonRef = useRef(null);    // [{x,y}] contour from server
+  const aiHistoryRef = useRef([]);          // undo stack: [{roughBox, points, maskPolygon}]
+  const aiRequestIdRef = useRef(0);         // incremented per request to ignore stale responses
+  const aiMetadataRef = useRef(null);       // {algo_version, area, etc} from last server response
+
+  // Render-sync refs so drawCanvas always reads current values without dep-array churn
+  const activeToolRef = useRef(activeTool);
+  const selectedBoxIndexRef = useRef(selectedBoxIndex);
+  const hoveredBoxIndexRef = useRef(hoveredBoxIndex);
+  const selectedClassRef = useRef(selectedClass);
+
+  // Keep render-sync refs up to date every render (no useEffect needed)
+  activeToolRef.current = activeTool;
+  selectedBoxIndexRef.current = selectedBoxIndex;
+  hoveredBoxIndexRef.current = hoveredBoxIndex;
+  selectedClassRef.current = selectedClass;
 
   // Filter images based on status
   const filteredImages = useMemo(() => {
@@ -165,8 +193,21 @@ function AnnotationToolContent() {
 
       switch (e.key) {
         case 'Escape':
-          if (activeTool === 'polygon' && isDrawing) {
+          if (activeTool === 'ai') {
+            aiRoughBoxRef.current = null;
+            aiCurrentBoxRef.current = null;
+            aiBoxStartRef.current = null;
+            aiIsDrawingBoxRef.current = false;
+            aiPointsRef.current = [];
+            aiMaskPolygonRef.current = null;
+            aiHistoryRef.current = [];
+            aiMetadataRef.current = null;
+            aiRequestIdRef.current++;
+            setAiStateVersion(v => v + 1);
+            drawCanvas();
+          } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
             setIsDrawing(false);
+            currentPointsRef.current = [];
             setCurrentPoints([]);
             cursorPosRef.current = null;
             showToast('Canceled drawing', 'info');
@@ -379,6 +420,220 @@ function AnnotationToolContent() {
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (activeTool !== 'ai') {
+      aiRoughBoxRef.current = null;
+      aiCurrentBoxRef.current = null;
+      aiBoxStartRef.current = null;
+      aiIsDrawingBoxRef.current = false;
+      aiPointsRef.current = [];
+      aiMaskPolygonRef.current = null;
+      aiHistoryRef.current = [];
+      aiRequestIdRef.current = 0;
+      aiMetadataRef.current = null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool, currentImageIndex]);
+
+  const callSmartSegment = useCallback(async (explicitSnapshot = null) => {
+    if (!token || !datasetId) return;
+    const img = images[currentImageIndex];
+    if (!img) return;
+
+    const snapshot = explicitSnapshot || {
+      roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+      points: [...aiPointsRef.current],
+    };
+
+    if (!snapshot.roughBox && !snapshot.points.some(p => p.type === 'fg')) {
+      toast.info('Draw a box or add foreground points first');
+      return;
+    }
+
+    const naturalWidth = imageRef.current?.naturalWidth || 1;
+    const naturalHeight = imageRef.current?.naturalHeight || 1;
+
+    const requestId = ++aiRequestIdRef.current;
+    setAiProcessing(true);
+
+    try {
+      const form = new FormData();
+      form.append('dataset_id', datasetId);
+      form.append('image_id', String(img.id));
+
+      if (snapshot.roughBox) {
+        form.append('box', JSON.stringify({
+          x1: snapshot.roughBox.x1 / naturalWidth,
+          y1: snapshot.roughBox.y1 / naturalHeight,
+          x2: snapshot.roughBox.x2 / naturalWidth,
+          y2: snapshot.roughBox.y2 / naturalHeight,
+        }));
+        form.append('x', String((snapshot.roughBox.x1 + snapshot.roughBox.x2) / 2 / naturalWidth));
+        form.append('y', String((snapshot.roughBox.y1 + snapshot.roughBox.y2) / 2 / naturalHeight));
+      } else if (snapshot.points.length > 0) {
+        const first = snapshot.points.find(p => p.type === 'fg') || snapshot.points[0];
+        form.append('x', String(first.x / naturalWidth));
+        form.append('y', String(first.y / naturalHeight));
+      }
+
+      const fgPts = snapshot.points.filter(p => p.type === 'fg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
+      const bgPts = snapshot.points.filter(p => p.type === 'bg').map(p => ({ x: p.x / naturalWidth, y: p.y / naturalHeight }));
+      if (fgPts.length > 0) form.append('fg_points', JSON.stringify(fgPts));
+      if (bgPts.length > 0) form.append('bg_points', JSON.stringify(bgPts));
+
+      const res = await fetch(API_ENDPOINTS.SMART.SEGMENT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+
+      if (requestId !== aiRequestIdRef.current) {
+        return;
+      }
+
+      if (!res.ok) throw new Error('Server error');
+      const data = await res.json();
+
+      if (requestId !== aiRequestIdRef.current) {
+        return;
+      }
+
+      if (data.polygon && data.polygon.length >= 3) {
+        aiMaskPolygonRef.current = data.polygon;
+        aiMetadataRef.current = {
+          algo_version: data.algo_version || 'smart_seg_v3_strict',
+          area: data.area || 0,
+          confidence: data.confidence || 1.0,
+        };
+      } else if (data.box) {
+        const b = data.box;
+        aiMaskPolygonRef.current = [
+          { x: b.x, y: b.y },
+          { x: b.x + b.width, y: b.y },
+          { x: b.x + b.width, y: b.y + b.height },
+          { x: b.x, y: b.y + b.height },
+        ];
+        aiMetadataRef.current = {
+          algo_version: data.algo_version || 'smart_seg_v3_strict',
+          area: b.width * b.height,
+          confidence: 0.5,
+        };
+      }
+
+      setAiStateVersion(v => v + 1);
+      drawCanvas();
+    } catch (err) {
+      if (requestId === aiRequestIdRef.current) {
+        toast.error('Smart selection failed — try again');
+      }
+    } finally {
+      if (requestId === aiRequestIdRef.current) {
+        setAiProcessing(false);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, datasetId, images, currentImageIndex]);
+
+  const handleAiAccept = useCallback(() => {
+    const polygon = aiMaskPolygonRef.current;
+    const metadata = aiMetadataRef.current;
+    const fgCount = aiPointsRef.current.filter(p => p.type === 'fg').length;
+    const hasBox = !!aiRoughBoxRef.current;
+
+    if (!polygon || polygon.length < 3) {
+      toast.info('No selection to accept');
+      return;
+    }
+
+    if (!hasBox && fgCount === 0) {
+      toast.warning('Add at least one foreground point or draw a box first');
+      return;
+    }
+
+    if (metadata && metadata.area < 100) {
+      toast.warning('Selection too small — refine with foreground points');
+      return;
+    }
+
+    const className = (dataset?.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
+    const minX = Math.min(...polygon.map(p => p.x));
+    const maxX = Math.max(...polygon.map(p => p.x));
+    const minY = Math.min(...polygon.map(p => p.y));
+    const maxY = Math.max(...polygon.map(p => p.y));
+
+    const newBox = {
+      type: 'polygon',
+      points: [...polygon],
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      class_id: selectedClass,
+      class_name: className,
+      ai_metadata: metadata ? {
+        algo_version: metadata.algo_version,
+        area: metadata.area,
+        confidence: metadata.confidence,
+      } : null,
+    };
+
+    setBoxHistory(prev => [...prev, boxesRef.current]);
+    const newBoxes = [...boxesRef.current, newBox];
+    boxesRef.current = newBoxes;
+    setBoxes(newBoxes);
+
+    aiRoughBoxRef.current = null;
+    aiCurrentBoxRef.current = null;
+    aiPointsRef.current = [];
+    aiMaskPolygonRef.current = null;
+    aiHistoryRef.current = [];
+    aiMetadataRef.current = null;
+    setAiStateVersion(v => v + 1);
+    setAiSubTool('box');
+
+    toast.success('Smart selection saved!');
+    drawCanvas();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset, selectedClass]);
+
+  const handleAiReset = useCallback(() => {
+    aiRoughBoxRef.current = null;
+    aiCurrentBoxRef.current = null;
+    aiBoxStartRef.current = null;
+    aiIsDrawingBoxRef.current = false;
+    aiPointsRef.current = [];
+    aiMaskPolygonRef.current = null;
+    aiHistoryRef.current = [];
+    aiMetadataRef.current = null;
+    aiRequestIdRef.current++;
+    setAiStateVersion(v => v + 1);
+    drawCanvas();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleAiUndo = useCallback(() => {
+    const hist = aiHistoryRef.current;
+    if (hist.length === 0) {
+      toast.info('Nothing to undo');
+      return;
+    }
+
+    const prev = hist[hist.length - 1];
+    aiHistoryRef.current = hist.slice(0, -1);
+    aiRoughBoxRef.current = prev.roughBox;
+    aiPointsRef.current = prev.points;
+    aiMaskPolygonRef.current = null;
+    aiMetadataRef.current = null;
+    setAiStateVersion(v => v + 1);
+
+    if (prev.roughBox || prev.points.some(p => p.type === 'fg')) {
+      callSmartSegment({ roughBox: prev.roughBox, points: prev.points });
+    } else {
+      drawCanvas();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callSmartSegment]);
+
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
     if (!canvas || !e) return { x: 0, y: 0 };
@@ -436,7 +691,7 @@ function AnnotationToolContent() {
         const box = boxesRef.current[clickedIndex];
         if (!box.type || box.type === 'box' || box.type === 'joint') {
           setDragOffset({ dx: x - box.x, dy: y - box.y });
-        } else if (box.type === 'polygon') {
+        } else if (box.type === 'polygon' || box.type === 'line') {
           setDragOffset({ x, y }); // store initial click
         }
       } else {
@@ -447,55 +702,30 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'ai') {
-      // Smart Segment Logic
-      if (!datasetId || !images[currentImageIndex]) return;
-
-      const toastId = toast.loading("Segmenting...");
-      try {
-        const formData = new FormData();
-        formData.append("dataset_id", datasetId);
-        formData.append("image_id", images[currentImageIndex].id);
-
-        // Send normalized coordinates
-        const img = imageRef.current;
-        formData.append("x", x / img.naturalWidth);
-        formData.append("y", y / img.naturalHeight);
-
-        const res = await fetch(API_ENDPOINTS.SMART.SEGMENT, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${token}` },
-          body: formData
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.box) {
-            // Add the smart box
-            const newBox = {
-              ...data.box,
-              class_id: selectedClass,
-              class_name: dataset.classes[selectedClass] || "object"
-            };
-
-            setBoxHistory(prev => [...prev, boxesRef.current]);
-            const newBoxes = [...boxesRef.current, newBox];
-            boxesRef.current = newBoxes;
-            setBoxes(newBoxes);
-            toast.dismiss(toastId);
-            toast.success("Object segmented!");
-          } else {
-            toast.dismiss(toastId);
-            toast.error("Could not segment object");
-          }
-        } else {
-          throw new Error("Server error");
-        }
-      } catch (e) {
-        console.error(e);
-        toast.dismiss(toastId);
-        toast.error("Smart segment failed");
+      if (aiSubTool === 'box') {
+        aiHistoryRef.current = [...aiHistoryRef.current, {
+          roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+          points: [...aiPointsRef.current],
+          maskPolygon: aiMaskPolygonRef.current,
+        }];
+        aiBoxStartRef.current = { x, y };
+        aiCurrentBoxRef.current = null;
+        aiIsDrawingBoxRef.current = true;
+        drawCanvas();
+        return;
       }
-      return;
+      if (aiSubTool === 'fg' || aiSubTool === 'bg') {
+        aiHistoryRef.current = [...aiHistoryRef.current, {
+          roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+          points: [...aiPointsRef.current],
+          maskPolygon: aiMaskPolygonRef.current,
+        }];
+        aiPointsRef.current = [...aiPointsRef.current, { x, y, type: aiSubTool }];
+        setAiStateVersion(v => v + 1);
+        drawCanvas();
+        callSmartSegment();
+        return;
+      }
     }
 
     if (activeTool === 'joint') {
@@ -511,21 +741,22 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'polygon') {
-      // Check if clicking near first point to close the polygon
-      if (isDrawing && currentPoints.length > 2) {
-        const firstPoint = currentPoints[0];
+      const pts = currentPointsRef.current;
+      const closeSnapPx = 22 * (scaleRef.current || 1);
+
+      if (pts.length > 2) {
+        const firstPoint = pts[0];
         const dist = Math.sqrt((x - firstPoint.x) ** 2 + (y - firstPoint.y) ** 2);
-        // Using a 30px radius around first point to close
-        if (dist < 30) {
+        if (dist < closeSnapPx) {
           const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
-          const minX = Math.min(...currentPoints.map(p => p.x));
-          const maxX = Math.max(...currentPoints.map(p => p.x));
-          const minY = Math.min(...currentPoints.map(p => p.y));
-          const maxY = Math.max(...currentPoints.map(p => p.y));
+          const minX = Math.min(...pts.map(p => p.x));
+          const maxX = Math.max(...pts.map(p => p.x));
+          const minY = Math.min(...pts.map(p => p.y));
+          const maxY = Math.max(...pts.map(p => p.y));
 
           const newBox = {
             type: 'polygon',
-            points: [...currentPoints],
+            points: [...pts],
             x: minX,
             y: minY,
             width: maxX - minX,
@@ -539,6 +770,7 @@ function AnnotationToolContent() {
           boxesRef.current = newBoxes;
           setBoxes(newBoxes);
           setIsDrawing(false);
+          currentPointsRef.current = [];
           setCurrentPoints([]);
           cursorPosRef.current = null;
           drawCanvas();
@@ -546,15 +778,15 @@ function AnnotationToolContent() {
         }
       }
 
-      // Add point
-      if (!isDrawing) {
-        setIsDrawing(true);
+      if (pts.length === 0) {
+        currentPointsRef.current = [{ x, y }];
         setCurrentPoints([{ x, y }]);
+        setIsDrawing(true);
       } else {
-        // Prevent duplicate double-clicks
-        const lastPoint = currentPoints[currentPoints.length - 1];
+        const lastPoint = pts[pts.length - 1];
         if (Math.abs(lastPoint.x - x) > 5 || Math.abs(lastPoint.y - y) > 5) {
-          setCurrentPoints(prev => [...prev, { x, y }]);
+          currentPointsRef.current = [...pts, { x, y }];
+          setCurrentPoints([...currentPointsRef.current]);
         }
       }
       drawCanvas();
@@ -582,7 +814,7 @@ function AnnotationToolContent() {
           if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) { hovered = i; break; }
         } else if (box.type === 'joint') {
           if (Math.abs(x - box.x) < 10 && Math.abs(y - box.y) < 10) { hovered = i; break; }
-        } else if (box.type === 'polygon') {
+        } else if (box.type === 'polygon' || box.type === 'line') {
           if (box.points && box.points.length > 0) {
             if (isPointNearPolygon(x, y, box.points)) { hovered = i; break; }
           }
@@ -600,7 +832,7 @@ function AnnotationToolContent() {
       const newBoxes = [...boxesRef.current];
       if (!box.type || box.type === 'box' || box.type === 'joint') {
         newBoxes[selectedBoxIndex] = { ...box, x: x - dragOffset.dx, y: y - dragOffset.dy };
-      } else if (box.type === 'polygon' && dragOffset.x !== undefined) {
+      } else if ((box.type === 'polygon' || box.type === 'line') && dragOffset.x !== undefined) {
         const dx = x - dragOffset.x;
         const dy = y - dragOffset.y;
         newBoxes[selectedBoxIndex] = {
@@ -615,12 +847,25 @@ function AnnotationToolContent() {
       return;
     }
 
-    if (!isDrawing) return;
+    if (activeTool === 'polygon' && currentPointsRef.current.length > 0) {
+      cursorPosRef.current = { x, y };
+      if (!animFrameRef.current) {
+        animFrameRef.current = requestAnimationFrame(() => {
+          animFrameRef.current = null;
+          drawCanvas();
+        });
+      }
+      return;
+    }
 
-    if (activeTool === 'polygon') {
-      if (isDrawing) {
-        cursorPosRef.current = { x, y };
-        // Throttle redraws to ~60fps via rAF
+    if (activeTool === 'ai') {
+      if (aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
+        const sx = aiBoxStartRef.current.x;
+        const sy = aiBoxStartRef.current.y;
+        aiCurrentBoxRef.current = {
+          x1: Math.min(sx, x), y1: Math.min(sy, y),
+          x2: Math.max(sx, x), y2: Math.max(sy, y),
+        };
         if (!animFrameRef.current) {
           animFrameRef.current = requestAnimationFrame(() => {
             animFrameRef.current = null;
@@ -630,6 +875,8 @@ function AnnotationToolContent() {
       }
       return;
     }
+
+    if (!isDrawing) return;
 
     if (activeTool === 'box' && startPos) {
       setCurrentBox({ x: startPos.x, y: startPos.y, width: x - startPos.x, height: y - startPos.y });
@@ -649,6 +896,30 @@ function AnnotationToolContent() {
       }
       setIsDrawing(false);
       setDragOffset(null);
+      return;
+    }
+
+    if (activeTool === 'ai' && aiSubTool === 'box') {
+      if (aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
+        aiIsDrawingBoxRef.current = false;
+        const { x, y } = getCanvasCoordinates(e);
+        const startPt = aiBoxStartRef.current;
+        const bw = Math.abs(x - startPt.x);
+        const bh = Math.abs(y - startPt.y);
+        if (bw > 10 && bh > 10) {
+          aiRoughBoxRef.current = {
+            x1: Math.min(startPt.x, x), y1: Math.min(startPt.y, y),
+            x2: Math.max(startPt.x, x), y2: Math.max(startPt.y, y),
+          };
+          aiCurrentBoxRef.current = null;
+          setAiStateVersion(v => v + 1);
+          callSmartSegment();
+        } else {
+          aiCurrentBoxRef.current = null;
+          drawCanvas();
+        }
+        aiBoxStartRef.current = null;
+      }
       return;
     }
 
@@ -690,17 +961,17 @@ function AnnotationToolContent() {
 
   useEffect(() => {
     const handleDoubleClick = (e) => {
-      if (activeTool === 'polygon' && isDrawing && currentPoints.length > 2) {
+      const pts = currentPointsRef.current;
+      if (activeTool === 'polygon' && pts.length > 2) {
         const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
-        // approximate bounding box
-        const minX = Math.min(...currentPoints.map(p => p.x));
-        const maxX = Math.max(...currentPoints.map(p => p.x));
-        const minY = Math.min(...currentPoints.map(p => p.y));
-        const maxY = Math.max(...currentPoints.map(p => p.y));
+        const minX = Math.min(...pts.map(p => p.x));
+        const maxX = Math.max(...pts.map(p => p.x));
+        const minY = Math.min(...pts.map(p => p.y));
+        const maxY = Math.max(...pts.map(p => p.y));
 
         const newBox = {
           type: 'polygon',
-          points: [...currentPoints],
+          points: [...pts],
           x: minX,
           y: minY,
           width: maxX - minX,
@@ -714,6 +985,7 @@ function AnnotationToolContent() {
         boxesRef.current = newBoxes;
         setBoxes(newBoxes);
         setIsDrawing(false);
+        currentPointsRef.current = [];
         setCurrentPoints([]);
         cursorPosRef.current = null;
         drawCanvas();
@@ -722,7 +994,7 @@ function AnnotationToolContent() {
     const canvas = canvasRef.current;
     if (canvas) canvas.addEventListener('dblclick', handleDoubleClick);
     return () => { if (canvas) canvas.removeEventListener('dblclick', handleDoubleClick); }
-  }, [activeTool, isDrawing, currentPoints, dataset, selectedClass]);
+  }, [activeTool, dataset, selectedClass]);
 
   // Color palette for classes
   const getClassColor = useCallback((classId) => {
@@ -755,6 +1027,12 @@ function AnnotationToolContent() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
+      // Read render-sync refs so drawCanvas never has stale state in its closure
+      const activeTool = activeToolRef.current;
+      const selectedBoxIndex = selectedBoxIndexRef.current;
+      const hoveredBoxIndex = hoveredBoxIndexRef.current;
+      const selectedClass = selectedClassRef.current;
+
       // Draw existing boxes with colored fills using the latest ref state
       boxesRef.current.forEach((box, index) => {
         const color = getClassColor(box.class_id);
@@ -769,7 +1047,7 @@ function AnnotationToolContent() {
         
         ctx.fillStyle = currentFill;
         ctx.strokeStyle = isSelected ? '#ffffff' : (isHovered ? `${color.stroke}FF` : color.stroke);
-        ctx.lineWidth = (isSelected ? 5 : (isHovered ? 4 : 3)) * scale;
+        ctx.lineWidth = (isSelected ? 3 : (isHovered ? 2.5 : 2)) * scale;
 
         if (box.type === 'polygon' || box.type === 'line') {
           if (box.points && box.points.length > 0) {
@@ -792,7 +1070,7 @@ function AnnotationToolContent() {
           }
         } else if (box.type === 'joint') {
           ctx.beginPath();
-          ctx.arc(box.x, box.y, 6 * scale, 0, Math.PI * 2);
+          ctx.arc(box.x, box.y, 4 * scale, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else {
@@ -830,25 +1108,26 @@ function AnnotationToolContent() {
         ctx.fillText(labelText, box.x + 6 * scale, box.y - 6 * scale);
       });
 
-      // Draw current polygon being drawn
-      if (activeTool === 'polygon' && isDrawing && currentPoints.length > 0) {
+      // Draw current polygon being drawn (read ref so paint matches clicks before React re-renders)
+      const livePoly = currentPointsRef.current;
+      if (activeTool === 'polygon' && livePoly.length > 0) {
         const color = getClassColor(selectedClass) || { stroke: '#8b5cf6', fill: 'rgba(139, 92, 246, 0.3)' };
         ctx.strokeStyle = color.stroke;
-        ctx.lineWidth = 4 * scale; // Thicker lines, scaled
+        ctx.lineWidth = 2 * scale;
         ctx.fillStyle = color.fill;
         ctx.beginPath();
-        ctx.moveTo(currentPoints[0].x, currentPoints[0].y);
-        for (let i = 1; i < currentPoints.length; i++) {
-          ctx.lineTo(currentPoints[i].x, currentPoints[i].y);
+        ctx.moveTo(livePoly[0].x, livePoly[0].y);
+        for (let i = 1; i < livePoly.length; i++) {
+          ctx.lineTo(livePoly[i].x, livePoly[i].y);
         }
         
         // draw to cursor
-        const closeSnapDist = 30 * scale;
+        const closeSnapDist = 22 * scale;
         if (cursorPosRef.current) {
           ctx.lineTo(cursorPosRef.current.x, cursorPosRef.current.y);
           // Auto-preview closing line if close enough to start
-          const firstPoint = currentPoints[0];
-          if (currentPoints.length > 2) {
+          const firstPoint = livePoly[0];
+          if (livePoly.length > 2) {
             const dist = Math.sqrt((cursorPosRef.current.x - firstPoint.x) ** 2 + (cursorPosRef.current.y - firstPoint.y) ** 2);
             if (dist < closeSnapDist) {
                ctx.lineTo(firstPoint.x, firstPoint.y);
@@ -860,27 +1139,75 @@ function AnnotationToolContent() {
         ctx.fill();
         ctx.stroke();
 
-        // Draw circles for vertices — scaled so they always appear visible on screen
-        currentPoints.forEach((p, idx) => {
+        livePoly.forEach((p, idx) => {
           ctx.beginPath();
           if (idx === 0) {
-            // Starting dot: green with white ring, slightly larger
-            ctx.arc(p.x, p.y, 7 * scale, 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, 3.5 * scale, 0, Math.PI * 2);
             ctx.fillStyle = '#10b981';
             ctx.fill();
-            ctx.lineWidth = 2 * scale;
+            ctx.lineWidth = 1 * scale;
             ctx.strokeStyle = '#ffffff';
             ctx.stroke();
           } else {
-            // Regular dot: red, smaller
             ctx.beginPath();
-            ctx.arc(p.x, p.y, 5 * scale, 0, Math.PI * 2);
+            ctx.arc(p.x, p.y, 2.5 * scale, 0, Math.PI * 2);
             ctx.fillStyle = '#ef4444';
             ctx.fill();
-            ctx.lineWidth = 1.5 * scale;
+            ctx.lineWidth = 0.75 * scale;
             ctx.strokeStyle = '#000000';
             ctx.stroke();
           }
+        });
+      }
+
+      if (activeTool === 'ai') {
+        const roughBox = aiCurrentBoxRef.current || aiRoughBoxRef.current;
+        const maskPolygon = aiMaskPolygonRef.current;
+        const aiPts = aiPointsRef.current;
+
+        if (roughBox) {
+          ctx.save();
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 1.5 * scale;
+          ctx.setLineDash([5 * scale, 4 * scale]);
+          ctx.strokeRect(roughBox.x1, roughBox.y1, roughBox.x2 - roughBox.x1, roughBox.y2 - roughBox.y1);
+          ctx.fillStyle = 'rgba(249, 115, 22, 0.06)';
+          ctx.fillRect(roughBox.x1, roughBox.y1, roughBox.x2 - roughBox.x1, roughBox.y2 - roughBox.y1);
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+
+        if (maskPolygon && maskPolygon.length >= 3) {
+          ctx.save();
+          ctx.strokeStyle = '#c084fc';
+          ctx.lineWidth = 2 * scale;
+          ctx.fillStyle = 'rgba(192, 132, 252, 0.22)';
+          ctx.beginPath();
+          ctx.moveTo(maskPolygon[0].x, maskPolygon[0].y);
+          for (let i = 1; i < maskPolygon.length; i++) ctx.lineTo(maskPolygon[i].x, maskPolygon[i].y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        aiPts.forEach(pt => {
+          ctx.save();
+          const isFg = pt.type === 'fg';
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 7 * scale, 0, Math.PI * 2);
+          ctx.fillStyle = isFg ? 'rgba(16, 185, 129, 0.9)' : 'rgba(239, 68, 68, 0.9)';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5 * scale;
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          const dotFs = Math.round(11 * scale);
+          ctx.font = `bold ${dotFs}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(isFg ? '+' : '−', pt.x, pt.y);
+          ctx.restore();
         });
       }
 
@@ -1283,15 +1610,89 @@ function AnnotationToolContent() {
                 </Button>
               </div>
 
-              {/* Empty section here since we replaced smart mode with AI mode in tool bar */}
-              <div className="pt-2 border-t border-white/5">
-                <p className="text-[10px] text-gray-500 mt-1 text-center h-8 flex items-center justify-center">
-                  {activeTool === 'ai' ? "Click an object to auto-segment it" :
-                    activeTool === 'polygon' ? "Click points to define polygon, click start to finish" :
+              <div className="pt-2 border-t border-white/5 space-y-2">
+                {activeTool === 'ai' ? (
+                  <div className="space-y-3" key={aiStateVersion}>
+                    <p className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider px-1">Smart Selection</p>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'box', label: 'Draw Box', icon: '⬚', desc: 'Rough region' },
+                        { id: 'fg', label: 'Foreground', icon: '+', desc: 'Mark object' },
+                        { id: 'bg', label: 'Background', icon: '−', desc: 'Mark outside' },
+                      ].map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => setAiSubTool(t.id)}
+                          className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${aiSubTool === t.id
+                            ? t.id === 'fg' ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300'
+                              : t.id === 'bg' ? 'bg-red-600/30 border-red-500/60 text-red-300'
+                                : 'bg-orange-600/30 border-orange-500/60 text-orange-300'
+                            : 'bg-black/30 border-white/5 text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+                        >
+                          <span className="text-sm font-bold leading-none mb-0.5">{t.icon}</span>
+                          <span className="text-[9px] font-medium">{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="px-1 py-1.5 bg-black/30 rounded-lg border border-white/5 text-center">
+                      {aiProcessing ? (
+                        <span className="text-[10px] text-purple-400 animate-pulse">Analyzing...</span>
+                      ) : aiMaskPolygonRef.current ? (
+                        <span className="text-[10px] text-purple-300">Selection ready · refine or accept</span>
+                      ) : aiRoughBoxRef.current ? (
+                        <span className="text-[10px] text-orange-300">Add fg/bg points to refine</span>
+                      ) : (
+                        <span className="text-[10px] text-gray-500">
+                          {aiSubTool === 'box' ? 'Drag to draw a rough region' : aiSubTool === 'fg' ? 'Click the object to select' : 'Click areas to exclude'}
+                        </span>
+                      )}
+                    </div>
+
+                    {(aiPointsRef.current.length > 0 || aiRoughBoxRef.current) && (
+                      <div className="flex gap-1 text-[9px] text-gray-500 px-1">
+                        {aiRoughBoxRef.current && <span className="px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/20 rounded text-orange-400">box</span>}
+                        {aiPointsRef.current.filter(p => p.type === 'fg').length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400">+{aiPointsRef.current.filter(p => p.type === 'fg').length} fg</span>
+                        )}
+                        {aiPointsRef.current.filter(p => p.type === 'bg').length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-red-400">−{aiPointsRef.current.filter(p => p.type === 'bg').length} bg</span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        onClick={handleAiAccept}
+                        disabled={!aiMaskPolygonRef.current || aiProcessing}
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-purple-500/40 bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 disabled:opacity-30 disabled:cursor-not-allowed text-[9px] font-medium transition-all"
+                      >
+                        <span className="text-base leading-none mb-0.5">✓</span>Accept
+                      </button>
+                      <button
+                        onClick={handleAiUndo}
+                        disabled={aiHistoryRef.current.length === 0 || aiProcessing}
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-white/10 bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed text-[9px] font-medium transition-all"
+                      >
+                        <span className="text-base leading-none mb-0.5">↩</span>Undo
+                      </button>
+                      <button
+                        onClick={handleAiReset}
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-white/10 bg-white/5 text-gray-400 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 text-[9px] font-medium transition-all"
+                      >
+                        <span className="text-base leading-none mb-0.5">✕</span>Reset
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-500 mt-1 text-center flex items-center justify-center h-8">
+                    {activeTool === 'polygon' ? "Click points to define polygon, click start to finish" :
                       activeTool === 'box' ? "Click and drag to draw a bounding box" :
                         activeTool === 'joint' ? "Click to place a keypoint/joint" :
                           "Click or drag on an annotation to move it"}
-                </p>
+                  </p>
+                )}
               </div>
 
             </div>
@@ -1302,7 +1703,7 @@ function AnnotationToolContent() {
                 <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Tools</h3>
                 <div className="grid grid-cols-3 gap-2">
                   <button
-                    onClick={() => setActiveTool('select')}
+                    onClick={() => { setActiveTool('select'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); cursorPosRef.current = null; }}
                     className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'select' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Select & Move: Click or drag shapes"
                   >
@@ -1310,7 +1711,7 @@ function AnnotationToolContent() {
                     <span className="text-[10px] font-medium">Select</span>
                   </button>
                   <button
-                    onClick={() => { setActiveTool('box'); setIsDrawing(false); setCurrentBox(null); setStartPos(null); }}
+                    onClick={() => { setActiveTool('box'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); setCurrentBox(null); setStartPos(null); cursorPosRef.current = null; }}
                     className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'box' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Bounding Box: Click and drag to draw a box"
                   >
@@ -1318,7 +1719,7 @@ function AnnotationToolContent() {
                     <span className="text-[10px] font-medium">Box</span>
                   </button>
                   <button
-                    onClick={() => { setActiveTool('polygon'); setIsDrawing(false); setCurrentPoints([]); }}
+                    onClick={() => { setActiveTool('polygon'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); cursorPosRef.current = null; }}
                     className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'polygon' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Polygon/Line: Click to add points, click start to finish"
                   >
@@ -1326,7 +1727,7 @@ function AnnotationToolContent() {
                     <span className="text-[10px] font-medium">Draw Lines</span>
                   </button>
                   <button
-                    onClick={() => { setActiveTool('joint'); setIsDrawing(false); }}
+                    onClick={() => { setActiveTool('joint'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); cursorPosRef.current = null; }}
                     className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'joint' ? 'bg-indigo-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
                     title="Joint Lines (Keypoints): Click to place a joint"
                   >
@@ -1334,7 +1735,7 @@ function AnnotationToolContent() {
                     <span className="text-[10px] font-medium">Joints</span>
                   </button>
                   <button
-                    onClick={() => { setActiveTool('ai'); setIsDrawing(false); setCurrentPoints([]); setCurrentBox(null); }}
+                    onClick={() => { setActiveTool('ai'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); setCurrentBox(null); }}
                     className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-2 border border-dashed ${activeTool === 'ai' ? 'bg-purple-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-purple-400 hover:text-purple-300 hover:bg-white/5 border-white/5'}`}
                     title="AI Mode: Click an object to auto-segment"
                   >
@@ -1464,12 +1865,22 @@ function AnnotationToolContent() {
                         setIsDrawing(false); setStartPos(null); setCurrentBox(null); cursorPosRef.current = null;
                         setTimeout(() => drawCanvas(), 0);
                       }
-                      if (annotationType === 'detection' && isDrawing && activeTool === 'polygon') {
-                         cursorPosRef.current = null;
-                         setTimeout(() => drawCanvas(), 0);
+                      if (annotationType === 'detection' && activeTool === 'polygon' && currentPointsRef.current.length > 0) {
+                        cursorPosRef.current = null;
+                        setTimeout(() => drawCanvas(), 0);
+                      }
+                      if (annotationType === 'detection' && activeTool === 'ai' && aiIsDrawingBoxRef.current) {
+                        aiIsDrawingBoxRef.current = false;
+                        aiCurrentBoxRef.current = null;
+                        aiBoxStartRef.current = null;
+                        setTimeout(() => drawCanvas(), 0);
                       }
                     }}
-                    className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection' ? 'cursor-crosshair' : 'cursor-default pointer-events-none'}`}
+                    className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection'
+                        ? activeTool === 'ai'
+                          ? aiSubTool === 'fg' ? 'cursor-cell' : aiSubTool === 'bg' ? 'cursor-cell' : 'cursor-crosshair'
+                          : 'cursor-crosshair'
+                        : 'cursor-default pointer-events-none'}`}
                     style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }}
                   />
                 </div>

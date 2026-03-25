@@ -11,7 +11,24 @@ import { Shield, ShieldAlert, ShieldCheck, Mail, UserPlus, Trash2, Activity, Clo
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
-import { formatDistanceToNow } from 'date-fns';
+
+function formatDistanceToNow(isoOrDate) {
+    const diffSec = (new Date(isoOrDate).getTime() - Date.now()) / 1000;
+    const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+    const a = Math.abs(diffSec);
+    if (a < 60) return rtf.format(Math.round(diffSec), "second");
+    const diffMin = diffSec / 60;
+    if (Math.abs(diffMin) < 60) return rtf.format(Math.round(diffMin), "minute");
+    const diffHour = diffSec / 3600;
+    if (Math.abs(diffHour) < 24) return rtf.format(Math.round(diffHour), "hour");
+    const diffDay = diffSec / 86400;
+    if (Math.abs(diffDay) < 7) return rtf.format(Math.round(diffDay), "day");
+    const diffWeek = diffSec / 604800;
+    if (Math.abs(diffWeek) < 5) return rtf.format(Math.round(diffWeek), "week");
+    const diffMonth = diffSec / (30.44 * 86400);
+    if (Math.abs(diffMonth) < 12) return rtf.format(Math.round(diffMonth), "month");
+    return rtf.format(Math.round(diffSec / (365.25 * 86400)), "year");
+}
 
 export default function ProjectTeam({ dataset }) {
     const { token } = useAuth();
@@ -220,7 +237,7 @@ export default function ProjectTeam({ dataset }) {
                                         </p>
                                         <p className="text-[10px] text-muted-foreground flex items-center gap-1">
                                             <Clock className="w-3 h-3" />
-                                            {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
+                                            {formatDistanceToNow(log.created_at)}
                                         </p>
                                     </div>
                                 </div>

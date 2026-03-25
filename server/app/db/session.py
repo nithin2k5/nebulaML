@@ -52,6 +52,30 @@ def get_db_connection():
         return None
 
 
+def migrate_users_otp_columns(connection) -> None:
+    """
+    Older deployments may have `users` without OTP columns; CREATE TABLE IF NOT EXISTS
+    does not add new columns. Login/verify UPDATE those columns and would fail with 500.
+    """
+    try:
+        cur = connection.cursor()
+        cur.execute("SHOW COLUMNS FROM users LIKE 'verification_code'")
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE users ADD COLUMN verification_code VARCHAR(32) NULL")
+            logger.info("Migrated: added users.verification_code")
+        cur.execute("SHOW COLUMNS FROM users LIKE 'verification_code_expires'")
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN verification_code_expires TIMESTAMP NULL"
+            )
+            logger.info("Migrated: added users.verification_code_expires")
+        connection.commit()
+        cur.close()
+    except Error as e:
+        logger.error(f"migrate_users_otp_columns: {e}")
+        raise
+
+
 def create_tables():
     """Create all required tables"""
     connection = get_db_connection()
@@ -82,6 +106,7 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'users' ready")
+        migrate_users_otp_columns(connection)
         
         # Pending registrations table
         cursor.execute("""

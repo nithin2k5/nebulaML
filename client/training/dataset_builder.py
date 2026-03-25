@@ -21,6 +21,36 @@ from typing import Dict, List, Optional, Tuple, Union
 import yaml
 
 
+def _valid_yolo_label_parts(parts: List[str]) -> bool:
+    n = len(parts)
+    if n == 0:
+        return True
+    if n == 1:
+        try:
+            int(parts[0])
+            return True
+        except ValueError:
+            return False
+    if n == 5:
+        try:
+            int(parts[0])
+            vals = [float(p) for p in parts[1:]]
+            return all(0 <= v <= 1 for v in vals)
+        except ValueError:
+            return False
+    if n >= 7 and n % 2 == 1:
+        try:
+            int(parts[0])
+            for i in range(1, n):
+                v = float(parts[i])
+                if not 0 <= v <= 1:
+                    return False
+            return True
+        except ValueError:
+            return False
+    return False
+
+
 @dataclass
 class BoundingBox:
     """Represents a bounding box annotation."""
@@ -459,15 +489,18 @@ class DatasetBuilder:
                     with open(label_path, 'r') as f:
                         for line_num, line in enumerate(f, 1):
                             parts = line.strip().split()
-                            if len(parts) != 5:
+                            if not parts:
+                                continue
+                            if not _valid_yolo_label_parts(parts):
                                 stats["invalid_labels"].append(f"{label_path.name}:{line_num}")
                                 issues.append(f"Invalid label format in {label_path.name} line {line_num}")
                                 continue
                             try:
-                                values = [float(x) for x in parts]
-                                if not all(0 <= v <= 1 for v in values[1:]):
-                                    stats["invalid_labels"].append(f"{label_path.name}:{line_num}")
-                                    issues.append(f"Values out of range in {label_path.name} line {line_num}")
+                                if len(parts) > 1:
+                                    values = [float(x) for x in parts[1:]]
+                                    if not all(0 <= v <= 1 for v in values):
+                                        stats["invalid_labels"].append(f"{label_path.name}:{line_num}")
+                                        issues.append(f"Values out of range in {label_path.name} line {line_num}")
                             except ValueError:
                                 stats["invalid_labels"].append(f"{label_path.name}:{line_num}")
                                 issues.append(f"Non-numeric values in {label_path.name} line {line_num}")

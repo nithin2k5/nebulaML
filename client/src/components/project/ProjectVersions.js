@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Cpu, Clock, RefreshCw, CheckCircle2, AlertCircle, Trash2, Layers } from "lucide-react";
-import { API_BASE_URL } from "@/lib/config";
+import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
+import { formatMetricValue } from "@/lib/utils";
 
 export default function ProjectVersions({ dataset, onDeploy }) {
     const [jobs, setJobs] = useState([]);
@@ -37,8 +38,27 @@ export default function ProjectVersions({ dataset, onDeploy }) {
         return () => clearInterval(interval);
     }, [token, dataset?.id]);
 
+    const cancelJob = async (jobId) => {
+        if (!window.confirm("Stop training? The run ends after the current epoch.")) return;
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                toast.success(data.message || "Cancellation requested");
+                fetchJobs();
+            } else {
+                toast.error(data.detail || "Failed to cancel");
+            }
+        } catch (e) {
+            toast.error(e.message || "Cancel failed");
+        }
+    };
+
     const deleteJob = async (jobId) => {
-        if (!window.confirm("Delete this training job? This cannot be undone.")) return;
+        if (!window.confirm("Delete this training job record? This cannot be undone.")) return;
         try {
             const res = await fetch(`${API_BASE_URL}/api/training/job/${jobId}`, {
                 method: 'DELETE',
@@ -48,7 +68,8 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                 toast.success("Job deleted");
                 fetchJobs();
             } else {
-                toast.error("Failed to delete job");
+                const err = await res.json().catch(() => ({}));
+                toast.error(err.detail || "Failed to delete job");
             }
         } catch (e) {
             toast.error("Failed to delete job: " + e.message);
@@ -111,6 +132,11 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                                             <AlertCircle className="h-3 w-3" /> Failed
                                                         </Badge>
                                                     )}
+                                                    {job.status === "cancelled" && (
+                                                        <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 border-amber-500/20 flex items-center gap-1 w-fit">
+                                                            Stopped
+                                                        </Badge>
+                                                    )}
                                                     {job.status === "pending" && (
                                                         <Badge variant="outline" className="text-muted-foreground flex items-center gap-1 w-fit">
                                                             <Clock className="h-3 w-3" /> Pending
@@ -125,9 +151,16 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                                         Deploy
                                                     </Button>
                                                 )}
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-400" onClick={() => deleteJob(job.job_id)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+                                                {(job.status === "running" || job.status === "pending") && (
+                                                    <Button variant="ghost" size="sm" className="h-8 text-amber-600 hover:text-amber-500" onClick={() => cancelJob(job.job_id)}>
+                                                        Cancel
+                                                    </Button>
+                                                )}
+                                                {(job.status !== "running" && job.status !== "pending") && (
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-400" onClick={() => deleteJob(job.job_id)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                )}
                                             </div>
                                         </div>
 
@@ -164,7 +197,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                                         {Object.entries(job.metrics).filter(([k]) => k.includes('mAP') || k.includes('loss')).slice(0, 4).map(([key, value]) => (
                                                             <div key={key} className="flex justify-between items-center bg-background/50 px-2 py-1.5 rounded">
                                                                 <span className="text-muted-foreground truncate max-w-[60px]" title={key}>{key.split('/').pop()}</span>
-                                                                <span className="font-mono font-medium">{typeof value === 'number' ? value.toFixed(3) : value}</span>
+                                                                <span className="font-mono font-medium">{formatMetricValue(value)}</span>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -177,7 +210,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                                 {Object.entries(job.metrics).filter(([k]) => k.includes('mAP')).map(([key, value]) => (
                                                     <div key={key} className="bg-emerald-500/10 border border-emerald-500/20 p-2 rounded flex flex-col items-center justify-center text-center">
                                                         <span className="text-emerald-500/80 mb-0.5 truncate w-full" title={key}>{key.split('/').pop()}</span>
-                                                        <span className="font-semibold text-emerald-400 text-sm">{typeof value === 'number' ? value.toFixed(3) : value}</span>
+                                                        <span className="font-semibold text-emerald-400 text-sm">{formatMetricValue(value)}</span>
                                                     </div>
                                                 ))}
                                             </div>

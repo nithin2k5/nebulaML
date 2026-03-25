@@ -13,12 +13,13 @@ export default function GamifiedTerminal({ output, onCommand, isRunning = false 
 
     // Parse and process incoming output
     useEffect(() => {
-        if (!output) {
+        if (output == null || output === "") {
             setLogs([]);
             return;
         }
 
-        const lines = output.split('\n');
+        const text = typeof output === "string" ? output : JSON.stringify(output, null, 2);
+        const lines = text.split("\n");
         setLogs(lines);
     }, [output]);
 

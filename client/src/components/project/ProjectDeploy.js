@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,18 +22,15 @@ export default function ProjectDeploy({ dataset }) {
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState(null);
 
-    useEffect(() => {
-        if (token) fetchJobs();
-    }, [dataset.id, token]);
-
-    const fetchJobs = async () => {
+    const fetchJobs = useCallback(async () => {
+        if (!dataset?.id || !token) return;
         try {
             const res = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
                 headers: { "Authorization": `Bearer ${token}` }
             });
             if (res.ok) {
                 const data = await res.json();
-                const projectJobs = data.jobs.filter(j => j.dataset_id === dataset.id && (j.status === "completed" || j.status === "success"));
+                const projectJobs = (data.jobs || []).filter(j => j.dataset_id === dataset.id && (j.status === "completed" || j.status === "success"));
                 setJobs(projectJobs);
                 if (projectJobs.length > 0) {
                     setSelectedJob(projectJobs[0].job_id);
@@ -44,7 +41,11 @@ export default function ProjectDeploy({ dataset }) {
         } catch (e) {
             toast.error("Error loading models: " + e.message);
         }
-    };
+    }, [dataset?.id, token]);
+
+    useEffect(() => {
+        if (token) fetchJobs();
+    }, [token, fetchJobs]);
 
     const handleFileChange = (e) => {
         const file = e.target.files[0];

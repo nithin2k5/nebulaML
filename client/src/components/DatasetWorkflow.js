@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_ENDPOINTS } from "@/lib/config";
-import { cn } from "@/lib/utils";
+import { cn, formatMetricValue } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
@@ -205,7 +205,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
               <div className="flex flex-wrap gap-2 pt-1">
                 {Object.entries(job.metrics).slice(0, 4).map(([k, v]) => (
                   <span key={k} className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-mono">
-                    {k}: {typeof v === 'number' ? v.toFixed(3) : v}
+                    {k}: {formatMetricValue(v)}
                   </span>
                 ))}
               </div>
@@ -235,7 +235,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
               <div className="flex flex-wrap gap-2">
                 {Object.entries(completedJobs[0].metrics).slice(0, 4).map(([k, v]) => (
                   <span key={k} className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-mono">
-                    {k}: {typeof v === 'number' ? v.toFixed(3) : v}
+                    {k}: {formatMetricValue(v)}
                   </span>
                 ))}
               </div>
