@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Upload, Image, CheckCircle, Loader, Terminal } from "lucide-react";
+import { Upload, CheckCircle, Loader, Terminal, X } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -18,9 +18,11 @@ export default function ProjectDeploy({ dataset }) {
     const [jobs, setJobs] = useState([]);
     const [selectedJob, setSelectedJob] = useState(null);
     const [selectedFile, setSelectedFile] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState(null);
     const [confidence, setConfidence] = useState(0.25);
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState(null);
+    const canvasRef = useRef(null);
 
     const fetchJobs = useCallback(async () => {
         if (!dataset?.id || !token) return;
@@ -49,16 +51,68 @@ export default function ProjectDeploy({ dataset }) {
 
     const handleFileChange = (e) => {
         const file = e.target.files[0];
-        if (file) {
-            setSelectedFile(file);
-            setResults(null);
-        }
+        if (!file) return;
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setSelectedFile(file);
+        setPreviewUrl(URL.createObjectURL(file));
+        setResults(null);
+    };
+
+    const clearFile = () => {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        setSelectedFile(null);
+        setPreviewUrl(null);
+        setResults(null);
+    };
+
+    const drawDetections = (detections, imageUrl) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const img = new Image();
+        img.onload = () => {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            detections.forEach((det, idx) => {
+                const color = `hsl(${(idx * 137.5) % 360}, 70%, 55%)`;
+                const [x1, y1, x2, y2] = det.bbox;
+                const bw = x2 - x1;
+                const bh = y2 - y1;
+
+                // Fill
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.18;
+                ctx.fillRect(x1, y1, bw, bh);
+                ctx.globalAlpha = 1;
+
+                // Border
+                ctx.strokeStyle = color;
+                ctx.lineWidth = Math.max(2, img.width / 400);
+                ctx.strokeRect(x1, y1, bw, bh);
+
+                // Label background
+                const label = `${det.class_name} ${Math.round(det.confidence * 100)}%`;
+                const fontSize = Math.max(12, img.width / 60);
+                ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+                const tw = ctx.measureText(label).width;
+                const th = fontSize + 8;
+                ctx.fillStyle = color;
+                ctx.fillRect(x1, y1 - th, tw + 10, th);
+
+                // Label text
+                ctx.fillStyle = "#fff";
+                ctx.fillText(label, x1 + 5, y1 - 6);
+            });
+        };
+        img.src = imageUrl;
     };
 
     const handleInference = async () => {
         if (!selectedFile || !selectedJob) return;
-
         setIsLoading(true);
+        setResults(null);
+
         const formData = new FormData();
         formData.append("file", selectedFile);
         formData.append("confidence", confidence);
@@ -67,16 +121,18 @@ export default function ProjectDeploy({ dataset }) {
         try {
             const response = await fetch(API_ENDPOINTS.INFERENCE.PREDICT, {
                 method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
                 body: formData,
             });
 
-            if (!response.ok) {
-                throw new Error(await response.text());
-            }
+            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || response.statusText);
 
             const data = await response.json();
             setResults(data);
-            toast.success("Inference successful!");
+            toast.success(`Found ${data.num_detections} object${data.num_detections !== 1 ? "s" : ""}`);
+
+            // Draw after state update
+            setTimeout(() => drawDetections(data.detections || [], previewUrl), 50);
         } catch (error) {
             console.error("Inference error:", error);
             toast.error("Inference failed: " + error.message);
@@ -184,58 +240,83 @@ print(response.json())`}
                         </CardHeader>
                         <CardContent className="space-y-4">
                             {!selectedFile ? (
-                                <div className="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-primary transition-colors cursor-pointer relative">
+                                <label className="border-2 border-dashed border-border rounded-xl p-12 text-center hover:border-primary transition-colors cursor-pointer flex flex-col items-center gap-3">
                                     <Input
                                         type="file"
                                         accept="image/*"
                                         onChange={handleFileChange}
-                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                        className="hidden"
                                     />
-                                    <Upload className="mx-auto text-4xl text-muted-foreground mb-4" />
-                                    <p className="font-medium">Click to upload an image</p>
-                                    <p className="text-xs text-muted-foreground mt-1">Supports JPG, PNG</p>
-                                </div>
+                                    <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center">
+                                        <Upload className="w-6 h-6 text-muted-foreground" />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium">Click to upload an image</p>
+                                        <p className="text-xs text-muted-foreground mt-1">JPG, PNG — max 10 MB</p>
+                                    </div>
+                                </label>
                             ) : (
                                 <div className="space-y-4">
-                                    <div className="relative rounded-lg overflow-hidden border border-border bg-black/5 flex items-center justify-center min-h-[300px]">
-                                        {/* Display Image */}
-                                        <div className="relative">
-                                            <img
-                                                src={URL.createObjectURL(selectedFile)}
-                                                alt="Preview"
-                                                className="max-h-[400px] w-auto mx-auto block"
+                                    {/* Canvas: shows plain image until Run Model, then shows detections */}
+                                    <div className="rounded-xl border border-border bg-muted/10 overflow-hidden flex items-center justify-center p-3">
+                                        {results ? (
+                                            <canvas
+                                                ref={canvasRef}
+                                                className="max-w-full max-h-[420px] rounded object-contain"
                                             />
-                                            {/* Overlay Bounding Boxes */}
-                                            {results?.detections?.map((det, idx) => (
-                                                <div
-                                                    key={idx}
-                                                    className="absolute border-2 border-primary"
-                                                    style={{
-                                                        left: `${det.bbox_normalized[0] * 100 - (det.bbox_normalized[2] * 100) / 2}%`,
-                                                        top: `${det.bbox_normalized[1] * 100 - (det.bbox_normalized[3] * 100) / 2}%`,
-                                                        width: `${det.bbox_normalized[2] * 100}%`,
-                                                        height: `${det.bbox_normalized[3] * 100}%`,
-                                                    }}
-                                                >
-                                                    <span className="absolute -top-6 left-0 bg-primary text-primary-foreground text-xs px-1 rounded">
-                                                        {det.class_name} ({Math.round(det.confidence * 100)}%)
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
+                                        ) : (
+                                            <img
+                                                src={previewUrl}
+                                                alt="Preview"
+                                                className="max-w-full max-h-[420px] rounded object-contain"
+                                            />
+                                        )}
                                     </div>
+
+                                    {/* Detection list */}
+                                    {results?.detections?.length > 0 && (
+                                        <div className="rounded-xl border border-border overflow-hidden">
+                                            <div className="bg-muted/40 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide border-b border-border">
+                                                {results.num_detections} Detection{results.num_detections !== 1 ? "s" : ""}
+                                            </div>
+                                            <div className="divide-y divide-border max-h-40 overflow-y-auto">
+                                                {results.detections.map((det, idx) => (
+                                                    <div key={idx} className="flex items-center justify-between px-4 py-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div
+                                                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                                style={{ backgroundColor: `hsl(${(idx * 137.5) % 360}, 70%, 55%)` }}
+                                                            />
+                                                            <span className="text-sm font-medium">{det.class_name}</span>
+                                                        </div>
+                                                        <Badge variant="outline" className="text-xs tabular-nums">
+                                                            {Math.round(det.confidence * 100)}%
+                                                        </Badge>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {results?.num_detections === 0 && (
+                                        <p className="text-sm text-muted-foreground text-center py-2">
+                                            No objects detected above the confidence threshold.
+                                        </p>
+                                    )}
 
                                     <div className="flex justify-between items-center">
                                         <p className="text-sm text-muted-foreground">
-                                            {results ? `Found ${results.num_detections} objects` : "Ready to run"}
+                                            {selectedFile.name}
                                         </p>
                                         <div className="flex gap-2">
-                                            <Button variant="outline" onClick={() => { setSelectedFile(null); setResults(null); }}>
-                                                Clear
+                                            <Button variant="outline" size="sm" onClick={clearFile}>
+                                                <X className="w-4 h-4 mr-1.5" /> Clear
                                             </Button>
-                                            <Button onClick={handleInference} disabled={isLoading}>
-                                                {isLoading ? <Loader className="animate-spin mr-2" /> : <CheckCircle className="mr-2" />}
-                                                Run Model
+                                            <Button size="sm" onClick={handleInference} disabled={isLoading || !selectedJob}>
+                                                {isLoading
+                                                    ? <><Loader className="w-4 h-4 mr-1.5 animate-spin" /> Running…</>
+                                                    : <><CheckCircle className="w-4 h-4 mr-1.5" /> Run Model</>
+                                                }
                                             </Button>
                                         </div>
                                     </div>

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import sys
@@ -8,12 +8,13 @@ from dataclasses import asdict
 # Add parent directory to path for imports
 # sys.path.append(str(Path(__file__).parent.parent.parent))
 from app.services.dataset_analyzer import DatasetAnalyzer
+from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/datasets/{dataset_id}/analyze")
-async def analyze_dataset(dataset_id: str):
+async def analyze_dataset(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
     Perform comprehensive dataset analysis for training readiness
     Returns analysis including:
@@ -24,6 +25,13 @@ async def analyze_dataset(dataset_id: str):
     - Warnings and issues
     """
     try:
+        from app.services.database import DatasetService
+        dataset = DatasetService.get_dataset(dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
+
         analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
         
         # Convert dataclass to dict for JSON serialization
@@ -41,7 +49,7 @@ async def analyze_dataset(dataset_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/datasets/{dataset_id}/uncertainty")
-async def analyze_uncertainty(dataset_id: str):
+async def analyze_uncertainty(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
     Analyze unlabeled images and return them sorted by uncertainty (active learning).
     Uncertainty is calculated as 1.0 - max_confidence.
@@ -51,10 +59,12 @@ async def analyze_uncertainty(dataset_id: str):
         from app.services.inference import YOLOInference
         import os
 
-        # Get dataset
+        # Get dataset and verify ownership
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
+        if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
         
         # Get all images
         all_images = DatasetService.get_dataset_images(dataset_id)
