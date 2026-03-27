@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
-import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users } from "lucide-react";
+import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users, TestTube2 } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
@@ -17,6 +17,7 @@ import ProjectAnnotate from "@/components/project/ProjectAnnotate";
 import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
 import ProjectVersions from "@/components/project/ProjectVersions";
+import ProjectTest from "@/components/project/ProjectTest";
 import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth";
 import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
@@ -179,6 +180,13 @@ export default function ProjectPage() {
             meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
         },
         {
+            id: 'test',
+            label: 'Test',
+            icon: TestTube2,
+            status: hasModels ? 'complete' : 'pending',
+            meta: hasModels ? 'Ready' : 'No Model'
+        },
+        {
             id: 'deploy',
             label: 'Deploy',
             icon: Code,
@@ -234,7 +242,11 @@ export default function ProjectPage() {
 
                 <div className="flex items-center gap-2">
                     {isTraining && (
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium">
+                        <div 
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium cursor-pointer hover:bg-amber-500/20 transition-colors"
+                            onClick={() => handleTabChange('versions')}
+                            title="Click to view training progress"
+                        >
                             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
                             Training {Math.round(runningJobs[0]?.progress || 0)}%
                         </div>
@@ -292,6 +304,26 @@ export default function ProjectPage() {
                     </TabsList>
                 </div>
 
+                {isTraining && (
+                    <div className="px-6 py-3 bg-amber-500/5 border-b border-amber-500/20 flex items-center justify-between">
+                        <div className="flex items-center gap-3 text-sm">
+                            <div className="flex items-center gap-2">
+                                <Cpu className="w-4 h-4 text-amber-500 animate-pulse" />
+                                <span className="font-medium">Training in Progress</span>
+                            </div>
+                            <span className="text-muted-foreground">You can navigate freely - training continues in the background</span>
+                        </div>
+                        <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => handleTabChange('versions')}
+                            className="text-amber-600 hover:text-amber-500"
+                        >
+                            View Progress
+                        </Button>
+                    </div>
+                )}
+
                 <div className="flex-1 overflow-auto bg-muted/5 p-6">
                     <div className="max-w-7xl mx-auto h-full">
                         <TabsContent value="overview" className="mt-0 h-full">
@@ -316,6 +348,10 @@ export default function ProjectPage() {
 
                         <TabsContent value="versions" className="mt-0 h-full">
                             <ProjectVersions dataset={dataset} onDeploy={() => handleTabChange('deploy')} />
+                        </TabsContent>
+
+                        <TabsContent value="test" className="mt-0 h-full">
+                            <ProjectTest dataset={dataset} />
                         </TabsContent>
 
                         <TabsContent value="deploy" className="mt-0 h-full">

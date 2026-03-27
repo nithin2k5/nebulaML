@@ -22,6 +22,7 @@ class YOLOInference:
         self, 
         image: Any, 
         conf_threshold: float = 0.25,
+        iou_threshold: float = 0.45,
         agnostic_nms: bool = False,
         augment: bool = False
     ) -> List[Dict[str, Any]]:
@@ -31,6 +32,7 @@ class YOLOInference:
         Args:
             image: Path to input image, PIL Image, or numpy array
             conf_threshold: Confidence threshold for detections
+            iou_threshold: IoU threshold for NMS
             agnostic_nms: If True, perform class-agnostic NMS
             augment: If True, perform Test Time Augmentation (TTA)
             
@@ -39,7 +41,8 @@ class YOLOInference:
         """
         results = self.model(
             image, 
-            conf=conf_threshold, 
+            conf=conf_threshold,
+            iou=iou_threshold,
             device=self.device,
             agnostic_nms=agnostic_nms,
             augment=augment
@@ -48,7 +51,9 @@ class YOLOInference:
         detections = []
         for result in results:
             boxes = result.boxes
-            for box in boxes:
+            masks = getattr(result, 'masks', None)
+            
+            for idx, box in enumerate(boxes):
                 detection = {
                     "class_id": int(box.cls[0]),
                     "class_name": self.model.names[int(box.cls[0])],
@@ -56,6 +61,12 @@ class YOLOInference:
                     "bbox": box.xyxy[0].tolist(),
                     "bbox_normalized": box.xywhn[0].tolist()
                 }
+                
+                if masks is not None and idx < len(masks.xy):
+                    polygon = masks.xy[idx]
+                    if polygon is not None and len(polygon) > 0:
+                        detection["polygon"] = polygon.flatten().tolist()
+                
                 detections.append(detection)
                 
         return detections
@@ -64,6 +75,7 @@ class YOLOInference:
         self, 
         images: List[Any], 
         conf_threshold: float = 0.25,
+        iou_threshold: float = 0.45,
         agnostic_nms: bool = False,
         augment: bool = False
     ) -> List[List[Dict[str, Any]]]:
@@ -73,6 +85,7 @@ class YOLOInference:
         Args:
             images: List of image paths, PIL Images, or numpy arrays
             conf_threshold: Confidence threshold
+            iou_threshold: IoU threshold for NMS
             agnostic_nms: If True, perform class-agnostic NMS
             augment: If True, perform Test Time Augmentation (TTA)
             
@@ -82,6 +95,7 @@ class YOLOInference:
         results = self.model(
             images,
             conf=conf_threshold,
+            iou=iou_threshold,
             device=self.device,
             agnostic_nms=agnostic_nms,
             augment=augment
@@ -91,8 +105,10 @@ class YOLOInference:
         for result in results:
             detections = []
             boxes = result.boxes
+            masks = getattr(result, 'masks', None)
+            
             if boxes:
-                for box in boxes:
+                for idx, box in enumerate(boxes):
                     detection = {
                         "class_id": int(box.cls[0]),
                         "class_name": self.model.names[int(box.cls[0])],
@@ -100,6 +116,12 @@ class YOLOInference:
                         "bbox": box.xyxy[0].tolist(),
                         "bbox_normalized": box.xywhn[0].tolist()
                     }
+                    
+                    if masks is not None and idx < len(masks.xy):
+                        polygon = masks.xy[idx]
+                        if polygon is not None and len(polygon) > 0:
+                            detection["polygon"] = polygon.flatten().tolist()
+                    
                     detections.append(detection)
             all_detections.append(detections)
             

@@ -416,6 +416,24 @@ async def get_my_permissions(current_user: dict = Depends(get_current_user)):
     }
 
 
+@router.post("/extend-session", response_model=TokenResponse)
+async def extend_session(current_user: dict = Depends(get_current_user)):
+    access_token = create_access_token(
+        data={"user_id": current_user["id"], "username": current_user["username"], "role": current_user["role"]}
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": current_user["id"],
+            "username": current_user["username"],
+            "email": current_user["email"],
+            "role": current_user["role"],
+        },
+    }
+
+
 @router.get("/users")
 async def list_users(
     current_user: dict = Depends(require_permission(Permission.MANAGE_USERS))

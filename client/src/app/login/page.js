@@ -84,11 +84,11 @@ export default function LoginPage() {
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           
           <form onSubmit={handleSubmit} className="space-y-6">
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" initial={false}>
               {error && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }} 
-                  animate={{ opacity: 1, y: 0 }} 
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 text-red-400 text-sm"
                 >
@@ -97,9 +97,9 @@ export default function LoginPage() {
                 </motion.div>
               )}
               {resendSuccess && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }} 
-                  animate={{ opacity: 1, y: 0 }} 
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3 text-emerald-400 text-sm"
                 >
@@ -109,9 +109,9 @@ export default function LoginPage() {
               )}
             </AnimatePresence>
 
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" initial={false}>
               {step === "email" ? (
-                <motion.div 
+                <motion.div
                   key="email-step"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -152,7 +152,7 @@ export default function LoginPage() {
                   </Button>
                 </motion.div>
               ) : (
-                <motion.div 
+                <motion.div
                   key="otp-step"
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
