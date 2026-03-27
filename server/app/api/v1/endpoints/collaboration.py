@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection
 import uuid
+import json
 from datetime import datetime, timedelta
 import jwt
 from app.core.config import settings
@@ -125,7 +126,7 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
         # Log activity
         cursor.execute(
             "INSERT INTO activity_logs (dataset_id, user_id, action, details) VALUES (%s, %s, %s, %s)",
-            (dataset_id, current_user['id'], "invite_sent", f'{{"target_email": "{req.email}", "role": "{req.role}"}}')
+            (dataset_id, current_user['id'], "invite_sent", json.dumps({"target_email": req.email, "role": req.role}))
         )
         
         conn.commit()
@@ -181,7 +182,7 @@ async def accept_invite(req: AcceptInviteRequest, current_user: dict = Depends(g
         # Log activity
         cursor.execute(
             "INSERT INTO activity_logs (dataset_id, user_id, action, details) VALUES (%s, %s, %s, %s)",
-            (dataset_id, current_user['id'], "member_joined", f'{{"role": "{role}"}}')
+            (dataset_id, current_user['id'], "member_joined", json.dumps({"role": role}))
         )
         
         conn.commit()
@@ -219,7 +220,7 @@ async def remove_member(dataset_id: str, user_id: int, current_user: dict = Depe
         # Log activity
         cursor.execute(
             "INSERT INTO activity_logs (dataset_id, user_id, action, details) VALUES (%s, %s, %s, %s)",
-            (dataset_id, current_user['id'], "member_removed", f'{{"target_user_id": {user_id}}}')
+            (dataset_id, current_user['id'], "member_removed", json.dumps({"target_user_id": user_id}))
         )
         
         conn.commit()

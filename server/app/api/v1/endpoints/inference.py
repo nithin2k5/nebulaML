@@ -47,6 +47,10 @@ async def predict_image(
             # Prevent path traversal in job_id
             if ".." in job_id or "/" in job_id or "\\" in job_id:
                 raise HTTPException(status_code=400, detail="Invalid job_id")
+            allowed_base = Path("runs/detect").resolve()
+            weights_dir = (Path("runs/detect") / f"job_{job_id}" / "weights").resolve()
+            if not str(weights_dir).startswith(str(allowed_base)):
+                raise HTTPException(status_code=400, detail="Invalid job_id")
             weights_dir = Path("runs/detect") / f"job_{job_id}" / "weights"
             onnx_path = weights_dir / "best.onnx"
             pt_path = weights_dir / "best.pt"

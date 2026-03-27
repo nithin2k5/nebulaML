@@ -141,9 +141,9 @@ async def get_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
         
-    if db_dataset.get("user_id") and db_dataset["user_id"] != current_user["id"]:
+    if db_dataset.get("user_id") != current_user["id"]:
          raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
-    
+
     # Sync with memory
     datasets_db[dataset_id] = db_dataset
     
@@ -162,9 +162,9 @@ async def upload_images_to_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
         
-    if db_dataset.get("user_id") and db_dataset["user_id"] != current_user["id"]:
-         raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
-    
+    if db_dataset.get("user_id") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
+
     # Validate files list
     if not files or len(files) == 0:
         raise HTTPException(status_code=400, detail="No files provided")
@@ -325,7 +325,7 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
     db_dataset = DatasetService.get_dataset(dataset_id)
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    if db_dataset.get("user_id") and db_dataset["user_id"] != current_user["id"]:
+    if db_dataset.get("user_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized to annotate this dataset")
 
     # Verify image belongs to this dataset
@@ -649,10 +649,13 @@ val: val/images
 
 
 @router.get("/datasets/{dataset_id}/export-status/{job_id}")
-async def get_export_status(dataset_id: str, job_id: str):
+async def get_export_status(dataset_id: str, job_id: str, current_user: dict = Depends(get_current_user)):
     if job_id not in export_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
-    return export_jobs[job_id]
+    job = export_jobs[job_id]
+    if job.get("dataset_id") and job["dataset_id"] != dataset_id:
+        raise HTTPException(status_code=403, detail="Job does not belong to this dataset")
+    return job
 
 
 @router.post("/datasets/{dataset_id}/export")
@@ -686,7 +689,8 @@ async def export_dataset(
     job_id = str(uuid.uuid4())
     export_jobs[job_id] = {
         "status": "pending",
-        "progress": 0
+        "progress": 0,
+        "dataset_id": dataset_id
     }
     
     background_tasks.add_task(
