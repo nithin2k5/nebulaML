@@ -68,14 +68,17 @@ class YOLOTrainer:
         on_train_epoch_end = kwargs.pop('on_train_epoch_end', None)
         if on_train_epoch_end:
             self.model.add_callback('on_train_epoch_end', on_train_epoch_end)
-        
+
+        # Respect caller-supplied device; fall back to auto-detected device
+        device = kwargs.pop('device', self.device)
+
         results = self.model.train(
             data=data_yaml,
             epochs=epochs,
             imgsz=imgsz,
             batch=batch,
             name=name,
-            device=self.device,
+            device=device,
             **kwargs
         )
         # Export the best model to ONNX for faster inference

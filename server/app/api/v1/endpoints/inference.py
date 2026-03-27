@@ -25,6 +25,7 @@ def get_inference_model(model_path: str) -> YOLOInference:
 async def predict_image(
     file: UploadFile = File(...),
     confidence: Optional[float] = Form(0.25),
+    iou: Optional[float] = Form(0.45),
     model_name: Optional[str] = Form("yolov8n.pt"),
     job_id: Optional[str] = Form(None),
     agnostic_nms: Optional[bool] = Form(False),
@@ -77,6 +78,7 @@ async def predict_image(
         detections = inference_model.predict(
             image, 
             conf_threshold=confidence,
+            iou_threshold=iou,
             agnostic_nms=agnostic_nms,
             augment=augment
         )
@@ -100,6 +102,8 @@ async def predict_batch(
     confidence: Optional[float] = Form(0.25),
     agnostic_nms: Optional[bool] = Form(False),
     augment: Optional[bool] = Form(False),
+    model_name: Optional[str] = Form("yolov8n.pt"),
+    job_id: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -110,9 +114,22 @@ async def predict_batch(
         raise HTTPException(status_code=400, detail="Batch inference is limited to 20 images at a time")
 
     try:
-        # We need a model_name or job_id to know which model to use.
-        # But this endpoint doesn't accept model_name easily in the signature. Default to base.
-        inference_model = get_inference_model("yolov8n.pt")
+        # Resolve model path (same logic as /predict)
+        model_path = model_name
+        if job_id:
+            if ".." in job_id or "/" in job_id or "\\" in job_id:
+                raise HTTPException(status_code=400, detail="Invalid job_id")
+            weights_dir = Path("runs/detect") / f"job_{job_id}" / "weights"
+            onnx_path = weights_dir / "best.onnx"
+            pt_path = weights_dir / "best.pt"
+            if onnx_path.exists():
+                model_path = str(onnx_path)
+            elif pt_path.exists():
+                model_path = str(pt_path)
+            else:
+                raise HTTPException(status_code=404, detail=f"Trained model for job {job_id} not found")
+
+        inference_model = get_inference_model(model_path)
         
         all_results = []
         images = []
@@ -156,7 +173,7 @@ async def predict_batch(
 
 
 @router.get("/models")
-async def list_available_models():
+async def list_available_models(current_user: dict = Depends(get_current_user)):
     """
     List available YOLO models
     """

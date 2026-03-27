@@ -57,6 +57,17 @@ def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
         return True
     return uid == current_user.get("id")
 
+ALLOWED_MODELS = {
+    # YOLOv8
+    "yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt",
+    # YOLOv9
+    "yolov9t.pt", "yolov9s.pt", "yolov9c.pt", "yolov9e.pt",
+    # YOLOv10
+    "yolov10n.pt", "yolov10s.pt", "yolov10m.pt", "yolov10l.pt", "yolov10x.pt",
+    # YOLO11
+    "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
+}
+
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
     batch_size: int = Field(default=16, ge=1, le=128, description="Batch size (1-128)")
@@ -68,6 +79,12 @@ class TrainingConfig(BaseModel):
     strict_epochs: bool = Field(default=False, description="If True, enforce exact epoch count (disable early stopping)")
     augmentations: Optional[Dict[str, Any]] = Field(default=None, description="Data augmentation parameters")
     preset: Optional[str] = Field(default=None, description="Preset name: fast, balanced, accurate")
+
+    @validator('model_name')
+    def validate_model_name(cls, v):
+        if v not in ALLOWED_MODELS:
+            raise ValueError(f"Unsupported model '{v}'. Allowed: {sorted(ALLOWED_MODELS)}")
+        return v
 
     def apply_preset(self):
         """Apply a named preset, overriding defaults but not user-set values."""
@@ -762,6 +779,13 @@ async def start_training_from_dataset(
     """
     _ensure_jobs_loaded()
     try:
+        active = sum(1 for j in training_jobs.values() if j.get("status") in ["running", "pending"])
+        if active >= MAX_CONCURRENT_JOBS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many training jobs running ({active}/{MAX_CONCURRENT_JOBS}). Wait for one to finish before starting another."
+            )
+
         # Analyze dataset first
         try:
             analysis = DatasetAnalyzer.analyze_dataset(request.dataset_id)

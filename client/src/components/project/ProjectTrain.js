@@ -23,7 +23,7 @@ const PRESET_META = {
 export default function ProjectTrain({ dataset, onTrainingStarted, versionRefreshKey = 0 }) {
     const { token } = useAuth();
     const [versions, setVersions] = useState([]);
-    const [selectedVersion, setSelectedVersion] = useState("");
+    const [selectedVersionIds, setSelectedVersionIds] = useState([]);
     const [activePreset, setActivePreset] = useState("balanced");
     const [config, setConfig] = useState({
         epochs: 100,
@@ -36,7 +36,6 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
     const [selectedClasses, setSelectedClasses] = useState([]);
     const [preflight, setPreflight] = useState(null);
     const [preflightLoading, setPreflightLoading] = useState(false);
-    const [activeJobId, setActiveJobId] = useState(null);
 
     // Initialize with all classes selected
     useEffect(() => {
@@ -69,19 +68,16 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
                 if (res.ok) {
                     const data = await res.json();
                     setVersions(data.versions || []);
-                    if (data.versions?.length > 0) {
-                        setSelectedVersion(data.versions[0].id);
-                    }
+                    if (data.versions?.length > 0) setSelectedVersionIds([data.versions[0].id.toString()]);
                 }
             } catch(e) { console.error("Failed to fetch versions:", e); }
         };
         fetchVersions();
     }, [dataset.id, token, versionRefreshKey]);
 
-    // Run preflight check when version changes
     useEffect(() => {
         if (dataset?.id) runPreflight();
-    }, [dataset?.id, selectedVersion]);
+    }, [dataset?.id]);
 
     const runPreflight = async () => {
         setPreflightLoading(true);
@@ -118,8 +114,8 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
     };
 
     const startTraining = async () => {
-        if (!selectedVersion) {
-            toast.error("Please select a dataset version first.");
+        if (!selectedVersionIds || selectedVersionIds.length === 0) {
+            toast.error("Please select at least one dataset version.");
             return;
         }
         if (preflight && !preflight.can_train) {
@@ -128,51 +124,38 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
         }
         setTraining(true);
         try {
-            const response = await fetch(API_ENDPOINTS.TRAINING.START_FROM_DATASET, {
-                method: "POST",
-                headers: { 
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}` 
-                },
-                body: JSON.stringify({
-                    dataset_id: dataset.id,
-                    version_id: selectedVersion,
-                    config: { ...config, preset: activePreset },
-                    classes: selectedClasses
-                })
-            });
+            const startedJobIds = [];
+            for (const verId of selectedVersionIds) {
+                const response = await fetch(API_ENDPOINTS.TRAINING.START_FROM_DATASET, {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}` 
+                    },
+                    body: JSON.stringify({
+                        dataset_id: dataset.id,
+                        version_id: verId,
+                        config: { ...config, preset: activePreset },
+                        classes: selectedClasses
+                    })
+                });
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(errText || `Server error ${response.status}`);
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || `Server error ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success && data.job_id) startedJobIds.push(data.job_id);
             }
-            const data = await response.json();
-            if (data.success) {
-                toast.success("Training started!");
-                setActiveJobId(data.job_id);
-                if (onTrainingStarted) onTrainingStarted();
-            } else {
-                toast.error("Failed to start training: " + (data.detail || "Unknown error"));
-            }
+
+            toast.success(`Training started for ${startedJobIds.length} version${startedJobIds.length === 1 ? "" : "s"}! You can navigate away - training will continue in the background.`);
+            if (onTrainingStarted) onTrainingStarted();
         } catch (e) {
             toast.error("Error: " + e.message);
         } finally {
             setTraining(false);
         }
     };
-
-    // If we have an active job, show the live training view
-    if (activeJobId) {
-        return (
-            <div className="h-full flex flex-col gap-6 overflow-y-auto pb-10 custom-scrollbar pr-2">
-                <TrainingLive 
-                    jobId={activeJobId} 
-                    dataset={dataset}
-                    onBack={() => setActiveJobId(null)} 
-                />
-            </div>
-        );
-    }
 
     return (
         <div className="h-full flex flex-col gap-6 overflow-y-auto pb-10 custom-scrollbar pr-2">
@@ -282,24 +265,64 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="space-y-2 mb-6 p-4 bg-muted/30 rounded-lg border border-border">
-                                <Label className="text-base font-semibold">Dataset Version</Label>
-                                {versions.length > 0 ? (
-                                    <Select value={selectedVersion} onValueChange={setSelectedVersion}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select a version to train on" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {versions.map((ver) => (
-                                                <SelectItem key={ver.id} value={ver.id.toString()}>
-                                                    {ver.name} - {new Date(ver.created_at).toLocaleDateString()} ({ver.images_count} imgs)
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                ) : (
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                        <Label className="text-base font-semibold">Dataset Versions</Label>
+                                        <p className="text-xs text-muted-foreground">Select one or more versions to train in parallel.</p>
+                                    </div>
+                                    {versions.length > 0 && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                                if (selectedVersionIds.length === versions.length) setSelectedVersionIds([]);
+                                                else setSelectedVersionIds(versions.map(v => v.id.toString()));
+                                            }}
+                                        >
+                                            {selectedVersionIds.length === versions.length ? "Clear" : "Select all"}
+                                        </Button>
+                                    )}
+                                </div>
+                                {versions.length === 0 ? (
                                     <div className="flex items-center text-amber-500 text-sm mt-2">
                                         <AlertCircle className="w-4 h-4 mr-2" />
                                         No dataset versions created yet. Please go to the Generate tab to create one before training.
+                                    </div>
+                                ) : (
+                                    <div className="mt-3 max-h-56 overflow-y-auto pr-1">
+                                        <div className="space-y-2">
+                                            {versions
+                                                .slice()
+                                                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                                                .map((ver) => {
+                                                    const verId = ver.id.toString();
+                                                    const checked = selectedVersionIds.includes(verId);
+                                                    return (
+                                                        <div
+                                                            key={verId}
+                                                            className={`flex items-center justify-between gap-3 p-3 rounded-lg border transition-all ${
+                                                                checked ? "border-primary/40 bg-primary/5" : "border-border hover:border-muted-foreground/30 bg-background/10"
+                                                            }`}
+                                                        >
+                                                            <div className="min-w-0">
+                                                                <div className="font-semibold text-sm truncate">{ver.name}</div>
+                                                                <div className="text-xs text-muted-foreground font-mono">
+                                                                    {new Date(ver.created_at).toLocaleDateString()} • {ver.images_count} imgs
+                                                                </div>
+                                                            </div>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                onChange={() => {
+                                                                    if (checked) setSelectedVersionIds(selectedVersionIds.filter(id => id !== verId));
+                                                                    else setSelectedVersionIds([...selectedVersionIds, verId]);
+                                                                }}
+                                                                className="h-4 w-4 accent-indigo-500"
+                                                            />
+                                                        </div>
+                                                    );
+                                                })}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -440,7 +463,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
                             <Button
                                 className="w-full mt-6"
                                 onClick={startTraining}
-                                disabled={training || selectedClasses.length === 0 || !selectedVersion || (preflight && !preflight.can_train)}
+                                disabled={training || selectedClasses.length === 0 || (selectedVersionIds.length === 0) || (preflight && !preflight.can_train)}
                             >
                                 {training ? "Starting..." : "Start Training"}
                                 {!training && <Play className="ml-2" />}

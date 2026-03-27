@@ -514,6 +514,28 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
         
         total_steps = len(annotated_images)
         current_step = 0
+
+        def _transform_label_line(line: str, flip_horizontal: bool, flip_vertical: bool) -> str:
+            parts = line.strip().split()
+            if not parts:
+                return ""
+            if len(parts) == 5:
+                cls, x, y, w, h = parts[0], float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+                if flip_horizontal:
+                    x = 1.0 - x
+                if flip_vertical:
+                    y = 1.0 - y
+                return f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n"
+            if len(parts) >= 7 and (len(parts) % 2 == 1):
+                cls = parts[0]
+                coords = [float(p) for p in parts[1:]]
+                for i in range(0, len(coords), 2):
+                    if flip_horizontal:
+                        coords[i] = 1.0 - coords[i]
+                    if flip_vertical:
+                        coords[i + 1] = 1.0 - coords[i + 1]
+                return f"{cls} " + " ".join(f"{c:.6f}" for c in coords) + "\n"
+            return line
         
         for split_dir, images, split_name in splits:
             if images:
@@ -531,6 +553,8 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
                     dst_label = split_dir / "labels" / label_name
                     if src_label.exists():
                         shutil.copy2(src_label, dst_label)
+                    else:
+                        (dst_label).write_text("")
 
                     if split_name == "train" and augmentations and any(augmentations.values()):
                         try:
@@ -545,10 +569,9 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
                                     if src_label.exists():
                                         with open(src_label, 'r') as f_src, open(aug_label_path, 'w') as f_dst:
                                             for line in f_src:
-                                                parts = line.strip().split()
-                                                if len(parts) >= 5:
-                                                    cls, x, y, w, h = parts[0], float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
-                                                    f_dst.write(f"{cls} {1.0 - x} {y} {w} {h}\n")
+                                                f_dst.write(_transform_label_line(line, True, False))
+                                    else:
+                                        aug_label_path.write_text("")
                                                     
                                 if augmentations.get("flipVertical"):
                                     aug_filename = f"aug_vflip_{img['filename']}"
@@ -560,10 +583,9 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
                                     if src_label.exists():
                                         with open(src_label, 'r') as f_src, open(aug_label_path, 'w') as f_dst:
                                             for line in f_src:
-                                                parts = line.strip().split()
-                                                if len(parts) >= 5:
-                                                    cls, x, y, w, h = parts[0], float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
-                                                    f_dst.write(f"{cls} {x} {1.0 - y} {w} {h}\n")
+                                                f_dst.write(_transform_label_line(line, False, True))
+                                    else:
+                                        aug_label_path.write_text("")
                                                     
                                 if augmentations.get("noise"):
                                     aug_filename = f"aug_noise_{img['filename']}"
@@ -573,6 +595,8 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
                                     im_noise.save(aug_img_path)
                                     if src_label.exists():
                                         shutil.copy2(src_label, aug_label_path)
+                                    else:
+                                        aug_label_path.write_text("")
                         except Exception as e:
                             print(f"Augmentation failed for {img['filename']}: {e}")
                     
@@ -652,10 +676,10 @@ async def export_dataset(
     dataset_dir = Path(f"datasets/{dataset_id}")
     
     all_images = DatasetService.get_dataset_images(dataset_id)
-    annotated_images = [img for img in all_images if img.get("annotated", False)]
+    annotated_images = list(all_images or [])
     
     if not annotated_images:
-        raise HTTPException(status_code=400, detail="No annotated images in dataset")
+        raise HTTPException(status_code=400, detail="No images in dataset")
     
     images_with_split = [img for img in annotated_images if img.get("split")]
     

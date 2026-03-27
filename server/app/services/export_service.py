@@ -83,14 +83,36 @@ class ExportService:
                     class_name = box.get("class_name", "")
                     cat_id = class_map.get(class_name, 0)
 
+                    box_type = box.get("type", "box")
+                    points = box.get("points", []) if box_type in ["polygon", "line"] else []
+                    segmentation = []
+                    area_px = w * h
+                    if points and len(points) >= 3:
+                        coords = []
+                        xs = []
+                        ys = []
+                        for p in points:
+                            px = float(p.get("x", 0))
+                            py = float(p.get("y", 0))
+                            coords.extend([px, py])
+                            xs.append(px)
+                            ys.append(py)
+                        segmentation = [coords]
+                        s = 0.0
+                        n = len(points)
+                        for i in range(n):
+                            j = (i + 1) % n
+                            s += xs[i] * ys[j] - xs[j] * ys[i]
+                        area_px = abs(s) / 2.0
+
                     coco["annotations"].append({
                         "id": ann_id,
                         "image_id": hash(image_id) % (10**9),
                         "category_id": cat_id,
                         "bbox": [x, y, w, h],
-                        "area": w * h,
+                        "area": area_px,
                         "iscrowd": 0,
-                        "segmentation": []
+                        "segmentation": segmentation
                     })
                     ann_id += 1
 

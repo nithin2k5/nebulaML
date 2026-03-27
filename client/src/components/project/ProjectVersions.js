@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Cpu, Clock, RefreshCw, CheckCircle2, AlertCircle, Trash2, Layers } from "lucide-react";
+import { Cpu, Clock, RefreshCw, CheckCircle2, AlertCircle, Trash2, Layers, Download } from "lucide-react";
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -147,9 +147,37 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                             </div>
                                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity -mr-2 -mt-2">
                                                 {(job.status === "completed" || job.status === "success") && (
-                                                    <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary/80" onClick={onDeploy}>
-                                                        Deploy
-                                                    </Button>
+                                                    <>
+                                                        <Button variant="ghost" size="sm" className="h-8 text-primary hover:text-primary/80" onClick={onDeploy}>
+                                                            Deploy
+                                                        </Button>
+                                                        <a
+                                                            href={API_ENDPOINTS.MODELS.DOWNLOAD(`job_${job.job_id}`)}
+                                                            download={`${job.config?.model_name?.replace('.pt','') || 'model'}_job_${job.job_id.substring(0,8)}.pt`}
+                                                            onClick={(e) => {
+                                                                // Add auth header via fetch for authenticated download
+                                                                e.preventDefault();
+                                                                fetch(API_ENDPOINTS.MODELS.DOWNLOAD(`job_${job.job_id}`), {
+                                                                    headers: { Authorization: `Bearer ${token}` }
+                                                                }).then(res => {
+                                                                    if (!res.ok) throw new Error("Download failed");
+                                                                    return res.blob();
+                                                                }).then(blob => {
+                                                                    const url = URL.createObjectURL(blob);
+                                                                    const a = document.createElement('a');
+                                                                    a.href = url;
+                                                                    a.download = `${job.config?.model_name?.replace('.pt','') || 'model'}_job_${job.job_id.substring(0,8)}.pt`;
+                                                                    a.click();
+                                                                    URL.revokeObjectURL(url);
+                                                                    toast.success("Model downloaded");
+                                                                }).catch(err => toast.error(err.message));
+                                                            }}
+                                                        >
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-500 hover:text-emerald-400" title="Download .pt weights">
+                                                                <Download className="h-4 w-4" />
+                                                            </Button>
+                                                        </a>
+                                                    </>
                                                 )}
                                                 {(job.status === "running" || job.status === "pending") && (
                                                     <Button variant="ghost" size="sm" className="h-8 text-amber-600 hover:text-amber-500" onClick={() => cancelJob(job.job_id)}>
