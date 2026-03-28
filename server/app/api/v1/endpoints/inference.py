@@ -12,6 +12,11 @@ from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 
+# Resolve the runs directory relative to this file's location so it is always
+# consistent regardless of the working directory uvicorn is launched from.
+_SERVER_ROOT = Path(__file__).resolve().parents[4]  # …/server/
+_RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
+
 # Max image upload size for inference: 10 MB
 _MAX_INFERENCE_SIZE = 10 * 1024 * 1024
 
@@ -20,6 +25,36 @@ _MAX_INFERENCE_SIZE = 10 * 1024 * 1024
 def get_inference_model(model_path: str) -> YOLOInference:
     """Load and cache up to 3 models in memory for fast swapping"""
     return YOLOInference(model_path)
+
+
+def _resolve_job_weights(job_id: str) -> str:
+    """Return the absolute path to the best weights for a training job.
+
+    Raises HTTPException 400 if job_id looks malicious, 404 if weights are missing.
+    """
+    # Reject obvious path-traversal attempts
+    if ".." in job_id or "/" in job_id or "\\" in job_id:
+        raise HTTPException(status_code=400, detail="Invalid job_id")
+
+    weights_dir = (_RUNS_BASE / f"job_{job_id}" / "weights").resolve()
+
+    # Verify the resolved path is still inside the expected subtree
+    if not str(weights_dir).startswith(str(_RUNS_BASE)):
+        raise HTTPException(status_code=400, detail="Invalid job_id")
+
+    onnx_path = weights_dir / "best.onnx"
+    pt_path = weights_dir / "best.pt"
+
+    if onnx_path.exists():
+        return str(onnx_path)
+    if pt_path.exists():
+        return str(pt_path)
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Trained model weights not found for this job. Ensure training completed successfully (expected: {weights_dir})"
+    )
+
 
 @router.post("/predict")
 async def predict_image(
@@ -34,34 +69,13 @@ async def predict_image(
 ):
     """
     Run inference on uploaded image. Requires authentication.
-    If job_id is provided, loads trained weights from that job. 
+    If job_id is provided, loads trained weights from that job.
     Otherwise uses pretrained model_name.
     """
-    global inference_model
-    
     try:
         # Determine model path
-        model_path = model_name
-        
-        if job_id:
-            # Prevent path traversal in job_id
-            if ".." in job_id or "/" in job_id or "\\" in job_id:
-                raise HTTPException(status_code=400, detail="Invalid job_id")
-            allowed_base = Path("runs/detect").resolve()
-            weights_dir = (Path("runs/detect") / f"job_{job_id}" / "weights").resolve()
-            if not str(weights_dir).startswith(str(allowed_base)):
-                raise HTTPException(status_code=400, detail="Invalid job_id")
-            weights_dir = Path("runs/detect") / f"job_{job_id}" / "weights"
-            onnx_path = weights_dir / "best.onnx"
-            pt_path = weights_dir / "best.pt"
-            
-            if onnx_path.exists():
-                model_path = str(onnx_path)
-            elif pt_path.exists():
-                model_path = str(pt_path)
-            else:
-                raise HTTPException(status_code=404, detail=f"Trained model for job {job_id} not found at {weights_dir}")
-                
+        model_path = _resolve_job_weights(job_id) if job_id else (model_name or "yolov8n.pt")
+
         # Get cached model
         inference_model = get_inference_model(model_path)
 
@@ -119,20 +133,7 @@ async def predict_batch(
 
     try:
         # Resolve model path (same logic as /predict)
-        model_path = model_name
-        if job_id:
-            if ".." in job_id or "/" in job_id or "\\" in job_id:
-                raise HTTPException(status_code=400, detail="Invalid job_id")
-            weights_dir = Path("runs/detect") / f"job_{job_id}" / "weights"
-            onnx_path = weights_dir / "best.onnx"
-            pt_path = weights_dir / "best.pt"
-            if onnx_path.exists():
-                model_path = str(onnx_path)
-            elif pt_path.exists():
-                model_path = str(pt_path)
-            else:
-                raise HTTPException(status_code=404, detail=f"Trained model for job {job_id} not found")
-
+        model_path = _resolve_job_weights(job_id) if job_id else (model_name or "yolov8n.pt")
         inference_model = get_inference_model(model_path)
         
         all_results = []

@@ -12,8 +12,9 @@ Provides analysis for:
 
 import json
 import logging
+import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
 from collections import Counter, defaultdict
 from PIL import Image
 import hashlib
@@ -29,13 +30,27 @@ except ImportError:
     # Fallback for numpy operations
     def mean(values):
         return sum(values) / len(values) if values else 0.0
-    
+
     def std(values):
         if not values:
             return 0.0
         m = mean(values)
         variance = sum((x - m) ** 2 for x in values) / len(values)
         return variance ** 0.5
+
+# Optional OpenCV import (already in requirements, but guard defensively)
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
+# Optional imagehash import
+try:
+    import imagehash
+    HAS_IMAGEHASH = True
+except ImportError:
+    HAS_IMAGEHASH = False
 
 from app.services.database import DatasetService, AnnotationService
 
@@ -89,6 +104,23 @@ class DatasetAnalysis:
     recommended_epochs: int
     augmentation_recommendations: Dict[str, Any]
     
+    # Image quality metrics
+    image_quality_flags: Dict[str, int]  # counts of blurry/dark/overexposed/low_contrast
+    blurry_images: List[str]
+    dark_images: List[str]
+    overexposed_images: List[str]
+    low_contrast_images: List[str]
+    avg_blur_score: float
+    avg_brightness: float
+    avg_contrast: float
+    image_quality_sampled: bool  # True if metrics were computed on a sample
+
+    # Near-duplicate detection
+    near_duplicate_images: List[Dict[str, Any]]  # [{image_a, image_b, distance}]
+
+    # Per-class quality
+    per_class_quality: Dict[str, Dict[str, Any]]
+
     # Overall quality
     overall_quality_score: float  # 0-100
     warnings: List[str]
@@ -97,23 +129,131 @@ class DatasetAnalysis:
 
 class DatasetAnalyzer:
     """Analyze datasets for training readiness"""
-    
+
     # Size thresholds (relative to image)
     TINY_THRESHOLD = 0.01  # < 1% of image
     SMALL_THRESHOLD = 0.05  # < 5% of image
     MEDIUM_THRESHOLD = 0.2  # < 20% of image
     # LARGE = > 20%
+
+    # Image quality thresholds
+    BLUR_THRESHOLD = 100.0         # Laplacian variance below this = blurry
+    BRIGHTNESS_LOW_THRESHOLD = 40  # Mean pixel value below this = too dark
+    BRIGHTNESS_HIGH_THRESHOLD = 220  # Mean pixel value above this = overexposed
+    CONTRAST_THRESHOLD = 20        # Std dev below this = low contrast
+
+    # Sampling caps to keep analysis fast on large datasets
+    MAX_QUALITY_SAMPLE = 500       # Max images to run image-quality metrics on
+    MAX_PHASH_COMPARE = 800        # Max images to run perceptual-hash comparison on
+    NEAR_DUP_THRESHOLD = 10        # Hamming distance ≤ this = near-duplicate
     
     @staticmethod
-    def analyze_dataset(dataset_id: str) -> DatasetAnalysis:
+    def _compute_image_quality(img_path: Path) -> Dict[str, Any]:
+        """Compute blur, brightness, and contrast for a single image using OpenCV."""
+        if not HAS_CV2:
+            return {}
+        try:
+            img_cv = cv2.imread(str(img_path))
+            if img_cv is None:
+                return {}
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+            blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            brightness = float(gray.mean())
+            contrast = float(gray.std())
+            return {
+                "blur_score": blur_score,
+                "brightness": brightness,
+                "contrast": contrast,
+                "is_blurry": blur_score < DatasetAnalyzer.BLUR_THRESHOLD,
+                "is_dark": brightness < DatasetAnalyzer.BRIGHTNESS_LOW_THRESHOLD,
+                "is_overexposed": brightness > DatasetAnalyzer.BRIGHTNESS_HIGH_THRESHOLD,
+                "is_low_contrast": contrast < DatasetAnalyzer.CONTRAST_THRESHOLD,
+            }
+        except Exception as e:
+            logger.warning(f"Image quality check failed for {img_path}: {e}")
+            return {}
+
+    @staticmethod
+    def _find_near_duplicates(
+        phash_list: List[Tuple[str, Any, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Compare perceptual hashes pairwise; return near-duplicate pairs."""
+        near_dups: List[Dict[str, Any]] = []
+        seen: Set[str] = set()
+        for i in range(len(phash_list)):
+            fn_a, ph_a, dh_a = phash_list[i]
+            for j in range(i + 1, len(phash_list)):
+                fn_b, ph_b, dh_b = phash_list[j]
+                dist = min(ph_a - ph_b, dh_a - dh_b)
+                if dist <= DatasetAnalyzer.NEAR_DUP_THRESHOLD:
+                    key = tuple(sorted([fn_a, fn_b]))
+                    if key not in seen:
+                        seen.add(key)
+                        near_dups.append({"image_a": fn_a, "image_b": fn_b, "distance": int(dist)})
+        return near_dups
+
+    @staticmethod
+    def _compute_per_class_quality(
+        class_boxes: Dict[str, List[Dict]],
+        class_image_sets: Dict[str, Set[str]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Compute per-class quality metrics."""
+        result: Dict[str, Dict[str, Any]] = {}
+        for cls, boxes in class_boxes.items():
+            if not boxes:
+                continue
+            total = len(boxes)
+            valid = sum(1 for b in boxes if b.get("width", 0) > 0 and b.get("height", 0) > 0)
+            validity_rate = valid / total if total else 0.0
+
+            # Average relative box size
+            rel_sizes = []
+            for b in boxes:
+                iw = b.get("_img_width", 0)
+                ih = b.get("_img_height", 0)
+                bw = b.get("width", 0)
+                bh = b.get("height", 0)
+                if iw > 0 and ih > 0 and bw > 0 and bh > 0:
+                    rel_sizes.append((bw * bh) / (iw * ih))
+            avg_box_size = float(sum(rel_sizes) / len(rel_sizes)) if rel_sizes else 0.0
+
+            # IoU overlap ratio among same-class boxes
+            valid_boxes = [b for b in boxes if b.get("width", 0) > 0 and b.get("height", 0) > 0]
+            overlap_pairs = 0
+            total_pairs = 0
+            for ii in range(len(valid_boxes)):
+                b1 = valid_boxes[ii]
+                x1, y1 = b1.get("x", 0), b1.get("y", 0)
+                x1m, y1m = x1 + b1.get("width", 0), y1 + b1.get("height", 0)
+                for jj in range(ii + 1, len(valid_boxes)):
+                    b2 = valid_boxes[jj]
+                    x2, y2 = b2.get("x", 0), b2.get("y", 0)
+                    x2m, y2m = x2 + b2.get("width", 0), y2 + b2.get("height", 0)
+                    total_pairs += 1
+                    if not (x1m <= x2 or x2m <= x1 or y1m <= y2 or y2m <= y1):
+                        overlap_pairs += 1
+
+            iou_overlap_ratio = overlap_pairs / total_pairs if total_pairs else 0.0
+
+            result[cls] = {
+                "image_count": len(class_image_sets.get(cls, set())),
+                "annotation_count": total,
+                "avg_box_size": round(avg_box_size, 6),
+                "iou_overlap_ratio": round(iou_overlap_ratio, 4),
+                "validity_rate": round(validity_rate, 4),
+            }
+        return result
+
+    @staticmethod
+    def analyze_dataset(dataset_id: str) -> "DatasetAnalysis":
         """Perform comprehensive dataset analysis"""
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise ValueError(f"Dataset {dataset_id} not found")
-        
+
         images = DatasetService.get_dataset_images(dataset_id)
         annotated_images = [img for img in images if img.get("annotated", False)]
-        
+
         # Get all annotations
         all_annotations = []
         class_counts = Counter()
@@ -127,140 +267,223 @@ class DatasetAnalyzer:
         invalid_class_ids = []
         boxes_out_of_bounds = []
         dataset_classes = dataset.get("classes", [])
-        
+
+        # Per-class quality accumulators
+        class_boxes: Dict[str, List[Dict]] = defaultdict(list)
+        class_image_sets: Dict[str, Set[str]] = defaultdict(set)
+
+        # Image quality accumulators
+        blur_scores: List[float] = []
+        brightness_vals: List[float] = []
+        contrast_vals: List[float] = []
+        blurry_images: List[str] = []
+        dark_images: List[str] = []
+        overexposed_images: List[str] = []
+        low_contrast_images: List[str] = []
+
+        # Perceptual hash list for near-duplicate detection
+        phash_list: List[Tuple[str, Any, Any]] = []
+
+        # Decide which images to sample for expensive per-image metrics
+        quality_sample = annotated_images
+        image_quality_sampled = False
+        if len(annotated_images) > DatasetAnalyzer.MAX_QUALITY_SAMPLE:
+            quality_sample = random.sample(annotated_images, DatasetAnalyzer.MAX_QUALITY_SAMPLE)
+            image_quality_sampled = True
+        quality_sample_set = {img["filename"] for img in quality_sample}
+
+        phash_sample = annotated_images
+        if len(annotated_images) > DatasetAnalyzer.MAX_PHASH_COMPARE:
+            phash_sample = random.sample(annotated_images, DatasetAnalyzer.MAX_PHASH_COMPARE)
+        phash_sample_set = {img["filename"] for img in phash_sample}
+
         for img in annotated_images:
             annotation = AnnotationService.get_annotation(dataset_id, img["id"])
             if not annotation:
                 empty_annotations.append(img["filename"])
                 continue
-            
+
             # Validate image file
             img_path = Path(img["path"])
             if not img_path.exists():
                 label_mismatches.append(img["filename"])
                 continue
-            
+
             try:
                 # Check if image is corrupt - use load() for full validation
                 with Image.open(img_path) as pil_img:
                     pil_img.load()
                     width, height = pil_img.size
-                
-                # Calculate image hash for duplicate detection
+
+                    # Perceptual hash (sampled)
+                    if HAS_IMAGEHASH and img["filename"] in phash_sample_set:
+                        try:
+                            ph = imagehash.phash(pil_img)
+                            dh = imagehash.dhash(pil_img)
+                            phash_list.append((img["filename"], ph, dh))
+                        except Exception:
+                            pass
+
+                # Calculate image hash for exact duplicate detection
                 with open(img_path, 'rb') as f:
                     img_hash = hashlib.md5(f.read()).hexdigest()
                     if img_hash in image_hashes:
                         image_hashes[img_hash].append(img["filename"])
                     else:
                         image_hashes[img_hash] = [img["filename"]]
-                
+
                 # Validate annotation dimensions match image
                 if annotation["width"] != width or annotation["height"] != height:
                     label_mismatches.append(img["filename"])
-                
+
             except Exception as e:
                 corrupt_images.append(img["filename"])
                 logger.warning(f"Corrupt image {img['filename']}: {e}")
                 continue
-            
+
+            # Image quality metrics (sampled)
+            if img["filename"] in quality_sample_set:
+                quality = DatasetAnalyzer._compute_image_quality(img_path)
+                if quality:
+                    blur_scores.append(quality["blur_score"])
+                    brightness_vals.append(quality["brightness"])
+                    contrast_vals.append(quality["contrast"])
+                    if quality["is_blurry"]:
+                        blurry_images.append(img["filename"])
+                    if quality["is_dark"]:
+                        dark_images.append(img["filename"])
+                    if quality["is_overexposed"]:
+                        overexposed_images.append(img["filename"])
+                    if quality["is_low_contrast"]:
+                        low_contrast_images.append(img["filename"])
+
             # Process boxes with full validation
             boxes = annotation.get("boxes", [])
-            
+
             # Check for empty annotations
             if not boxes:
                 empty_annotations.append(img["filename"])
-            
+
             img_width = annotation["width"]
             img_height = annotation["height"]
-            
+
             for box in boxes:
                 # Validate class
                 class_name = box.get("class_name", "")
                 class_id = box.get("class_id", -1)
-                
+
                 # Check if class exists in dataset
                 if class_name and class_name not in dataset_classes:
                     invalid_class_ids.append(f"{img['filename']}: class '{class_name}' not in dataset")
-                
+
                 # Validate class_id is within valid range
                 if class_id < 0 or class_id >= len(dataset_classes):
                     invalid_class_ids.append(f"{img['filename']}: invalid class_id {class_id}")
-                
+
                 # Get box coordinates
                 box_x = box.get("x", 0)
                 box_y = box.get("y", 0)
                 box_width = box.get("width", 0)
                 box_height = box.get("height", 0)
-                
+
                 # Validate box coordinates are within image bounds
                 box_x_max = box_x + box_width
                 box_y_max = box_y + box_height
-                
+
                 if box_x < 0 or box_y < 0 or box_x_max > img_width or box_y_max > img_height:
                     boxes_out_of_bounds.append(f"{img['filename']}: box ({box_x}, {box_y}, {box_width}, {box_height}) out of bounds")
                     invalid_boxes.append(box)
                     continue
-                
+
                 # Validate box dimensions
                 if box_width <= 0 or box_height <= 0:
                     invalid_boxes.append(box)
                     continue
-                
+
                 # Box is valid - add to analysis
                 all_annotations.append(box)
-                
+
                 if class_name:
                     class_counts[class_name] += 1
-                
+                    enriched = dict(box)
+                    enriched["_img_width"] = img_width
+                    enriched["_img_height"] = img_height
+                    class_boxes[class_name].append(enriched)
+                    class_image_sets[class_name].add(img["filename"])
+
                 # Calculate object size and aspect ratio
                 img_area = img_width * img_height
                 box_area = box_width * box_height
-                
+
                 if img_area > 0:
                     relative_size = box_area / img_area
                     object_sizes.append(relative_size)
-                    
+
                     if box_width > 0 and box_height > 0:
                         aspect_ratio = box_width / box_height
                         aspect_ratios.append(aspect_ratio)
-        
+
         # Class distribution analysis
         class_frequency = dict(class_counts)
         class_balance_score = DatasetAnalyzer._calculate_class_balance(class_frequency)
-        
+
         # Object size distribution
         size_dist = DatasetAnalyzer._categorize_sizes(object_sizes)
-        
+
         # Aspect ratio distribution
         aspect_dist = DatasetAnalyzer._categorize_aspect_ratios(aspect_ratios)
-        
-        # Duplicate detection
+
+        # Exact duplicate detection
         duplicates = [files for files in image_hashes.values() if len(files) > 1]
         duplicate_filenames = [f for files in duplicates for f in files[1:]]  # Skip first occurrence
-        
+
+        # Near-duplicate detection (perceptual hash)
+        near_duplicate_images: List[Dict[str, Any]] = []
+        if HAS_IMAGEHASH and phash_list:
+            near_duplicate_images = DatasetAnalyzer._find_near_duplicates(phash_list)
+        elif not HAS_IMAGEHASH:
+            logger.info("imagehash not installed — near-duplicate detection skipped. Install with: pip install ImageHash")
+
+        # Per-class quality
+        per_class_quality = DatasetAnalyzer._compute_per_class_quality(class_boxes, class_image_sets)
+
+        # Image quality aggregates
+        def _safe_mean(lst):
+            return float(sum(lst) / len(lst)) if lst else 0.0
+
+        avg_blur_score = _safe_mean(blur_scores)
+        avg_brightness = _safe_mean(brightness_vals)
+        avg_contrast = _safe_mean(contrast_vals)
+        image_quality_flags = {
+            "blurry": len(blurry_images),
+            "dark": len(dark_images),
+            "overexposed": len(overexposed_images),
+            "low_contrast": len(low_contrast_images),
+        }
+
         # Structure validation
         structure_valid, structure_issues = DatasetAnalyzer._validate_structure(dataset_id, dataset)
-        
+
         # Add YOLO label file validation issues to structure issues
         label_file_issues = DatasetAnalyzer._validate_yolo_label_files(dataset_id, annotated_images)
         structure_issues.extend(label_file_issues)
         if label_file_issues:
             structure_valid = False
-        
+
         # Split analysis
         split_dist, split_ratios, data_leakage = DatasetAnalyzer._analyze_splits(annotated_images, image_hashes)
-        
+
         # Quality scores
         label_accuracy = DatasetAnalyzer._calculate_label_accuracy(
-            annotated_images, 
-            label_mismatches, 
+            annotated_images,
+            label_mismatches,
             corrupt_images,
             len(invalid_boxes),
             len(empty_annotations),
             len(boxes_out_of_bounds)
         )
         iou_consistency = DatasetAnalyzer._calculate_iou_consistency(all_annotations)
-        
+
         # Recommendations
         recommended_config = DatasetAnalyzer._recommend_training_config(
             len(annotated_images),
@@ -268,13 +491,13 @@ class DatasetAnalyzer:
             class_balance_score,
             size_dist
         )
-        
+
         augmentation_recs = DatasetAnalyzer._recommend_augmentation(
             class_balance_score,
             size_dist,
             len(annotated_images)
         )
-        
+
         # Overall quality score
         quality_score = DatasetAnalyzer._calculate_quality_score(
             class_balance_score,
@@ -288,9 +511,11 @@ class DatasetAnalyzer:
             len(invalid_boxes),
             len(empty_annotations),
             len(boxes_out_of_bounds),
-            len(invalid_class_ids)
+            len(invalid_class_ids),
+            len(blurry_images),
+            len(near_duplicate_images),
         )
-        
+
         # Generate warnings and recommendations
         warnings, recommendations = DatasetAnalyzer._generate_warnings_recommendations(
             dataset,
@@ -307,9 +532,12 @@ class DatasetAnalyzer:
             len(invalid_boxes),
             len(empty_annotations),
             len(boxes_out_of_bounds),
-            len(invalid_class_ids)
+            len(invalid_class_ids),
+            image_quality_flags,
+            len(near_duplicate_images),
+            image_quality_sampled,
         )
-        
+
         return DatasetAnalysis(
             dataset_id=dataset_id,
             dataset_name=dataset.get("name", ""),
@@ -340,9 +568,20 @@ class DatasetAnalyzer:
             recommended_batch_size=recommended_config["batch_size"],
             recommended_epochs=recommended_config["epochs"],
             augmentation_recommendations=augmentation_recs,
+            image_quality_flags=image_quality_flags,
+            blurry_images=blurry_images[:100],
+            dark_images=dark_images[:100],
+            overexposed_images=overexposed_images[:100],
+            low_contrast_images=low_contrast_images[:100],
+            avg_blur_score=round(avg_blur_score, 2),
+            avg_brightness=round(avg_brightness, 2),
+            avg_contrast=round(avg_contrast, 2),
+            image_quality_sampled=image_quality_sampled,
+            near_duplicate_images=near_duplicate_images[:200],
+            per_class_quality=per_class_quality,
             overall_quality_score=quality_score,
             warnings=warnings,
-            recommendations=recommendations
+            recommendations=recommendations,
         )
     
     @staticmethod
@@ -733,12 +972,14 @@ class DatasetAnalyzer:
         invalid_box_count: int,
         empty_count: int,
         out_of_bounds_count: int,
-        invalid_class_count: int
+        invalid_class_count: int,
+        blurry_count: int = 0,
+        near_dup_count: int = 0,
     ) -> float:
         """Calculate overall quality score (0-100) with comprehensive validation"""
         if total_images == 0:
             return 0.0
-        
+
         # Base scores (weighted)
         base_score = (
             balance_score * 0.25 +
@@ -746,20 +987,20 @@ class DatasetAnalyzer:
             iou_consistency * 0.25 +
             (1.0 if invalid_class_count == 0 else 0.5) * 0.15  # Class validation
         ) * 100
-        
+
         # Penalties (weighted by severity)
         critical_errors = corrupt_count + mismatch_count + out_of_bounds_count
-        moderate_errors = duplicate_count + invalid_box_count
-        minor_errors = empty_count + invalid_class_count
-        
+        moderate_errors = duplicate_count + invalid_box_count + near_dup_count
+        minor_errors = empty_count + invalid_class_count + blurry_count
+
         error_penalty = (
-            (critical_errors / total_images) * 40 +      # Critical errors heavily penalize
-            (moderate_errors / total_images) * 20 +      # Moderate errors moderate penalty
-            (minor_errors / total_images) * 10           # Minor errors light penalty
+            (critical_errors / total_images) * 40 +
+            (moderate_errors / total_images) * 20 +
+            (minor_errors / total_images) * 10
         )
-        
+
         leakage_penalty = 25 if data_leakage else 0
-        
+
         final_score = max(0.0, base_score - error_penalty - leakage_penalty)
         return float(final_score)
     
@@ -779,7 +1020,10 @@ class DatasetAnalyzer:
         invalid_box_count: int,
         empty_count: int,
         out_of_bounds_count: int,
-        invalid_class_count: int
+        invalid_class_count: int,
+        image_quality_flags: Optional[Dict[str, int]] = None,
+        near_dup_count: int = 0,
+        image_quality_sampled: bool = False,
     ) -> Tuple[List[str], List[str]]:
         """Generate warnings and recommendations"""
         warnings = []
@@ -854,6 +1098,31 @@ class DatasetAnalyzer:
             warnings.append("Data leakage detected - same images in multiple splits")
             recommendations.append("Fix split assignments to prevent data leakage")
         
+        # Image quality warnings
+        if image_quality_flags:
+            sample_note = " (sampled)" if image_quality_sampled else ""
+            blurry_count = image_quality_flags.get("blurry", 0)
+            dark_count = image_quality_flags.get("dark", 0)
+            overexposed_count = image_quality_flags.get("overexposed", 0)
+            low_contrast_count = image_quality_flags.get("low_contrast", 0)
+            if blurry_count > 0:
+                warnings.append(f"{blurry_count} blurry images detected{sample_note} (Laplacian variance < 100)")
+                recommendations.append("Remove or reshoot blurry images — they degrade feature learning")
+            if dark_count > 0:
+                warnings.append(f"{dark_count} dark/underexposed images detected{sample_note}")
+                recommendations.append("Improve lighting or apply brightness augmentation for dark images")
+            if overexposed_count > 0:
+                warnings.append(f"{overexposed_count} overexposed images detected{sample_note}")
+                recommendations.append("Reduce exposure or apply contrast normalization for overexposed images")
+            if low_contrast_count > 0:
+                warnings.append(f"{low_contrast_count} low-contrast images detected{sample_note}")
+                recommendations.append("Enhance contrast or apply CLAHE preprocessing for low-contrast images")
+
+        # Near-duplicate warnings
+        if near_dup_count > 0:
+            warnings.append(f"{near_dup_count} near-duplicate image pairs detected (perceptual hash distance ≤ 10)")
+            recommendations.append("Remove visually similar duplicate images to prevent overfitting")
+
         # Overall quality
         if quality_score < 50:
             warnings.append("Low overall dataset quality")
@@ -861,5 +1130,5 @@ class DatasetAnalyzer:
         elif quality_score < 70:
             warnings.append("Moderate dataset quality")
             recommendations.append("Consider improving dataset quality for better model performance")
-        
+
         return warnings, recommendations

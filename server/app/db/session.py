@@ -329,11 +329,35 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'activity_logs' ready")
-        
+
+        # Dataset quality snapshots table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dataset_quality_snapshots (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                overall_quality_score FLOAT NOT NULL,
+                class_balance_score FLOAT NOT NULL,
+                label_accuracy_score FLOAT NOT NULL,
+                iou_consistency_score FLOAT NOT NULL,
+                total_images INT NOT NULL,
+                annotated_images INT NOT NULL,
+                duplicate_count INT DEFAULT 0,
+                near_duplicate_count INT DEFAULT 0,
+                corrupt_count INT DEFAULT 0,
+                blurry_count INT DEFAULT 0,
+                full_snapshot JSON NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                INDEX idx_quality_dataset_id (dataset_id),
+                INDEX idx_quality_created_at (created_at)
+            )
+        """)
+        logger.info("✓ Table 'dataset_quality_snapshots' ready")
+
         connection.commit()
         cursor.close()
         connection.close()
-        
+
         logger.info("✅ All tables created successfully!")
         return True
         
