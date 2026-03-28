@@ -20,12 +20,12 @@ async def analyze_dataset(dataset_id: str, current_user: dict = Depends(get_curr
     Returns analysis including:
     - Class distribution
     - Object size/aspect ratio analysis
-    - Quality metrics
+    - Quality metrics (including image quality, per-class, near-duplicates)
     - Training recommendations
     - Warnings and issues
     """
     try:
-        from app.services.database import DatasetService
+        from app.services.database import DatasetService, QualitySnapshotService
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
@@ -33,10 +33,16 @@ async def analyze_dataset(dataset_id: str, current_user: dict = Depends(get_curr
             raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
 
         analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
-        
+
         # Convert dataclass to dict for JSON serialization
         result = asdict(analysis)
-        
+
+        # Persist snapshot for trend tracking (non-blocking — failure is silent)
+        try:
+            QualitySnapshotService.save_snapshot(dataset_id, result)
+        except Exception as snap_err:
+            logger.warning(f"Failed to save quality snapshot: {snap_err}")
+
         return JSONResponse(content={
             "success": True,
             "analysis": result
@@ -46,6 +52,28 @@ async def analyze_dataset(dataset_id: str, current_user: dict = Depends(get_curr
     except Exception as e:
         import traceback
         logger.error(f"Error analyzing dataset: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/datasets/{dataset_id}/quality-history")
+async def get_quality_history(
+    dataset_id: str,
+    limit: int = 30,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return historical quality scores for a dataset (for trend charts)."""
+    try:
+        from app.services.database import DatasetService, QualitySnapshotService
+        dataset = DatasetService.get_dataset(dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
+
+        history = QualitySnapshotService.get_history(dataset_id, min(limit, 100))
+        return JSONResponse(content={"success": True, "history": history})
+    except Exception as e:
+        logger.error(f"Error fetching quality history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/datasets/{dataset_id}/uncertainty")
