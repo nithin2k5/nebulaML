@@ -19,6 +19,38 @@ import {
   MousePointer2, Square, Hexagon, GitCommit, Wand2
 } from "lucide-react";
 
+// --- Real-time annotation validation ---
+const BOX_VALIDATION = {
+  MIN_SIZE_PX: 10,
+  MIN_ASPECT_RATIO: 0.05,  // prevents extreme slivers
+  MAX_ASPECT_RATIO: 20.0,
+  MIN_RELATIVE_SIZE: 0.001, // box must be >= 0.1% of image area
+};
+
+function validateBox(box, imageWidth, imageHeight) {
+  const errors = [];
+  const { x, y, width, height } = box;
+  if (imageWidth > 0 && imageHeight > 0) {
+    if (x < 0 || y < 0 || x + width > imageWidth || y + height > imageHeight) {
+      errors.push("Box extends outside image boundaries.");
+    }
+    const relSize = (width * height) / (imageWidth * imageHeight);
+    if (relSize < BOX_VALIDATION.MIN_RELATIVE_SIZE) {
+      errors.push("Box is too small (< 0.1% of image area).");
+    }
+  }
+  if (width < BOX_VALIDATION.MIN_SIZE_PX || height < BOX_VALIDATION.MIN_SIZE_PX) {
+    errors.push(`Box is too small (minimum ${BOX_VALIDATION.MIN_SIZE_PX}px per side).`);
+  }
+  if (width > 0 && height > 0) {
+    const ar = width / height;
+    if (ar < BOX_VALIDATION.MIN_ASPECT_RATIO || ar > BOX_VALIDATION.MAX_ASPECT_RATIO) {
+      errors.push("Extreme aspect ratio — likely an accidental stroke.");
+    }
+  }
+  return errors;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Helpers for polygon selection
@@ -934,23 +966,35 @@ function AnnotationToolContent() {
     const width = x - startPos.x;
     const height = y - startPos.y;
 
-    if (Math.abs(width) > 10 && Math.abs(height) > 10) {
+    if (Math.abs(width) > 5 && Math.abs(height) > 5) {
       const className = (dataset.classes && dataset.classes[selectedClass]) ? dataset.classes[selectedClass] : `class_${selectedClass}`;
-      const normalizedBox = {
+      const candidateBox = {
         type: 'box',
         x: width < 0 ? startPos.x + width : startPos.x,
         y: height < 0 ? startPos.y + height : startPos.y,
         width: Math.abs(width),
         height: Math.abs(height),
         class_id: selectedClass,
-        class_name: className
+        class_name: className,
       };
 
-      setBoxHistory(prev => [...prev, boxesRef.current]);
-      const newBoxes = [...boxesRef.current, normalizedBox];
-      boxesRef.current = newBoxes;
-      setBoxes(newBoxes);
-      setTimeout(() => { setCurrentBox(null); drawCanvas(); }, 0);
+      const validationErrors = validateBox(
+        candidateBox,
+        imageRef.current?.naturalWidth || 0,
+        imageRef.current?.naturalHeight || 0
+      );
+
+      if (validationErrors.length > 0) {
+        validationErrors.slice(0, 2).forEach(err => toast.error(err));
+        setCurrentBox(null);
+        drawCanvas();
+      } else {
+        setBoxHistory(prev => [...prev, boxesRef.current]);
+        const newBoxes = [...boxesRef.current, candidateBox];
+        boxesRef.current = newBoxes;
+        setBoxes(newBoxes);
+        setTimeout(() => { setCurrentBox(null); drawCanvas(); }, 0);
+      }
     } else {
       setCurrentBox(null);
       drawCanvas();
@@ -1258,6 +1302,19 @@ function AnnotationToolContent() {
     }
 
     const img = images[currentImageIndex];
+
+    // Pre-save validation: filter out any invalid boxes and warn the user
+    const allBoxes = boxesRef.current;
+    const validBoxes = allBoxes.filter(b => {
+      if (b.type === 'polygon' || b.type === 'line' || b.type === 'joint') return true;
+      return validateBox(b, naturalWidth, naturalHeight).length === 0;
+    });
+    if (validBoxes.length < allBoxes.length) {
+      const skipped = allBoxes.length - validBoxes.length;
+      toast.warning(`${skipped} invalid box${skipped !== 1 ? "es" : ""} were not saved.`);
+      boxesRef.current = validBoxes;
+      setBoxes(validBoxes);
+    }
 
     // Determine status: if override provided use it, otherwise keep current status unless it was 'predicted'/'unlabeled' then promote to 'annotated'
     let newStatus = statusOverride || reviewStatus;

@@ -9,13 +9,14 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
     Activity, AlertTriangle, CheckCircle, PieChart,
-    BarChart, AlertOctagon, RotateCcw, RefreshCw
+    BarChart, AlertOctagon, RotateCcw, RefreshCw, TrendingUp, Eye, Layers
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function ProjectHealth({ params }) {
     const { token } = useAuth();
     const [analysis, setAnalysis] = useState(null);
+    const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -23,14 +24,21 @@ export default function ProjectHealth({ params }) {
         setLoading(true);
         setError(null);
         try {
-            // Trigger new analysis
-            const res = await fetch(API_ENDPOINTS.DATASETS.ANALYZE(params.id), {
-                method: "GET",
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error("Analysis failed");
-            const data = await res.json();
+            const [analysisRes, historyRes] = await Promise.all([
+                fetch(API_ENDPOINTS.DATASETS.ANALYZE(params.id), {
+                    headers: { "Authorization": `Bearer ${token}` }
+                }),
+                fetch(API_ENDPOINTS.DATASETS.QUALITY_HISTORY(params.id), {
+                    headers: { "Authorization": `Bearer ${token}` }
+                }).catch(() => null),
+            ]);
+            if (!analysisRes.ok) throw new Error("Analysis failed");
+            const data = await analysisRes.json();
             setAnalysis(data.analysis || data);
+            if (historyRes?.ok) {
+                const hData = await historyRes.json();
+                setHistory(hData.history || []);
+            }
         } catch (e) {
             console.error(e);
             setError(e.message);
@@ -71,8 +79,16 @@ export default function ProjectHealth({ params }) {
         return "text-red-400";
     };
 
+    const qualityBarColor = (score) =>
+        score >= 80 ? "bg-emerald-500" : score >= 50 ? "bg-yellow-500" : "bg-red-500";
+
     const balanceScore = analysis.class_balance_score || 0;
     const qualityScore = analysis.overall_quality_score || 0;
+    const imgFlags = analysis.image_quality_flags || {};
+    const totalImageIssues = (imgFlags.blurry || 0) + (imgFlags.dark || 0) +
+        (imgFlags.overexposed || 0) + (imgFlags.low_contrast || 0);
+    const nearDups = analysis.near_duplicate_images || [];
+    const perClassQuality = analysis.per_class_quality || {};
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -86,7 +102,7 @@ export default function ProjectHealth({ params }) {
                         <div className={`text-3xl font-bold ${qualityColor(qualityScore)}`}>
                             {Math.round(qualityScore)}/100
                         </div>
-                        <Progress value={qualityScore} className="h-2 mt-2 bg-white/5" indicatorClassName={qualityScore >= 80 ? "bg-emerald-500" : (qualityScore >= 50 ? "bg-yellow-500" : "bg-red-500")} />
+                        <Progress value={qualityScore} className="h-2 mt-2 bg-white/5" indicatorClassName={qualityBarColor(qualityScore)} />
                     </CardContent>
                 </Card>
 
@@ -122,6 +138,52 @@ export default function ProjectHealth({ params }) {
                 </Card>
             </div>
 
+            {/* Quality Trend */}
+            {history.length > 0 && (
+                <Card className="bg-zinc-900 border-white/10">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4 text-purple-400" />
+                            Quality Trend ({history.length} run{history.length !== 1 ? "s" : ""})
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {history.length === 1 ? (
+                            <p className="text-xs text-gray-500">Run analysis again to see quality trends.</p>
+                        ) : (
+                            <div className="flex items-end gap-1 h-16 overflow-x-auto">
+                                {history.map((snap, i) => {
+                                    const score = snap.overall_quality_score || 0;
+                                    const isLatest = i === history.length - 1;
+                                    const barColor = isLatest
+                                        ? (score >= 80 ? "bg-emerald-500" : score >= 50 ? "bg-yellow-500" : "bg-red-500")
+                                        : "bg-white/20";
+                                    const heightPct = Math.max(4, score);
+                                    const date = snap.created_at ? new Date(snap.created_at).toLocaleDateString() : "";
+                                    return (
+                                        <div
+                                            key={snap.id}
+                                            className="flex-1 min-w-[8px] flex flex-col items-center justify-end group relative"
+                                            style={{ height: "100%" }}
+                                        >
+                                            <div
+                                                className={`w-full rounded-t ${barColor} transition-all`}
+                                                style={{ height: `${heightPct}%` }}
+                                            />
+                                            <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col items-center z-10">
+                                                <div className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white whitespace-nowrap shadow-lg">
+                                                    {Math.round(score)}/100 · {date}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Issues & Warnings */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-4">
@@ -140,6 +202,29 @@ export default function ProjectHealth({ params }) {
                         </Alert>
                     )}
 
+                    {nearDups.length > 0 && (
+                        <Alert className="bg-orange-950/20 border-orange-900/50">
+                            <AlertTriangle className="h-4 w-4 text-orange-500" />
+                            <AlertTitle className="text-orange-400">Near-Duplicate Images</AlertTitle>
+                            <AlertDescription className="text-orange-200/80">
+                                {nearDups.length} visually similar pair{nearDups.length !== 1 ? "s" : ""} detected (perceptual hash distance ≤ 10). Consider deduplication.
+                            </AlertDescription>
+                        </Alert>
+                    )}
+
+                    {totalImageIssues > 0 && (
+                        <Alert className="bg-blue-950/20 border-blue-900/50">
+                            <Eye className="h-4 w-4 text-blue-400" />
+                            <AlertTitle className="text-blue-400">Image Quality Issues{analysis.image_quality_sampled ? " (sampled)" : ""}</AlertTitle>
+                            <AlertDescription className="text-blue-200/80 space-y-1">
+                                {imgFlags.blurry > 0 && <div>{imgFlags.blurry} blurry</div>}
+                                {imgFlags.dark > 0 && <div>{imgFlags.dark} too dark</div>}
+                                {imgFlags.overexposed > 0 && <div>{imgFlags.overexposed} overexposed</div>}
+                                {imgFlags.low_contrast > 0 && <div>{imgFlags.low_contrast} low contrast</div>}
+                            </AlertDescription>
+                        </Alert>
+                    )}
+
                     {analysis.warnings?.map((warn, i) => (
                         <Alert key={i} className="bg-yellow-950/20 border-yellow-900/50">
                             <AlertTriangle className="h-4 w-4 text-yellow-500" />
@@ -150,7 +235,7 @@ export default function ProjectHealth({ params }) {
                         </Alert>
                     ))}
 
-                    {analysis.warnings?.length === 0 && analysis.structure_valid && (
+                    {analysis.warnings?.length === 0 && analysis.structure_valid && nearDups.length === 0 && totalImageIssues === 0 && (
                         <div className="p-8 border border-white/10 rounded-lg text-center bg-white/5">
                             <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
                             <p className="text-gray-400">No major issues detected!</p>
@@ -225,6 +310,57 @@ export default function ProjectHealth({ params }) {
                 })}
             </div>
 
+            {/* Per-Class Quality */}
+            {Object.keys(perClassQuality).length > 0 && (
+                <>
+                    <h3 className="text-lg font-semibold flex items-center mt-2">
+                        <Layers className="w-5 h-5 mr-2 text-violet-400" />
+                        Per-Class Quality Breakdown
+                    </h3>
+                    <div className="border border-white/10 rounded-lg overflow-hidden bg-zinc-950/50">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-white/10 text-gray-500 text-xs uppercase tracking-wider">
+                                    <th className="text-left px-4 py-3">Class</th>
+                                    <th className="text-right px-4 py-3">Images</th>
+                                    <th className="text-right px-4 py-3">Annotations</th>
+                                    <th className="text-right px-4 py-3">Avg Box Size</th>
+                                    <th className="text-right px-4 py-3">Overlap %</th>
+                                    <th className="text-right px-4 py-3">Validity</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {Object.entries(perClassQuality).map(([cls, stats], i) => {
+                                    const validityPct = (stats.validity_rate * 100).toFixed(0);
+                                    const overlapPct = (stats.iou_overlap_ratio * 100).toFixed(0);
+                                    const boxSizePct = (stats.avg_box_size * 100).toFixed(2);
+                                    const validityBad = stats.validity_rate < 0.9;
+                                    const overlapHigh = stats.iou_overlap_ratio > 0.3;
+                                    return (
+                                        <tr key={cls} className={`border-b border-white/5 ${i % 2 === 0 ? "bg-white/[0.02]" : ""}`}>
+                                            <td className="px-4 py-3 font-medium text-white">{cls}</td>
+                                            <td className="px-4 py-3 text-right text-gray-300">{stats.image_count}</td>
+                                            <td className="px-4 py-3 text-right text-gray-300">{stats.annotation_count}</td>
+                                            <td className="px-4 py-3 text-right text-gray-400 font-mono text-xs">{boxSizePct}%</td>
+                                            <td className={`px-4 py-3 text-right font-mono text-xs ${overlapHigh ? "text-orange-400" : "text-gray-400"}`}>
+                                                {overlapPct}%
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <Badge
+                                                    variant={validityBad ? "destructive" : "outline"}
+                                                    className={`text-xs ${validityBad ? "" : "bg-white/5 text-emerald-400 border-emerald-800"}`}
+                                                >
+                                                    {validityPct}%
+                                                </Badge>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
+            )}
         </div>
     );
 }

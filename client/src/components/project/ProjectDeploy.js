@@ -23,6 +23,8 @@ export default function ProjectDeploy({ dataset }) {
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState(null);
     const canvasRef = useRef(null);
+    // Keep a stable ref to the current preview URL so the draw effect always has fresh data
+    const previewUrlRef = useRef(null);
 
     const fetchJobs = useCallback(async () => {
         if (!dataset?.id || !token) return;
@@ -53,8 +55,10 @@ export default function ProjectDeploy({ dataset }) {
         const file = e.target.files[0];
         if (!file) return;
         if (previewUrl) URL.revokeObjectURL(previewUrl);
+        const newUrl = URL.createObjectURL(file);
+        previewUrlRef.current = newUrl;
         setSelectedFile(file);
-        setPreviewUrl(URL.createObjectURL(file));
+        setPreviewUrl(newUrl);
         setResults(null);
     };
 
@@ -108,8 +112,17 @@ export default function ProjectDeploy({ dataset }) {
         img.src = imageUrl;
     };
 
+    // Draw bounding boxes whenever results arrive and canvas is mounted
+    useEffect(() => {
+        if (!results?.detections?.length) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        drawDetections(results.detections, previewUrlRef.current);
+    }, [results]);
+
     const handleInference = async () => {
-        if (!selectedFile || !selectedJob) return;
+        if (!selectedFile) { toast.error("Please upload an image first."); return; }
+        if (!selectedJob) { toast.error("Please select a trained model."); return; }
         setIsLoading(true);
         setResults(null);
 
@@ -125,14 +138,22 @@ export default function ProjectDeploy({ dataset }) {
                 body: formData,
             });
 
-            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || response.statusText);
+            if (!response.ok) {
+                const errBody = await response.json().catch(() => ({}));
+                const detail = errBody.detail || response.statusText;
+                if (response.status === 404 && detail.includes("not found")) {
+                    throw new Error("Model weights not found. Ensure training completed successfully and the server has not been moved.");
+                }
+                throw new Error(detail);
+            }
 
             const data = await response.json();
             setResults(data);
-            toast.success(`Found ${data.num_detections} object${data.num_detections !== 1 ? "s" : ""}`);
-
-            // Draw after state update
-            setTimeout(() => drawDetections(data.detections || [], previewUrl), 50);
+            if (data.num_detections > 0) {
+                toast.success(`Found ${data.num_detections} object${data.num_detections !== 1 ? "s" : ""}`);
+            } else {
+                toast.info("No objects detected above the confidence threshold.");
+            }
         } catch (error) {
             console.error("Inference error:", error);
             toast.error("Inference failed: " + error.message);
@@ -257,20 +278,19 @@ print(response.json())`}
                                 </label>
                             ) : (
                                 <div className="space-y-4">
-                                    {/* Canvas: shows plain image until Run Model, then shows detections */}
-                                    <div className="rounded-xl border border-border bg-muted/10 overflow-hidden flex items-center justify-center p-3">
-                                        {results ? (
-                                            <canvas
-                                                ref={canvasRef}
-                                                className="max-w-full max-h-[420px] rounded object-contain"
-                                            />
-                                        ) : (
-                                            <img
-                                                src={previewUrl}
-                                                alt="Preview"
-                                                className="max-w-full max-h-[420px] rounded object-contain"
-                                            />
-                                        )}
+                                    {/* Image + canvas overlay — canvas is always mounted so ref is stable */}
+                                    <div className="rounded-xl border border-border bg-muted/10 overflow-hidden flex items-center justify-center p-3 relative">
+                                        {/* Plain preview: shown while no results */}
+                                        <img
+                                            src={previewUrl}
+                                            alt="Preview"
+                                            className={`max-w-full max-h-[420px] rounded object-contain ${results ? "hidden" : ""}`}
+                                        />
+                                        {/* Canvas: always in DOM; drawDetections populates it after results arrive */}
+                                        <canvas
+                                            ref={canvasRef}
+                                            className={`max-w-full max-h-[420px] rounded object-contain ${results ? "" : "hidden"}`}
+                                        />
                                     </div>
 
                                     {/* Detection list */}

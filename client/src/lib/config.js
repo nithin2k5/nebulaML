@@ -11,6 +11,7 @@ export const API_ENDPOINTS = {
         EXPORT: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/export`,
         EXPORT_STATUS: (id, jobId) => `${API_BASE_URL}/api/annotations/datasets/${id}/export-status/${jobId}`,
         ANALYZE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/analyze`,
+        QUALITY_HISTORY: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/quality-history`,
         DOWNLOAD_FORMAT: (id, format) => `${API_BASE_URL}/api/annotations/datasets/${id}/download-format?format=${format}`,
         UPLOAD_VIDEO: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/upload-video`,
         MEMBERS: (id) => `${API_BASE_URL}/api/datasets/${id}/members`,
