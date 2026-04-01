@@ -354,6 +354,46 @@ def create_tables():
         """)
         logger.info("✓ Table 'dataset_quality_snapshots' ready")
 
+        # Monitoring inference logs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS monitoring_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                model_job_id VARCHAR(255),
+                model_name VARCHAR(255),
+                image_name VARCHAR(255) NOT NULL,
+                num_detections INT DEFAULT 0,
+                confidence_scores JSON,
+                avg_confidence FLOAT DEFAULT 0,
+                class_counts JSON,
+                inference_time_ms FLOAT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                INDEX idx_monitoring_dataset_id (dataset_id),
+                INDEX idx_monitoring_created_at (created_at)
+            )
+        """)
+        logger.info("✓ Table 'monitoring_logs' ready")
+
+        # Active learning uncertain images table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS uncertain_images (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                image_id VARCHAR(255) NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                low_confidence_detections JSON,
+                high_confidence_detections JSON,
+                total_detections INT DEFAULT 0,
+                min_confidence FLOAT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                UNIQUE KEY unique_uncertain (dataset_id, image_id),
+                INDEX idx_uncertain_dataset_id (dataset_id)
+            )
+        """)
+        logger.info("✓ Table 'uncertain_images' ready")
+
         connection.commit()
         cursor.close()
         connection.close()

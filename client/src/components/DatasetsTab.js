@@ -105,6 +105,10 @@ export default function DatasetsTab() {
         setNewDataset({ name: "", description: "", classes: "" });
         setShowCreate(false);
         fetchDatasets();
+        // Mark first project for onboarding wizard
+        if (typeof window !== "undefined" && !localStorage.getItem("nebula_first_project")) {
+          localStorage.setItem("nebula_first_project", "1");
+        }
         router.push(`/project/${data.dataset_id}`);
       } else {
         const err = await response.json();

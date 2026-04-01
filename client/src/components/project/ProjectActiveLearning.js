@@ -4,22 +4,42 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { RefreshCw, Brain, CheckCircle, XCircle, ArrowRight, Loader, Eye } from "lucide-react";
+import { RefreshCw, Brain, CheckCircle, ArrowRight, Loader, Eye, Sparkles } from "lucide-react";
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
-export default function ProjectActiveLearning({ dataset }) {
+export default function ProjectActiveLearning({ dataset, onNavigate }) {
     const { token } = useAuth();
     const [uncertainImages, setUncertainImages] = useState([]);
-    const [loading, setLoading] = useState(false);
     const [collecting, setCollecting] = useState(false);
     const [confidenceThreshold, setConfidenceThreshold] = useState(0.5);
     const [jobId, setJobId] = useState("");
+    const [completedJobs, setCompletedJobs] = useState([]);
     const [selectedImages, setSelectedImages] = useState(new Set());
+    const [approvedCount, setApprovedCount] = useState(0);
+    const [showRetrainBanner, setShowRetrainBanner] = useState(false);
+
+    const fetchCompletedJobs = async () => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const jobs = (data.jobs || []).filter(
+                    j => j.dataset_id === dataset.id && (j.status === "completed" || j.status === "success")
+                );
+                setCompletedJobs(jobs);
+                if (jobs.length > 0) setJobId(jobs[0].job_id);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
 
     const fetchUncertain = async () => {
         try {
@@ -36,12 +56,13 @@ export default function ProjectActiveLearning({ dataset }) {
     };
 
     useEffect(() => {
+        fetchCompletedJobs();
         fetchUncertain();
     }, [dataset.id]);
 
     const handleCollect = async () => {
         if (!jobId) {
-            toast.error("Please enter a training job ID");
+            toast.error("Please select a trained model");
             return;
         }
         setCollecting(true);
@@ -106,9 +127,11 @@ export default function ProjectActiveLearning({ dataset }) {
 
             if (res.ok) {
                 const data = await res.json();
+                setApprovedCount(data.approved_count);
                 toast.success(`Approved ${data.approved_count} images`);
                 setSelectedImages(new Set());
                 fetchUncertain();
+                setShowRetrainBanner(true);
             }
         } catch (e) {
             toast.error("Error: " + e.message);
@@ -143,7 +166,7 @@ export default function ProjectActiveLearning({ dataset }) {
 
             {/* Pipeline Visualization */}
             <div className="flex items-center gap-3 p-4 rounded-lg border border-border bg-muted/20">
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-sm flex-wrap">
                     <Badge variant="outline" className="gap-1"><Brain className="w-3 h-3" />Deploy Model</Badge>
                     <ArrowRight className="w-4 h-4 text-muted-foreground" />
                     <Badge variant="outline" className="gap-1"><Eye className="w-3 h-3" />Collect Uncertain</Badge>
@@ -154,6 +177,31 @@ export default function ProjectActiveLearning({ dataset }) {
                 </div>
             </div>
 
+            {/* Re-train CTA Banner (shown after approval) */}
+            {showRetrainBanner && (
+                <div className="flex items-center justify-between p-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10">
+                    <div className="flex items-center gap-3">
+                        <Sparkles className="w-5 h-5 text-emerald-500 shrink-0" />
+                        <div>
+                            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                                {approvedCount} image{approvedCount !== 1 ? "s" : ""} approved and added to training data!
+                            </p>
+                            <p className="text-xs text-muted-foreground">Generate a new dataset version and re-train to improve your model.</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                            size="sm"
+                            onClick={() => { setShowRetrainBanner(false); onNavigate?.("generate"); }}
+                        >
+                            <RefreshCw className="w-4 h-4 mr-1.5" />
+                            Generate & Re-train
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setShowRetrainBanner(false)}>Dismiss</Button>
+                    </div>
+                </div>
+            )}
+
             {/* Collection Controls */}
             <Card>
                 <CardHeader>
@@ -163,12 +211,23 @@ export default function ProjectActiveLearning({ dataset }) {
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <Label>Training Job ID</Label>
-                            <Input
-                                placeholder="Enter job ID of your trained model"
-                                value={jobId}
-                                onChange={(e) => setJobId(e.target.value)}
-                            />
+                            <Label>Trained Model</Label>
+                            {completedJobs.length === 0 ? (
+                                <p className="text-sm text-muted-foreground py-2">No trained models yet. Go to the Train tab first.</p>
+                            ) : (
+                                <Select value={jobId} onValueChange={setJobId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select a trained model" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {completedJobs.map(job => (
+                                            <SelectItem key={job.job_id} value={job.job_id}>
+                                                {job.config?.model_name || "Unknown Model"} — {job.created_at ? new Date(job.created_at).toLocaleDateString() : "Unknown date"}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
                         </div>
                         <div className="space-y-2">
                             <Label>Confidence Threshold: {confidenceThreshold.toFixed(2)}</Label>
@@ -184,7 +243,7 @@ export default function ProjectActiveLearning({ dataset }) {
                             </p>
                         </div>
                     </div>
-                    <Button onClick={handleCollect} disabled={collecting}>
+                    <Button onClick={handleCollect} disabled={collecting || !jobId}>
                         {collecting ? <Loader className="mr-2 animate-spin w-4 h-4" /> : <Brain className="mr-2 w-4 h-4" />}
                         {collecting ? "Scanning..." : "Scan for Uncertain Images"}
                     </Button>
@@ -263,7 +322,9 @@ export default function ProjectActiveLearning({ dataset }) {
                         <Brain className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
                         <h3 className="font-semibold mb-2">No Uncertain Images</h3>
                         <p className="text-muted-foreground text-sm">
-                            Enter a training job ID above and scan your dataset to find images that need review.
+                            {completedJobs.length > 0
+                                ? "Select a model above and scan your dataset to find images that need review."
+                                : "Train a model first, then come back to run active learning."}
                         </p>
                     </CardContent>
                 </Card>

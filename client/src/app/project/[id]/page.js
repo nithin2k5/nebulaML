@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
-import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users, TestTube2 } from "lucide-react";
+import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users, TestTube2, CheckCircle, X } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
 // Components for each tab
+import WizardBanner from "@/components/WizardBanner";
 import ProjectOverview from "@/components/project/ProjectOverview";
 import ProjectUpload from "@/components/project/ProjectUpload";
 import ProjectAnnotate from "@/components/project/ProjectAnnotate";
@@ -32,8 +33,11 @@ export default function ProjectPage() {
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState(null);
     const [trainingJobs, setTrainingJobs] = useState([]);
+    const [monitoringTotal, setMonitoringTotal] = useState(0);
     const [versionRefreshKey, setVersionRefreshKey] = useState(0);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
+    const [completionBanner, setCompletionBanner] = useState(null);
+    const prevRunningCountRef = useRef(null);
     const { token, loading: authLoading } = useAuth();
 
     // Update URL when tab changes
@@ -56,6 +60,7 @@ export default function ProjectPage() {
                 fetchDataset(params.id);
                 fetchStats(params.id);
                 fetchTrainingJobs(params.id);
+                fetchMonitoringStats(params.id);
             } else {
                 setLoading(false);
             }
@@ -94,9 +99,33 @@ export default function ProjectPage() {
             });
             if (res.ok) {
                 const data = await res.json();
-                setTrainingJobs((data.jobs || []).filter(j => j.dataset_id === datasetId));
+                const jobs = (data.jobs || []).filter(j => j.dataset_id === datasetId);
+                setTrainingJobs(jobs);
+
+                // Detect transition: running → completed
+                const running = jobs.filter(j => j.status === "running" || j.status === "pending");
+                const completed = jobs.filter(j => j.status === "completed" || j.status === "success");
+                if (prevRunningCountRef.current !== null && prevRunningCountRef.current > 0 && running.length === 0 && completed.length > 0) {
+                    const latest = completed[0];
+                    const mAP = latest?.results?.metrics?.["metrics/mAP50(B)"] ?? latest?.results?.map50 ?? null;
+                    setCompletionBanner({ mAP, jobId: latest.job_id });
+                    setTimeout(() => setCompletionBanner(null), 30000);
+                }
+                prevRunningCountRef.current = running.length;
             }
         } catch (e) { console.error(e); }
+    };
+
+    const fetchMonitoringStats = async (datasetId) => {
+        try {
+            const res = await fetch(API_ENDPOINTS.MONITORING.STATS(datasetId), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setMonitoringTotal(data.total_inferences || 0);
+            }
+        } catch (e) { /* non-critical */ }
     };
 
     // Poll training jobs every 8s so the pipeline bar stays live
@@ -197,21 +226,21 @@ export default function ProjectPage() {
             id: 'active-learning',
             label: 'Learning',
             icon: Brain,
-            status: 'pending',
-            meta: 'Re-train'
+            status: hasModels ? 'complete' : 'pending',
+            meta: hasModels ? 'Ready' : 'Needs Model'
         },
         {
             id: 'monitoring',
             label: 'Monitor',
             icon: BarChart3,
-            status: 'pending',
-            meta: 'No Data'
+            status: monitoringTotal > 0 ? 'complete' : hasModels ? 'inprogress' : 'pending',
+            meta: monitoringTotal > 0 ? `${monitoringTotal} Inferences` : hasModels ? 'Run Inference' : 'No Data'
         },
         {
             id: 'health',
             label: 'Health',
             icon: Activity,
-            status: 'pending',
+            status: hasModels ? 'complete' : 'pending',
             meta: 'No Issues'
         },
         {
@@ -290,6 +319,8 @@ export default function ProjectPage() {
                 </div>
             </div>
 
+            <WizardBanner pipelineStages={pipelineStages} activeTab={activeTab} onNavigate={handleTabChange} />
+
             {/* Tabs Navigation similar to Roboflow */}
             <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col min-h-0">
                 <div className="border-b border-border bg-muted/5 px-6 hidden">
@@ -313,14 +344,37 @@ export default function ProjectPage() {
                             </div>
                             <span className="text-muted-foreground">You can navigate freely - training continues in the background</span>
                         </div>
-                        <Button 
-                            variant="ghost" 
-                            size="sm" 
+                        <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleTabChange('versions')}
                             className="text-amber-600 hover:text-amber-500"
                         >
                             View Progress
                         </Button>
+                    </div>
+                )}
+
+                {completionBanner && (
+                    <div className="px-6 py-3 bg-emerald-500/5 border-b border-emerald-500/20 flex items-center justify-between">
+                        <div className="flex items-center gap-3 text-sm">
+                            <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <span className="font-medium">Training complete!</span>
+                            {completionBanner.mAP !== null && (
+                                <span className="text-muted-foreground">mAP50: <strong>{(completionBanner.mAP * 100).toFixed(1)}%</strong></span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => { setCompletionBanner(null); handleTabChange('test'); }}>
+                                Test it
+                            </Button>
+                            <Button size="sm" onClick={() => { setCompletionBanner(null); handleTabChange('deploy'); }}>
+                                Deploy it
+                            </Button>
+                            <Button size="icon" variant="ghost" className="w-7 h-7" onClick={() => setCompletionBanner(null)}>
+                                <X className="w-4 h-4" />
+                            </Button>
+                        </div>
                     </div>
                 )}
 
@@ -335,7 +389,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="annotate" className="mt-0 h-full">
-                            <ProjectAnnotate dataset={dataset} stats={stats} />
+                            <ProjectAnnotate dataset={dataset} stats={stats} onNavigate={handleTabChange} />
                         </TabsContent>
 
                         <TabsContent value="generate" className="mt-0 h-full">
@@ -343,7 +397,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="train" className="mt-0 h-full">
-                            <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} />
+                            <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} onDeploy={() => handleTabChange('deploy')} />
                         </TabsContent>
 
                         <TabsContent value="versions" className="mt-0 h-full">
@@ -359,7 +413,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="active-learning" className="mt-0 h-full">
-                            <ProjectActiveLearning dataset={dataset} />
+                            <ProjectActiveLearning dataset={dataset} onNavigate={handleTabChange} />
                         </TabsContent>
 
                         <TabsContent value="monitoring" className="mt-0 h-full">

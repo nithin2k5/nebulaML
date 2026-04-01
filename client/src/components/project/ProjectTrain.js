@@ -20,7 +20,7 @@ const PRESET_META = {
     accurate: { icon: Target, color: "text-emerald-500", label: "Accurate", desc: "~2 hrs • Maximum accuracy for production", epochs: 300, batch_size: 8, img_size: 1024, model_name: "yolov8m.pt", learning_rate: 0.001, patience: 80 },
 };
 
-export default function ProjectTrain({ dataset, onTrainingStarted, versionRefreshKey = 0 }) {
+export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, versionRefreshKey = 0 }) {
     const { token } = useAuth();
     const [versions, setVersions] = useState([]);
     const [selectedVersionIds, setSelectedVersionIds] = useState([]);
@@ -478,9 +478,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
 
             {/* Model Registry & Jobs */}
             <div className="mt-8">
-                <ProjectVersions dataset={dataset} onDeploy={() => {
-                    toast.info("Please navigate to the Deploy tab to deploy your model.");
-                }} />
+                <ProjectVersions dataset={dataset} onDeploy={onDeploy} />
             </div>
         </div>
     );
