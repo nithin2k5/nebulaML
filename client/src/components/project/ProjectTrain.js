@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Play, Cpu, Clock, AlertCircle, Zap, Scale, Target, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { Play, Cpu, Clock, AlertCircle, Zap, Scale, Target, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Loader2, ListOrdered, Activity, StopCircle, ChevronRight } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -20,7 +20,7 @@ const PRESET_META = {
     accurate: { icon: Target, color: "text-emerald-500", label: "Accurate", desc: "~2 hrs • Maximum accuracy for production", epochs: 300, batch_size: 8, img_size: 1024, model_name: "yolov8m.pt", learning_rate: 0.001, patience: 80 },
 };
 
-export default function ProjectTrain({ dataset, onTrainingStarted, versionRefreshKey = 0 }) {
+export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, versionRefreshKey = 0 }) {
     const { token } = useAuth();
     const [versions, setVersions] = useState([]);
     const [selectedVersionIds, setSelectedVersionIds] = useState([]);
@@ -36,6 +36,8 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
     const [selectedClasses, setSelectedClasses] = useState([]);
     const [preflight, setPreflight] = useState(null);
     const [preflightLoading, setPreflightLoading] = useState(false);
+    const [queueStatus, setQueueStatus] = useState(null);
+    const [activeJobs, setActiveJobs] = useState([]);
 
     // Initialize with all classes selected
     useEffect(() => {
@@ -76,8 +78,55 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
     }, [dataset.id, token, versionRefreshKey]);
 
     useEffect(() => {
-        if (dataset?.id) runPreflight();
+        if (!dataset?.id) return;
+        runPreflight();
+        fetchQueueStatus();
+        fetchActiveJobs();
+        const interval = setInterval(fetchActiveJobs, 5000);
+        return () => clearInterval(interval);
     }, [dataset?.id]);
+
+    const fetchActiveJobs = async () => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const running = (data.jobs || []).filter(
+                    j => j.dataset_id === dataset.id && (j.status === "running" || j.status === "pending")
+                );
+                setActiveJobs(running);
+            }
+        } catch(e) { /* non-critical */ }
+    };
+
+    const cancelJob = async (jobId) => {
+        if (!window.confirm("Stop training? The run ends after the current epoch.")) return;
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                toast.success("Cancellation requested");
+                fetchActiveJobs();
+                fetchQueueStatus();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                toast.error(err.detail || "Failed to cancel");
+            }
+        } catch(e) { toast.error(e.message); }
+    };
+
+    const fetchQueueStatus = async () => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.QUEUE_STATUS, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) setQueueStatus(await res.json());
+        } catch(e) { /* non-critical */ }
+    };
 
     const runPreflight = async () => {
         setPreflightLoading(true);
@@ -149,6 +198,8 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
             }
 
             toast.success(`Training started for ${startedJobIds.length} version${startedJobIds.length === 1 ? "" : "s"}! You can navigate away - training will continue in the background.`);
+            fetchQueueStatus();
+            fetchActiveJobs();
             if (onTrainingStarted) onTrainingStarted();
         } catch (e) {
             toast.error("Error: " + e.message);
@@ -172,6 +223,66 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
                     <Loader2 className="w-4 h-4 animate-spin" /> Running pre-flight checks...
                 </div>
             )}
+            {/* ── Active Runs ── */}
+            {activeJobs.length > 0 && (
+                <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                        <Activity className="w-4 h-4 text-blue-500 animate-pulse" />
+                        <span>Active Runs ({activeJobs.length})</span>
+                    </div>
+                    {activeJobs.map(job => (
+                        <div key={job.job_id} className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4 space-y-2">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium text-sm">{job.config?.model_name || "Model"}</span>
+                                        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-xs flex items-center gap-1">
+                                            {job.status === "running"
+                                                ? <><Loader2 className="w-3 h-3 animate-spin" /> Running</>
+                                                : <><Clock className="w-3 h-3" /> Pending</>}
+                                        </Badge>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                                        Job {job.job_id.substring(0, 8)}
+                                        {job.status === "running" && ` · Epoch ${job.current_epoch || 0}/${job.config?.epochs || "?"}`}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-sm font-bold text-blue-400 tabular-nums">
+                                        {Math.round(job.progress || 0)}%
+                                    </span>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 px-2 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                                        onClick={() => cancelJob(job.job_id)}
+                                    >
+                                        <StopCircle className="w-3.5 h-3.5" />
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="w-full bg-muted-foreground/20 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+                                    style={{ width: `${Math.max(2, job.progress || 0)}%` }}
+                                />
+                            </div>
+                            {job.metrics && Object.keys(job.metrics).length > 0 && (
+                                <div className="flex flex-wrap gap-3 pt-1">
+                                    {[["mAP50", job.metrics?.map50 ?? job.metrics?.["map50"]], ["Precision", job.metrics?.precision], ["Recall", job.metrics?.recall]]
+                                        .filter(([, v]) => v != null)
+                                        .map(([label, val]) => (
+                                            <span key={label} className="text-xs text-muted-foreground">
+                                                {label}: <span className="font-semibold text-foreground">{(Number(val) * 100).toFixed(1)}%</span>
+                                            </span>
+                                        ))}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+
             {preflight && !preflightLoading && (
                 <div className="space-y-2">
                     {/* Quality Score */}
@@ -458,6 +569,18 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
                                         </Badge>
                                     </div>
                                 )}
+                                {queueStatus && (
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground flex items-center gap-2">
+                                            <ListOrdered className="w-4 h-4" /> Queue
+                                        </span>
+                                        <span className={`text-xs font-medium ${queueStatus.slots_available > 0 ? "text-emerald-500" : "text-amber-500"}`}>
+                                            {queueStatus.slots_available > 0
+                                                ? `${queueStatus.slots_available} slot${queueStatus.slots_available > 1 ? "s" : ""} free`
+                                                : `${queueStatus.pending} waiting`}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             <Button
@@ -478,9 +601,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, versionRefres
 
             {/* Model Registry & Jobs */}
             <div className="mt-8">
-                <ProjectVersions dataset={dataset} onDeploy={() => {
-                    toast.info("Please navigate to the Deploy tab to deploy your model.");
-                }} />
+                <ProjectVersions dataset={dataset} onDeploy={onDeploy} />
             </div>
         </div>
     );

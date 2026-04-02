@@ -496,6 +496,28 @@ async def cancel_training_job(job_id: str, current_user: dict = Depends(get_curr
     _persist_job(job_id)
     return {"success": True, "message": "Cancellation requested; training stops after the current epoch completes"}
 
+@router.get("/queue-status")
+async def get_queue_status(current_user: dict = Depends(get_current_user)):
+    """
+    Return current queue capacity so the UI can show slot availability and position.
+    """
+    _ensure_jobs_loaded()
+    running = sum(1 for j in training_jobs.values() if j.get("status") == "running")
+    pending_jobs = [
+        {"job_id": jid, "created_at": j.get("created_at"), "dataset_id": j.get("dataset_id")}
+        for jid, j in training_jobs.items() if j.get("status") == "pending"
+    ]
+    # Sort pending by creation time so callers know queue order
+    pending_jobs.sort(key=lambda x: x.get("created_at") or "")
+    return {
+        "running": running,
+        "pending": len(pending_jobs),
+        "pending_jobs": pending_jobs,
+        "max_concurrent": MAX_CONCURRENT_JOBS,
+        "slots_available": max(0, MAX_CONCURRENT_JOBS - running),
+    }
+
+
 @router.get("/jobs")
 async def list_training_jobs(current_user: dict = Depends(get_current_user)):
     """

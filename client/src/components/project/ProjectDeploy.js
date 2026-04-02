@@ -22,6 +22,7 @@ export default function ProjectDeploy({ dataset }) {
     const [confidence, setConfidence] = useState(0.25);
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState(null);
+    const [activeLearningEnabled, setActiveLearningEnabled] = useState(true);
     const canvasRef = useRef(null);
     // Keep a stable ref to the current preview URL so the draw effect always has fresh data
     const previewUrlRef = useRef(null);
@@ -154,6 +155,20 @@ export default function ProjectDeploy({ dataset }) {
             } else {
                 toast.info("No objects detected above the confidence threshold.");
             }
+
+            // Fire-and-forget: log inference to monitoring
+            fetch(API_ENDPOINTS.MONITORING.LOG, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({
+                    dataset_id: dataset.id,
+                    model_job_id: selectedJob,
+                    image_name: selectedFile.name,
+                    detections: data.detections || [],
+                    confidence_scores: (data.detections || []).map(d => d.confidence),
+                    num_detections: data.num_detections || 0,
+                }),
+            }).catch(() => {});
         } catch (error) {
             console.error("Inference error:", error);
             toast.error("Inference failed: " + error.message);
@@ -228,7 +243,7 @@ export default function ProjectDeploy({ dataset }) {
                                             Low confidence predictions (&lt; {confidence}) will be automatically flagged in the Active Learn tab for human review.
                                         </p>
                                     </div>
-                                    <Switch checked={true} onCheckedChange={() => toast.success("Active Learning feedback loop enabled!")} />
+                                    <Switch checked={activeLearningEnabled} onCheckedChange={setActiveLearningEnabled} />
                                 </div>
                             </div>
                         </CardContent>

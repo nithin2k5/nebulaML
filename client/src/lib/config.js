@@ -36,6 +36,7 @@ export const API_ENDPOINTS = {
         EXPORT_AND_TRAIN: `${API_BASE_URL}/api/training/export-and-train`,
         VERSIONS_GENERATE: `${API_BASE_URL}/api/training/versions/generate`,
         VERSIONS_LIST: (id) => `${API_BASE_URL}/api/training/versions/list/${id}`,
+        QUEUE_STATUS: `${API_BASE_URL}/api/training/queue-status`,
         JOBS: `${API_BASE_URL}/api/training/jobs`,
         STATUS: (id) => `${API_BASE_URL}/api/training/status/${id}`,
         JOB: (id) => `${API_BASE_URL}/api/training/job/${id}`,

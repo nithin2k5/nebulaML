@@ -11,7 +11,8 @@ import { cn, formatMetricValue } from "@/lib/utils";
 import { toast } from 'sonner';
 import {
   Upload, Play, Square, RefreshCw, Terminal,
-  CheckCircle, XCircle, Clock, Cpu, TrendingUp
+  CheckCircle, XCircle, Clock, Cpu, TrendingUp,
+  Activity, History, ChevronDown, ChevronUp, Loader2
 } from "lucide-react";
 import GamifiedTerminal from "./GamifiedTerminal";
 import { useAuth } from "@/context/AuthContext";
@@ -93,6 +94,7 @@ export default function TrainingTab() {
   const [isTraining, setIsTraining] = useState(false);
   const [compareMode, setCompareMode] = useState(false);
   const [selectedJobs, setSelectedJobs] = useState([]);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const logEndRef = useRef(null);
 
   const fetchJobs = useCallback(async () => {
@@ -368,22 +370,19 @@ export default function TrainingTab() {
         </div>
 
         {/* Jobs Panel */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-lg flex items-center gap-2">
               <Terminal className="text-gray-500" />
               Training Jobs
             </h3>
             {jobs.length > 0 && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => {
-                  setCompareMode(!compareMode);
-                  if (compareMode) setSelectedJobs([]);
-                }}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setCompareMode(!compareMode); if (compareMode) setSelectedJobs([]); }}
                 className={cn(
-                  "border-white/10 text-xs h-8 transition-all", 
+                  "border-white/10 text-xs h-8 transition-all",
                   compareMode ? "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30" : "bg-white/5 hover:bg-white/10"
                 )}
               >
@@ -393,9 +392,7 @@ export default function TrainingTab() {
             )}
           </div>
 
-          {compareMode && (
-             <MultiJobComparisonChart selectedJobIds={selectedJobs} />
-          )}
+          {compareMode && <MultiJobComparisonChart selectedJobIds={selectedJobs} />}
 
           {jobs.length === 0 ? (
             <div className="py-16 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02]">
@@ -403,113 +400,190 @@ export default function TrainingTab() {
               <h3 className="font-semibold mb-1">No Training Jobs</h3>
               <p className="text-sm text-muted-foreground">Start a training job using the configuration panel.</p>
             </div>
-          ) : (
-            jobs.map((job) => (
-              <div key={job.job_id} className={cn(
-                "rounded-2xl bg-card/40 border overflow-hidden transition-all duration-300",
-                selectedJobs.includes(job.job_id) ? "border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)] bg-indigo-500/[0.02]" : "border-white/5"
-              )}>
-                {/* Job Header */}
-                <div className="p-4 flex items-center justify-between border-b border-white/5">
-                  <div className="flex items-center gap-3">
-                    {compareMode && (
-                      <div className="relative inline-flex items-center mr-1">
-                        <input 
-                          type="checkbox" 
-                          className="peer sr-only"
-                          checked={selectedJobs.includes(job.job_id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedJobs([...selectedJobs, job.job_id]);
-                            else setSelectedJobs(selectedJobs.filter(id => id !== job.job_id));
-                          }}
-                        />
-                        <div className="w-5 h-5 rounded border-2 border-white/20 peer-checked:border-indigo-500 peer-checked:bg-indigo-500 flex items-center justify-center transition-colors">
-                          {selectedJobs.includes(job.job_id) && <CheckCircle className="w-3.5 h-3.5 text-white" />}
-                        </div>
-                      </div>
-                    )}
-                    {getStatusBadge(job.status)}
-                    {/* Early Stopping Indicator */}
-                    {job.status === "completed" && typeof job.metrics?.epoch === "number" && job.metrics.epoch < job.config?.epochs && (
-                      <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20" title="Model stopped training to prevent overfitting since loss stopped improving.">
-                        Stopped Early (Ep {formatMetricValue(job.metrics.epoch)})
-                      </Badge>
-                    )}
-                    <div className="ml-2">
-                      <p className="text-sm font-medium">{job.config?.model_name || "yolov8n"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {job.config?.epochs || 0} epochs • Batch {job.config?.batch_size || 16}
-                      </p>
+          ) : (() => {
+            const activeJobs = jobs.filter(j => j.status === "running" || j.status === "pending");
+            const historyJobs = jobs.filter(j => j.status !== "running" && j.status !== "pending");
+
+            return (
+              <>
+                {/* ── Active Runs ── */}
+                {activeJobs.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-blue-400 animate-pulse" />
+                      <span className="text-sm font-semibold text-blue-400">Active Runs ({activeJobs.length})</span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {(job.status === "running" || job.status === "pending") && (
-                      <Button
-                        onClick={() => handleTerminateJob(job.job_id)}
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-400 hover:bg-red-400/10"
-                      >
-                        <Square className="mr-1" /> Stop
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Progress & Metrics */}
-                {(job.progress !== undefined || job.metrics) && (
-                  <div className="p-4 space-y-3">
-                    {job.progress !== undefined && (
-                      <div>
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-gray-500">Progress</span>
-                          <span className="font-mono text-indigo-400">{Math.round(job.progress || 0)}%</span>
+                    {activeJobs.map(job => (
+                      <div key={job.job_id} className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.08)]">
+                        <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
+                          <div className="flex items-center gap-3">
+                            {getStatusBadge(job.status)}
+                            <div>
+                              <p className="text-sm font-semibold">{job.config?.model_name || "yolov8n"}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {job.config?.epochs || 0} epochs • Batch {job.config?.batch_size || 16}
+                                {job.status === "running" && job.current_epoch != null &&
+                                  ` • Epoch ${job.current_epoch}/${job.config?.epochs || "?"}`}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl font-bold font-mono text-blue-400 tabular-nums">
+                              {Math.round(job.progress || 0)}%
+                            </span>
+                            <Button onClick={() => handleTerminateJob(job.job_id)} variant="ghost" size="sm"
+                              className="text-red-400 hover:bg-red-400/10 h-8 px-2">
+                              <Square className="w-3.5 h-3.5 mr-1" /> Stop
+                            </Button>
+                          </div>
                         </div>
-                        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-500"
-                            style={{ width: `${job.progress || 0}%` }}
-                          />
+
+                        <div className="p-4 space-y-3">
+                          {/* Progress bar */}
+                          <div>
+                            <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
+                                style={{ width: `${Math.max(2, job.progress || 0)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Live metrics */}
+                          {job.metrics && Object.keys(job.metrics).length > 0 && (
+                            <div className="grid grid-cols-3 gap-3">
+                              {job.metrics.loss != null && (
+                                <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                                  <p className="text-[10px] text-gray-500 uppercase mb-0.5">Loss</p>
+                                  <p className="text-sm font-mono text-amber-400">{Number(job.metrics.loss).toFixed(4)}</p>
+                                </div>
+                              )}
+                              {(job.metrics.mAP50 != null || job.metrics.map50 != null) && (
+                                <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                                  <p className="text-[10px] text-gray-500 uppercase mb-0.5">mAP@50</p>
+                                  <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}</p>
+                                </div>
+                              )}
+                              {job.metrics.epoch != null && (
+                                <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                                  <p className="text-[10px] text-gray-500 uppercase mb-0.5">Epoch</p>
+                                  <p className="text-sm font-mono text-blue-400">{formatMetricValue(job.metrics.epoch)}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <JobMetricsChart jobId={job.job_id} status={job.status} />
                         </div>
-                      </div>
-                    )}
 
-                    {job.metrics && (
-                      <div className="grid grid-cols-3 gap-4 pt-2">
-                        {job.metrics.loss !== undefined && typeof job.metrics.loss === "number" && (
-                          <div className="text-center p-2 rounded-lg bg-white/[0.03]">
-                            <p className="text-[10px] text-gray-500 uppercase">Loss</p>
-                            <p className="text-sm font-mono text-amber-400">{Number(job.metrics.loss).toFixed(4)}</p>
-                          </div>
-                        )}
-                        {(job.metrics.mAP50 !== undefined || job.metrics.map50 !== undefined) && (
-                          <div className="text-center p-2 rounded-lg bg-white/[0.03]">
-                            <p className="text-[10px] text-gray-500 uppercase">mAP@50</p>
-                            <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}</p>
-                          </div>
-                        )}
-                        {job.metrics.epoch !== undefined && (
-                          <div className="text-center p-2 rounded-lg bg-white/[0.03]">
-                            <p className="text-[10px] text-gray-500 uppercase">Epoch</p>
-                            <p className="text-sm font-mono text-blue-400">{formatMetricValue(job.metrics.epoch)}</p>
-                          </div>
-                        )}
+                        <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
                       </div>
-                    )}
-
-                    {/* Live Charts */}
-                    <JobMetricsChart jobId={job.job_id} status={job.status} />
+                    ))}
                   </div>
                 )}
 
-                {/* Log Output */}
-                <GamifiedTerminal
-                  output={job.output}
-                  isRunning={job.status === "running"}
-                />
-              </div>
-            ))
-          )}
+                {/* ── History ── */}
+                {historyJobs.length > 0 && (
+                  <div className="space-y-3">
+                    <button
+                      onClick={() => setHistoryCollapsed(c => !c)}
+                      className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-200 transition-colors w-full text-left"
+                    >
+                      <History className="w-4 h-4" />
+                      History ({historyJobs.length})
+                      {historyCollapsed
+                        ? <ChevronDown className="w-3.5 h-3.5 ml-auto" />
+                        : <ChevronUp className="w-3.5 h-3.5 ml-auto" />}
+                    </button>
+
+                    {!historyCollapsed && historyJobs.map(job => (
+                      <div key={job.job_id} className={cn(
+                        "rounded-2xl bg-card/40 border overflow-hidden transition-all duration-300",
+                        selectedJobs.includes(job.job_id)
+                          ? "border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)] bg-indigo-500/[0.02]"
+                          : "border-white/5"
+                      )}>
+                        <div className="p-4 flex items-center justify-between border-b border-white/5">
+                          <div className="flex items-center gap-3">
+                            {compareMode && (
+                              <div className="relative inline-flex items-center mr-1">
+                                <input type="checkbox" className="peer sr-only"
+                                  checked={selectedJobs.includes(job.job_id)}
+                                  onChange={e => {
+                                    if (e.target.checked) setSelectedJobs([...selectedJobs, job.job_id]);
+                                    else setSelectedJobs(selectedJobs.filter(id => id !== job.job_id));
+                                  }}
+                                />
+                                <div className="w-5 h-5 rounded border-2 border-white/20 peer-checked:border-indigo-500 peer-checked:bg-indigo-500 flex items-center justify-center transition-colors">
+                                  {selectedJobs.includes(job.job_id) && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+                                </div>
+                              </div>
+                            )}
+                            {getStatusBadge(job.status)}
+                            {job.status === "completed" && typeof job.metrics?.epoch === "number" && job.metrics.epoch < job.config?.epochs && (
+                              <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20">
+                                Early stop (Ep {formatMetricValue(job.metrics.epoch)})
+                              </Badge>
+                            )}
+                            <div>
+                              <p className="text-sm font-medium">{job.config?.model_name || "yolov8n"}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {job.config?.epochs || 0} epochs • Batch {job.config?.batch_size || 16}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {(job.progress !== undefined || job.metrics) && (
+                          <div className="p-4 space-y-3">
+                            {job.progress !== undefined && (
+                              <div>
+                                <div className="flex justify-between text-xs mb-1.5">
+                                  <span className="text-gray-500">Progress</span>
+                                  <span className="font-mono text-indigo-400">{Math.round(job.progress || 0)}%</span>
+                                </div>
+                                <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-500"
+                                    style={{ width: `${job.progress || 0}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                            {job.metrics && (
+                              <div className="grid grid-cols-3 gap-4 pt-2">
+                                {job.metrics.loss != null && typeof job.metrics.loss === "number" && (
+                                  <div className="text-center p-2 rounded-lg bg-white/[0.03]">
+                                    <p className="text-[10px] text-gray-500 uppercase">Loss</p>
+                                    <p className="text-sm font-mono text-amber-400">{Number(job.metrics.loss).toFixed(4)}</p>
+                                  </div>
+                                )}
+                                {(job.metrics.mAP50 != null || job.metrics.map50 != null) && (
+                                  <div className="text-center p-2 rounded-lg bg-white/[0.03]">
+                                    <p className="text-[10px] text-gray-500 uppercase">mAP@50</p>
+                                    <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}</p>
+                                  </div>
+                                )}
+                                {job.metrics.epoch != null && (
+                                  <div className="text-center p-2 rounded-lg bg-white/[0.03]">
+                                    <p className="text-[10px] text-gray-500 uppercase">Epoch</p>
+                                    <p className="text-sm font-mono text-blue-400">{formatMetricValue(job.metrics.epoch)}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            <JobMetricsChart jobId={job.job_id} status={job.status} />
+                          </div>
+                        )}
+
+                        <GamifiedTerminal output={job.output} isRunning={false} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     </div>
