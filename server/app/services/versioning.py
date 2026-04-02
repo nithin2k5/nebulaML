@@ -1,3 +1,4 @@
+import hashlib
 import os
 import json
 import uuid
@@ -87,8 +88,12 @@ class VersioningEngine:
         pipeline = self._build_augmentation_pipeline(preprocessing, augmentations)
         images = dataset['images']
         
-        # Simple random split logic for now
-        np.random.shuffle(images)
+        # Deterministic split: seed from dataset_id so same dataset always
+        # produces the same train/val/test partition across version regenerations.
+        seed = int(hashlib.md5(dataset_id.encode()).hexdigest(), 16) % (2 ** 31)
+        rng = np.random.default_rng(seed)
+        images = list(images)
+        rng.shuffle(images)
         n_train = int(len(images) * split_ratio['train'])
         n_val = int(len(images) * split_ratio['val'])
         

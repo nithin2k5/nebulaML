@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Play, Cpu, Clock, AlertCircle, Zap, Scale, Target, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { Play, Cpu, Clock, AlertCircle, Zap, Scale, Target, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Loader2, ListOrdered } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -36,6 +36,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
     const [selectedClasses, setSelectedClasses] = useState([]);
     const [preflight, setPreflight] = useState(null);
     const [preflightLoading, setPreflightLoading] = useState(false);
+    const [queueStatus, setQueueStatus] = useState(null);
 
     // Initialize with all classes selected
     useEffect(() => {
@@ -76,8 +77,20 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
     }, [dataset.id, token, versionRefreshKey]);
 
     useEffect(() => {
-        if (dataset?.id) runPreflight();
+        if (dataset?.id) {
+            runPreflight();
+            fetchQueueStatus();
+        }
     }, [dataset?.id]);
+
+    const fetchQueueStatus = async () => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.QUEUE_STATUS, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) setQueueStatus(await res.json());
+        } catch(e) { /* non-critical */ }
+    };
 
     const runPreflight = async () => {
         setPreflightLoading(true);
@@ -149,6 +162,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
             }
 
             toast.success(`Training started for ${startedJobIds.length} version${startedJobIds.length === 1 ? "" : "s"}! You can navigate away - training will continue in the background.`);
+            fetchQueueStatus();
             if (onTrainingStarted) onTrainingStarted();
         } catch (e) {
             toast.error("Error: " + e.message);
@@ -456,6 +470,18 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                         <Badge variant={preflight.quality_score >= 70 ? "default" : "destructive"} className="text-xs">
                                             {preflight.quality_score}/100
                                         </Badge>
+                                    </div>
+                                )}
+                                {queueStatus && (
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground flex items-center gap-2">
+                                            <ListOrdered className="w-4 h-4" /> Queue
+                                        </span>
+                                        <span className={`text-xs font-medium ${queueStatus.slots_available > 0 ? "text-emerald-500" : "text-amber-500"}`}>
+                                            {queueStatus.slots_available > 0
+                                                ? `${queueStatus.slots_available} slot${queueStatus.slots_available > 1 ? "s" : ""} free`
+                                                : `${queueStatus.pending} waiting`}
+                                        </span>
                                     </div>
                                 )}
                             </div>

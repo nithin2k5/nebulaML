@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Layers, RefreshCw, Eye, Download } from "lucide-react";
+import { Layers, RefreshCw, Eye, Download, ShieldCheck, AlertTriangle, XCircle, CheckCircle2 } from "lucide-react";
 import { toast } from 'sonner';
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
@@ -24,16 +24,38 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewData, setPreviewData] = useState(null);
     const [exportFormat, setExportFormat] = useState("yolo");
+    const [qualityCheck, setQualityCheck] = useState(null);
+    const [qualityLoading, setQualityLoading] = useState(false);
+
+    useEffect(() => {
+        if (dataset?.id) fetchQualityCheck();
+    }, [dataset?.id]);
+
+    const fetchQualityCheck = async () => {
+        setQualityLoading(true);
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.PREFLIGHT(dataset.id), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) setQualityCheck(await res.json());
+        } catch(e) { /* non-critical */ }
+        finally { setQualityLoading(false); }
+    };
 
     const handleGenerate = async () => {
         if (!stats || stats.total_images === 0) {
             toast.error("QA Error: Dataset is empty. Please upload some images first.");
             return;
         }
-        
+
         if (stats.annotated_images < stats.total_images) {
             const missing = stats.total_images - stats.annotated_images;
             toast.error(`QA Error: ${missing} images are still missing annotations. Please completely annotate the dataset before generating a version.`);
+            return;
+        }
+
+        if (qualityCheck?.blockers?.length > 0) {
+            toast.error(`Quality gate: ${qualityCheck.blockers[0].message}`);
             return;
         }
 
@@ -138,12 +160,63 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                         {previewLoading ? <RefreshCw className="mr-2 animate-spin w-4 h-4" /> : <Eye className="mr-2 w-4 h-4" />}
                         Preview
                     </Button>
-                    <Button onClick={handleGenerate} disabled={generating}>
+                    <Button onClick={handleGenerate} disabled={generating || (qualityCheck?.blockers?.length > 0)}>
                         {generating ? <RefreshCw className="mr-2 animate-spin w-4 h-4" /> : <Layers className="mr-2 w-4 h-4" />}
                         {generating ? "Generating..." : "Generate Version"}
                     </Button>
                 </div>
             </div>
+
+            {/* Dataset Quality Gate */}
+            {qualityLoading && (
+                <div className="p-3 rounded-lg border border-border bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw className="w-4 h-4 animate-spin" /> Checking dataset quality...
+                </div>
+            )}
+            {qualityCheck && !qualityLoading && (
+                <div className="space-y-2">
+                    <div className={`p-3 rounded-lg border flex items-center justify-between ${
+                        qualityCheck.quality_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5' :
+                        qualityCheck.quality_score >= 40 ? 'border-amber-500/30 bg-amber-500/5' :
+                        'border-red-500/30 bg-red-500/5'
+                    }`}>
+                        <div className="flex items-center gap-2">
+                            <ShieldCheck className={`w-4 h-4 ${
+                                qualityCheck.quality_score >= 70 ? 'text-emerald-500' :
+                                qualityCheck.quality_score >= 40 ? 'text-amber-500' : 'text-red-500'
+                            }`} />
+                            <span className="text-sm font-medium">Dataset Quality Score</span>
+                        </div>
+                        <Badge variant={qualityCheck.quality_score >= 70 ? "default" : "destructive"}>
+                            {qualityCheck.quality_score}/100
+                        </Badge>
+                    </div>
+                    {qualityCheck.blockers?.map((b, i) => (
+                        <div key={i} className="p-3 rounded-lg border border-red-500/40 bg-red-500/10 flex items-start gap-2">
+                            <XCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                            <div className="text-sm">
+                                <span className="font-medium text-red-500">Blocker: </span>{b.message}
+                                <p className="text-muted-foreground text-xs mt-1">{b.suggestion}</p>
+                            </div>
+                        </div>
+                    ))}
+                    {qualityCheck.warnings?.map((w, i) => (
+                        <div key={i} className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                            <div className="text-sm">
+                                <span className="font-medium text-amber-500">Warning: </span>{w.message}
+                                <p className="text-muted-foreground text-xs mt-1">{w.suggestion}</p>
+                            </div>
+                        </div>
+                    ))}
+                    {qualityCheck.blockers?.length === 0 && qualityCheck.warnings?.length === 0 && (
+                        <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 flex items-center gap-2 text-sm">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            <span className="text-emerald-600 font-medium">Dataset ready — all quality checks passed.</span>
+                        </div>
+                    )}
+                </div>
+            )}
 
             <div className="grid md:grid-cols-2 gap-6">
                 {/* Pre-processing */}
