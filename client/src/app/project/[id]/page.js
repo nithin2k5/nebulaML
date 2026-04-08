@@ -183,12 +183,26 @@ export default function ProjectPage() {
             meta: `${Math.round(stats?.completion_percentage || 0)}% Done`
         },
         {
+            id: 'health',
+            label: 'Health',
+            icon: Activity,
+            status: (stats?.total_images > 0) ? (hasModels ? 'complete' : 'inprogress') : 'pending',
+            meta: stats?.total_images > 0 ? 'Quality Check' : 'No Data'
+        },
+        {
             id: 'generate',
             label: 'Generate',
             icon: Layers,
             status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
                     (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
             meta: 'Version Snapshot'
+        },
+        {
+            id: 'versions',
+            label: 'Registry',
+            icon: Package,
+            status: hasModels ? 'complete' : 'pending',
+            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
         },
         {
             id: 'train',
@@ -200,13 +214,6 @@ export default function ProjectPage() {
             meta: isTraining ? `${runningJobs[0] ? Math.round(runningJobs[0].progress || 0) + '%' : 'Running'}` :
                   hasModels ? `${completedJobs.length} Model${completedJobs.length > 1 ? 's' : ''}` :
                   hasFailed ? 'Failed' : 'No Jobs'
-        },
-        {
-            id: 'versions',
-            label: 'Registry',
-            icon: Package,
-            status: hasModels ? 'complete' : 'pending',
-            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
         },
         {
             id: 'test',
@@ -235,13 +242,6 @@ export default function ProjectPage() {
             icon: BarChart3,
             status: monitoringTotal > 0 ? 'complete' : hasModels ? 'inprogress' : 'pending',
             meta: monitoringTotal > 0 ? `${monitoringTotal} Inferences` : hasModels ? 'Run Inference' : 'No Data'
-        },
-        {
-            id: 'health',
-            label: 'Health',
-            icon: Activity,
-            status: hasModels ? 'complete' : 'pending',
-            meta: 'No Issues'
         },
         {
             id: 'team',
@@ -392,16 +392,20 @@ export default function ProjectPage() {
                             <ProjectAnnotate dataset={dataset} stats={stats} onNavigate={handleTabChange} />
                         </TabsContent>
 
+                        <TabsContent value="health" className="mt-0 h-full">
+                            <ProjectHealth params={params} />
+                        </TabsContent>
+
                         <TabsContent value="generate" className="mt-0 h-full">
                             <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); setVersionRefreshKey(k => k + 1); handleTabChange('train'); }} />
                         </TabsContent>
 
-                        <TabsContent value="train" className="mt-0 h-full">
-                            <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} onDeploy={() => handleTabChange('deploy')} />
-                        </TabsContent>
-
                         <TabsContent value="versions" className="mt-0 h-full">
                             <ProjectVersions dataset={dataset} onDeploy={() => handleTabChange('deploy')} />
+                        </TabsContent>
+
+                        <TabsContent value="train" className="mt-0 h-full">
+                            <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} onDeploy={() => handleTabChange('deploy')} />
                         </TabsContent>
 
                         <TabsContent value="test" className="mt-0 h-full">
@@ -418,10 +422,6 @@ export default function ProjectPage() {
 
                         <TabsContent value="monitoring" className="mt-0 h-full">
                             <ProjectMonitoring dataset={dataset} />
-                        </TabsContent>
-
-                        <TabsContent value="health" className="mt-0 h-full">
-                            <ProjectHealth params={params} />
                         </TabsContent>
 
                         <TabsContent value="team" className="mt-0 h-full">
