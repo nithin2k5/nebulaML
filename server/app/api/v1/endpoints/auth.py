@@ -2,7 +2,7 @@
 Authentication routes for login, register, and user management
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -10,9 +10,9 @@ import mysql.connector
 from app.db.session import get_db_connection, migrate_users_otp_columns
 from app.core.logging import logger
 from app.core.rbac import (
-    hash_password, 
-    verify_password, 
-    create_access_token, 
+    hash_password,
+    verify_password,
+    create_access_token,
     decode_access_token,
     Role,
     Permission,
@@ -23,6 +23,10 @@ import uuid
 import random
 from datetime import datetime, timedelta
 from app.core.email import send_otp_email
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 security = HTTPBearer()
@@ -123,7 +127,8 @@ def require_permission(permission: str):
 
 
 @router.post("/register")
-async def register(user_data: UserRegister):
+@limiter.limit("5/minute")
+async def register(request: Request, user_data: UserRegister):
     """Register a new user"""
     connection = get_db_connection()
     if not connection:
@@ -200,7 +205,8 @@ async def register(user_data: UserRegister):
 
 
 @router.post("/login")
-async def login(credentials: UserLogin):
+@limiter.limit("5/minute")
+async def login(request: Request, credentials: UserLogin):
     """Login user and return OTP message or token for fast pass"""
     connection = get_db_connection()
     if not connection:
@@ -349,7 +355,8 @@ async def verify_otp(verify_data: UserVerify):
 
 
 @router.post("/resend-otp")
-async def resend_otp(request: EmailRequest):
+@limiter.limit("3/minute")
+async def resend_otp(request: Request, body: EmailRequest):
     """Resend OTP to existing user or pending registration"""
     connection = get_db_connection()
     if not connection:
@@ -358,12 +365,12 @@ async def resend_otp(request: EmailRequest):
     try:
         cursor = connection.cursor(dictionary=True)
         # Check users table first (for login flow)
-        cursor.execute("SELECT id FROM users WHERE email = %s", (request.email,))
+        cursor.execute("SELECT id FROM users WHERE email = %s", (body.email,))
         user = cursor.fetchone()
-        
+
         otp_code = f"{random.randint(100000, 999999)}"
         otp_expiry = datetime.now() + timedelta(minutes=10)
-        
+
         if user:
             cursor.execute(
                 "UPDATE users SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
@@ -371,7 +378,7 @@ async def resend_otp(request: EmailRequest):
             )
         else:
             # Check pending_registrations
-            cursor.execute("SELECT id FROM pending_registrations WHERE email = %s", (request.email,))
+            cursor.execute("SELECT id FROM pending_registrations WHERE email = %s", (body.email,))
             pending_user = cursor.fetchone()
             if pending_user:
                 cursor.execute(
@@ -380,9 +387,9 @@ async def resend_otp(request: EmailRequest):
                 )
             else:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-                
+
         connection.commit()
-        send_otp_email(request.email, otp_code)
+        send_otp_email(body.email, otp_code)
         
         return {"message": "OTP resent successfully"}
     except HTTPException:
