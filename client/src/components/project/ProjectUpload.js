@@ -10,7 +10,7 @@ import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
-export default function ProjectUpload({ dataset, onUploadComplete }) {
+export default function ProjectUpload({ dataset, onUploadComplete, onNavigate }) {
     const { token } = useAuth();
     const [isDragging, setIsDragging] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -83,7 +83,13 @@ export default function ProjectUpload({ dataset, onUploadComplete }) {
             const data = await response.json();
 
             if (data.success) {
-                toast.success(`Uploaded ${data.uploaded} images successfully`);
+                toast.success(`Uploaded ${data.uploaded} images successfully`, {
+                    action: onNavigate ? {
+                        label: "Check Health",
+                        onClick: () => onNavigate("health"),
+                    } : undefined,
+                    duration: 6000,
+                });
                 if (data.errors?.length > 0) {
                     toast.warning(`${data.error_count} files failed to upload`);
                 }
@@ -122,7 +128,14 @@ export default function ProjectUpload({ dataset, onUploadComplete }) {
                 const info = data.video_info;
                 toast.success(
                     `Extracted ${data.extraction.frames_extracted} frames from ${info.filename} ` +
-                    `(${info.duration_seconds}s @ ${info.fps}fps)`
+                    `(${info.duration_seconds}s @ ${info.fps}fps)`,
+                    {
+                        action: onNavigate ? {
+                            label: "Check Health",
+                            onClick: () => onNavigate("health"),
+                        } : undefined,
+                        duration: 6000,
+                    }
                 );
                 if (onUploadComplete) onUploadComplete();
             } else {
