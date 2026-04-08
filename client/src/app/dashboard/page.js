@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState("datasets");
   const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -27,7 +27,7 @@ export default function DashboardPage() {
 
   const tabs = [
     { id: "dashboard", label: "Overview", icon: Activity },
-    { id: "datasets", label: "Datasets", icon: Database },
+    { id: "datasets", label: "Projects", icon: Database },
     { id: "inference", label: "Playground", icon: Zap },
     { id: "training", label: "Training", icon: Cpu },
     { id: "models", label: "Models", icon: Box },
