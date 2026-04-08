@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import os
@@ -6,11 +6,14 @@ import io
 from pathlib import Path
 from PIL import Image
 from functools import lru_cache
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.services.inference import YOLOInference
 from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 # Resolve the runs directory relative to this file's location so it is always
 # consistent regardless of the working directory uvicorn is launched from.
@@ -57,7 +60,9 @@ def _resolve_job_weights(job_id: str) -> str:
 
 
 @router.post("/predict")
+@limiter.limit("30/minute")
 async def predict_image(
+    request: Request,
     file: UploadFile = File(...),
     confidence: Optional[float] = Form(0.25),
     iou: Optional[float] = Form(0.45),

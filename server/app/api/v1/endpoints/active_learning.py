@@ -37,6 +37,11 @@ class ApproveRequest(BaseModel):
     predictions: List[Dict[str, Any]]
 
 
+class RejectRequest(BaseModel):
+    dataset_id: str
+    image_ids: List[str]
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -269,6 +274,24 @@ async def approve_predictions(
     return {
         "success": True,
         "approved_count": approved_count,
+        "remaining_uncertain": len(remaining),
+    }
+
+
+@router.post("/reject")
+async def reject_predictions(
+    request: RejectRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Reject (discard) uncertain images without adding them to training data.
+    Removes the selected image_ids from the uncertain_images queue.
+    """
+    _remove_uncertain_images(request.dataset_id, set(request.image_ids))
+    remaining = _load_uncertain_images(request.dataset_id)
+    return {
+        "success": True,
+        "rejected_count": len(request.image_ids),
         "remaining_uncertain": len(remaining),
     }
 
