@@ -385,7 +385,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="upload" className="mt-0 h-full">
-                            <ProjectUpload dataset={dataset} onUploadComplete={() => fetchStats(dataset.id)} />
+                            <ProjectUpload dataset={dataset} onUploadComplete={() => fetchStats(dataset.id)} onNavigate={handleTabChange} />
                         </TabsContent>
 
                         <TabsContent value="annotate" className="mt-0 h-full">
