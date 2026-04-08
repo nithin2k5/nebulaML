@@ -73,6 +73,7 @@ export const API_ENDPOINTS = {
         COLLECT: `${API_BASE_URL}/api/active-learning/collect`,
         UNCERTAIN: (datasetId) => `${API_BASE_URL}/api/active-learning/uncertain/${datasetId}`,
         APPROVE: `${API_BASE_URL}/api/active-learning/approve`,
+        REJECT: `${API_BASE_URL}/api/active-learning/reject`,
     },
     MONITORING: {
         LOG: `${API_BASE_URL}/api/monitoring/log`,

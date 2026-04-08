@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { RefreshCw, Brain, CheckCircle, ArrowRight, Loader, Eye, Sparkles } from "lucide-react";
+import { RefreshCw, Brain, CheckCircle, ArrowRight, Loader, Eye, Sparkles, XCircle, Layers, Cpu } from "lucide-react";
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -93,6 +93,38 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
             toast.error("Error: " + e.message);
         } finally {
             setCollecting(false);
+        }
+    };
+
+    const handleReject = async () => {
+        const toReject = [...selectedImages];
+        if (toReject.length === 0) {
+            toast.error("No images selected");
+            return;
+        }
+        try {
+            const res = await fetch(API_ENDPOINTS.ACTIVE_LEARNING.REJECT, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    dataset_id: dataset.id,
+                    image_ids: toReject
+                })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                toast.success(`Rejected ${data.rejected_count} images`);
+                setSelectedImages(new Set());
+                fetchUncertain();
+            } else {
+                const err = await res.json();
+                toast.error(err.detail || "Failed to reject images");
+            }
+        } catch (e) {
+            toast.error("Error: " + e.message);
         }
     };
 
@@ -184,18 +216,28 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
                         <Sparkles className="w-5 h-5 text-emerald-500 shrink-0" />
                         <div>
                             <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-                                {approvedCount} image{approvedCount !== 1 ? "s" : ""} approved and added to training data!
+                                {approvedCount} image{approvedCount !== 1 ? "s" : ""} approved and merged into training data!
                             </p>
-                            <p className="text-xs text-muted-foreground">Generate a new dataset version and re-train to improve your model.</p>
+                            <p className="text-xs text-muted-foreground">
+                                Option A: Generate a new dataset version, then train. &nbsp;|&nbsp; Option B: Re-train directly on the current version.
+                            </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                         <Button
                             size="sm"
+                            variant="outline"
                             onClick={() => { setShowRetrainBanner(false); onNavigate?.("generate"); }}
                         >
-                            <RefreshCw className="w-4 h-4 mr-1.5" />
-                            Generate & Re-train
+                            <Layers className="w-4 h-4 mr-1.5" />
+                            New Version
+                        </Button>
+                        <Button
+                            size="sm"
+                            onClick={() => { setShowRetrainBanner(false); onNavigate?.("train"); }}
+                        >
+                            <Cpu className="w-4 h-4 mr-1.5" />
+                            Re-train Now
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => setShowRetrainBanner(false)}>Dismiss</Button>
                     </div>
@@ -263,9 +305,18 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
                                 <Button variant="outline" size="sm" onClick={selectAll}>
                                     {selectedImages.size === uncertainImages.length ? "Deselect All" : "Select All"}
                                 </Button>
+                                <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={handleReject}
+                                    disabled={selectedImages.size === 0}
+                                >
+                                    <XCircle className="mr-2 w-4 h-4" />
+                                    Reject ({selectedImages.size})
+                                </Button>
                                 <Button size="sm" onClick={handleApprove} disabled={selectedImages.size === 0}>
                                     <CheckCircle className="mr-2 w-4 h-4" />
-                                    Approve Selected ({selectedImages.size})
+                                    Approve ({selectedImages.size})
                                 </Button>
                             </div>
                         </div>
