@@ -429,6 +429,120 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     }
 
 
+class UpdateProfileRequest(BaseModel):
+    username: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Username cannot be empty")
+        if not _USERNAME_RE.match(v):
+            raise ValueError(
+                "Username may only contain lowercase letters, digits, and underscores"
+            )
+        return v
+
+
+@router.put("/me")
+async def update_profile(
+    update: UpdateProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update current user's username"""
+    if update.username == current_user["username"]:
+        return {"message": "No changes made", "username": current_user["username"]}
+
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed",
+        )
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+
+        # Uniqueness check across both tables
+        cursor.execute(
+            "SELECT id FROM users WHERE username = %s AND id != %s "
+            "UNION SELECT id FROM pending_registrations WHERE username = %s",
+            (update.username, current_user["id"], update.username),
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken",
+            )
+
+        cursor.execute(
+            "UPDATE users SET username = %s WHERE id = %s",
+            (update.username, current_user["id"]),
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return {"message": "Profile updated", "username": update.username}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update profile: {str(e)}",
+        )
+
+
+@router.get("/me/stats")
+async def get_my_stats(current_user: dict = Depends(get_current_user)):
+    """Get activity stats for the current user"""
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed",
+        )
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM datasets WHERE user_id = %s",
+            (current_user["id"],),
+        )
+        projects_owned = cursor.fetchone()["cnt"]
+
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM project_members WHERE user_id = %s",
+            (current_user["id"],),
+        )
+        projects_member = cursor.fetchone()["cnt"]
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS cnt FROM annotations a
+            JOIN datasets d ON a.dataset_id = d.id
+            WHERE d.user_id = %s
+            """,
+            (current_user["id"],),
+        )
+        annotations_count = cursor.fetchone()["cnt"]
+
+        cursor.close()
+        connection.close()
+
+        return {
+            "projects_owned": projects_owned,
+            "projects_member": projects_member,
+            "annotations_saved": annotations_count,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch stats: {str(e)}",
+        )
+
+
 @router.get("/permissions")
 async def get_my_permissions(current_user: dict = Depends(get_current_user)):
     """Get current user's permissions"""

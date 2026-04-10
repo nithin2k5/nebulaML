@@ -10,12 +10,13 @@ import InferenceTab from "@/components/InferenceTab";
 import TrainingTab from "@/components/TrainingTab";
 import ModelsTab from "@/components/ModelsTab";
 import SettingsTab from "@/components/SettingsTab";
+import ProfileTab from "@/components/ProfileTab";
 import OnboardingTour from "@/components/OnboardingTour";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Activity, Database, Zap, Cpu, Box,
-  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight
+  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -32,6 +33,7 @@ export default function DashboardPage() {
     { id: "training", label: "Training", icon: Cpu },
     { id: "models", label: "Models", icon: Box },
     { id: "settings", label: "Settings", icon: Settings },
+    { id: "profile", label: "Profile", icon: UserCircle },
   ];
 
   return (
@@ -102,15 +104,19 @@ export default function DashboardPage() {
           <div className="border-t border-white/5 p-3 shrink-0">
             {sidebarOpen ? (
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 min-w-0">
+                <button
+                  onClick={() => setActiveTab("profile")}
+                  className="flex items-center gap-2.5 min-w-0 hover:opacity-80 transition-opacity"
+                  title="View profile"
+                >
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
                     {user?.username?.charAt(0)?.toUpperCase() || "U"}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 text-left">
                     <p className="text-sm font-medium truncate">{user?.username || "User"}</p>
                     <p className="text-[10px] text-muted-foreground truncate">{user?.role || "user"}</p>
                   </div>
-                </div>
+                </button>
                 <Button
                   onClick={logout}
                   variant="ghost"
@@ -164,6 +170,7 @@ export default function DashboardPage() {
                 {activeTab === "training" && <TrainingTab />}
                 {activeTab === "models" && <ModelsTab />}
                 {activeTab === "settings" && <SettingsTab />}
+                {activeTab === "profile" && <ProfileTab />}
               </div>
             </div>
           </main>
