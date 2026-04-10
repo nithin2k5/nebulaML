@@ -304,14 +304,14 @@ export default function DatasetsTab() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {datasets?.map((dataset) => {
+          {datasets?.map((dataset, dsIdx) => {
             const total = dataset.stats?.total_images || 0;
             const annotated = dataset.stats?.annotated_images || 0;
             const progress = total > 0 ? Math.round((annotated / total) * 100) : 0;
 
             return (
               <div
-                key={dataset.id}
+                key={dataset.id || `ds-${dsIdx}`}
                 className="group rounded-2xl bg-card/40 backdrop-blur-md border border-white/5 hover:border-indigo-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden shadow-lg"
               >
                 <div className="p-6 flex flex-col flex-1 h-full">

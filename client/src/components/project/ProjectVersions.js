@@ -463,7 +463,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                         </div>
                     ) : (
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                            {sortedJobs.map((job) => {
+                            {sortedJobs.map((job, jobIdx) => {
                                 const isCompleted = job.status === "completed" || job.status === "success";
                                 const isActive = job.status === "running" || job.status === "pending";
                                 const usedVersion = versions.find(v => v.id?.toString() === job.version_id?.toString());
@@ -475,7 +475,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
 
                                 return (
                                     <button
-                                        key={job.job_id}
+                                        key={job.job_id || `job-${jobIdx}`}
                                         type="button"
                                         onClick={() => setSelectedJob(job)}
                                         className="group border rounded-xl p-5 bg-card/50 text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col min-h-[160px]"

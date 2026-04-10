@@ -137,6 +137,9 @@ function AnnotationToolContent() {
   const aiRequestIdRef = useRef(0);         // incremented per request to ignore stale responses
   const aiMetadataRef = useRef(null);       // {algo_version, area, etc} from last server response
   const aiHoverInsideMaskRef = useRef(false); // true when cursor is inside the current mask polygon
+  const [aiViewMode, setAiViewMode] = useState('mask'); // 'mask' | 'polygon' | 'box'
+  const aiViewModeRef = useRef('mask');
+  const aiDragVertexIdxRef = useRef(-1); // index of vertex being dragged (-1 = none)
 
   // Render-sync refs so drawCanvas always reads current values without dep-array churn
   const activeToolRef = useRef(activeTool);
@@ -149,6 +152,7 @@ function AnnotationToolContent() {
   selectedBoxIndexRef.current = selectedBoxIndex;
   hoveredBoxIndexRef.current = hoveredBoxIndex;
   selectedClassRef.current = selectedClass;
+  aiViewModeRef.current = aiViewMode;
 
   // Filter images based on status
   const filteredImages = useMemo(() => {
@@ -688,8 +692,10 @@ function AnnotationToolContent() {
     aiHistoryRef.current = [];
     aiMetadataRef.current = null;
     aiHoverInsideMaskRef.current = false;
+    aiDragVertexIdxRef.current = -1;
     aiRequestIdRef.current++;
     setAiSubTool('box');
+    setAiViewMode('mask');
     setAiStateVersion(v => v + 1);
     drawCanvas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -786,6 +792,18 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'ai') {
+      // Check if clicking near a mask polygon vertex → start vertex drag
+      if (aiMaskPolygonRef.current && aiSubTool !== 'box') {
+        const hitRadius = 10;
+        const poly = aiMaskPolygonRef.current;
+        for (let vi = 0; vi < poly.length; vi += 3) {
+          if (Math.hypot(x - poly[vi].x, y - poly[vi].y) < hitRadius) {
+            aiDragVertexIdxRef.current = vi;
+            return;
+          }
+        }
+      }
+
       if (aiSubTool === 'box') {
         aiHistoryRef.current = [...aiHistoryRef.current, {
           roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
@@ -949,6 +967,21 @@ function AnnotationToolContent() {
     }
 
     if (activeTool === 'ai') {
+      // Vertex drag
+      if (aiDragVertexIdxRef.current >= 0 && aiMaskPolygonRef.current) {
+        if (canvasRef.current) canvasRef.current.style.cursor = 'grabbing';
+        const newPoly = [...aiMaskPolygonRef.current];
+        newPoly[aiDragVertexIdxRef.current] = { x, y };
+        aiMaskPolygonRef.current = newPoly;
+        if (!animFrameRef.current) {
+          animFrameRef.current = requestAnimationFrame(() => {
+            animFrameRef.current = null;
+            drawCanvas();
+          });
+        }
+        return;
+      }
+
       if (aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
         const sx = aiBoxStartRef.current.x;
         const sy = aiBoxStartRef.current.y;
@@ -963,9 +996,15 @@ function AnnotationToolContent() {
           });
         }
       } else if (aiMaskPolygonRef.current && (aiSubTool === 'fg' || aiSubTool === 'bg')) {
+        // Check for proximity to vertex handles
+        const poly = aiMaskPolygonRef.current;
+        let nearVertex = false;
+        for (let vi = 0; vi < poly.length; vi += 3) {
+          if (Math.hypot(x - poly[vi].x, y - poly[vi].y) < 10) { nearVertex = true; break; }
+        }
         // Dynamic cursor + hover highlight: change appearance when hovering inside existing mask
         const insideMask = isPointInPolygon(x, y, aiMaskPolygonRef.current);
-        if (canvasRef.current) canvasRef.current.style.cursor = insideMask ? 'not-allowed' : 'cell';
+        if (canvasRef.current) canvasRef.current.style.cursor = nearVertex ? 'grab' : (insideMask ? 'not-allowed' : 'cell');
         if (insideMask !== aiHoverInsideMaskRef.current) {
           aiHoverInsideMaskRef.current = insideMask;
           if (!animFrameRef.current) {
@@ -989,6 +1028,13 @@ function AnnotationToolContent() {
 
   const handleMouseUp = (e) => {
     e.preventDefault();
+
+    // End vertex drag
+    if (aiDragVertexIdxRef.current >= 0) {
+      aiDragVertexIdxRef.current = -1;
+      drawCanvas();
+      return;
+    }
 
     // Poly is finished via double click or Enter key, but let's allow it to finish via context menu or something later. For now we use double click event.
     // So for polygon, up does nothing special unless it's select
@@ -1295,15 +1341,47 @@ function AnnotationToolContent() {
         if (maskPolygon && maskPolygon.length >= 3) {
           ctx.save();
           const hoverInside = aiHoverInsideMaskRef.current;
-          ctx.strokeStyle = hoverInside ? '#f87171' : '#c084fc';
-          ctx.lineWidth = (hoverInside ? 2.5 : 2) * scale;
-          ctx.fillStyle = hoverInside ? 'rgba(239, 68, 68, 0.25)' : 'rgba(192, 132, 252, 0.22)';
-          ctx.beginPath();
-          ctx.moveTo(maskPolygon[0].x, maskPolygon[0].y);
-          for (let i = 1; i < maskPolygon.length; i++) ctx.lineTo(maskPolygon[i].x, maskPolygon[i].y);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
+          const viewMode = aiViewModeRef.current;
+
+          if (viewMode === 'box') {
+            // Draw bounding box of the mask polygon
+            const minX = Math.min(...maskPolygon.map(p => p.x));
+            const maxX = Math.max(...maskPolygon.map(p => p.x));
+            const minY = Math.min(...maskPolygon.map(p => p.y));
+            const maxY = Math.max(...maskPolygon.map(p => p.y));
+            ctx.strokeStyle = '#c084fc';
+            ctx.lineWidth = 2 * scale;
+            ctx.fillStyle = 'rgba(192, 132, 252, 0.15)';
+            ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+            ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+          } else {
+            // 'mask' = filled polygon, 'polygon' = outline only
+            ctx.strokeStyle = hoverInside ? '#f87171' : '#c084fc';
+            ctx.lineWidth = (hoverInside ? 2.5 : 2) * scale;
+            ctx.fillStyle = viewMode === 'polygon'
+              ? 'rgba(192, 132, 252, 0.08)'
+              : (hoverInside ? 'rgba(239, 68, 68, 0.25)' : 'rgba(192, 132, 252, 0.35)');
+            ctx.beginPath();
+            ctx.moveTo(maskPolygon[0].x, maskPolygon[0].y);
+            for (let i = 1; i < maskPolygon.length; i++) ctx.lineTo(maskPolygon[i].x, maskPolygon[i].y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
+
+          // Vertex handles (every 3rd point) for drag editing
+          const dragIdx = aiDragVertexIdxRef.current;
+          for (let vi = 0; vi < maskPolygon.length; vi += 3) {
+            const vp = maskPolygon[vi];
+            ctx.beginPath();
+            ctx.arc(vp.x, vp.y, (dragIdx === vi ? 5 : 3.5) * scale, 0, Math.PI * 2);
+            ctx.fillStyle = dragIdx === vi ? '#f97316' : 'rgba(192, 132, 252, 0.9)';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1 * scale;
+            ctx.stroke();
+          }
+
           ctx.restore();
         }
 
@@ -1780,13 +1858,13 @@ function AnnotationToolContent() {
                         <span className="text-[10px] text-orange-300">Box drawn — click foreground points to refine</span>
                       ) : (
                         <span className="text-[10px] text-gray-500">
-                          {aiSubTool === 'box' ? 'Step 1: Drag to draw a rough region' : aiSubTool === 'fg' ? 'Click inside the object to mark it' : 'Click outside the object to exclude'}
+                          {aiSubTool === 'box' ? 'Drag a region, or switch to fg and click directly' : aiSubTool === 'fg' ? 'Left-click: foreground · Right-click: background' : 'Click outside the object to exclude'}
                         </span>
                       )}
                     </div>
 
                     {(aiPointsRef.current.length > 0 || aiRoughBoxRef.current) && (
-                      <div className="flex gap-1 text-[9px] text-gray-500 px-1">
+                      <div className="flex gap-1 flex-wrap text-[9px] text-gray-500 px-1">
                         {aiRoughBoxRef.current && <span className="px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/20 rounded text-orange-400">box</span>}
                         {aiPointsRef.current.filter(p => p.type === 'fg').length > 0 && (
                           <span className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400">+{aiPointsRef.current.filter(p => p.type === 'fg').length} fg</span>
@@ -1794,6 +1872,37 @@ function AnnotationToolContent() {
                         {aiPointsRef.current.filter(p => p.type === 'bg').length > 0 && (
                           <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-red-400">−{aiPointsRef.current.filter(p => p.type === 'bg').length} bg</span>
                         )}
+                        {aiMetadataRef.current?.confidence != null && (
+                          <span className="px-1.5 py-0.5 bg-purple-500/10 border border-purple-500/20 rounded text-purple-300 ml-auto">
+                            {Math.round(aiMetadataRef.current.confidence * 100)}% conf
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* View mode toggle */}
+                    {aiMaskPolygonRef.current && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-gray-500 px-1">View</p>
+                        <div className="grid grid-cols-3 gap-1">
+                          {[
+                            { id: 'mask', label: 'Mask' },
+                            { id: 'polygon', label: 'Outline' },
+                            { id: 'box', label: 'BBox' },
+                          ].map(v => (
+                            <button
+                              key={v.id}
+                              onClick={() => { setAiViewMode(v.id); drawCanvas(); }}
+                              className={`py-1 rounded text-[9px] font-medium border transition-all ${
+                                aiViewMode === v.id
+                                  ? 'bg-purple-600/30 border-purple-500/60 text-purple-200'
+                                  : 'bg-black/30 border-white/5 text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                              }`}
+                            >
+                              {v.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -2019,6 +2128,21 @@ function AnnotationToolContent() {
                     onMouseUp={(e) => {
                       if (annotationType === 'detection') handleMouseUp(e);
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (activeTool === 'ai' && annotationType === 'detection') {
+                        const { x, y } = getCanvasCoordinates(e);
+                        aiHistoryRef.current = [...aiHistoryRef.current, {
+                          roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+                          points: [...aiPointsRef.current],
+                          maskPolygon: aiMaskPolygonRef.current,
+                        }];
+                        aiPointsRef.current = [...aiPointsRef.current, { x, y, type: 'bg' }];
+                        setAiStateVersion(v => v + 1);
+                        drawCanvas();
+                        callSmartSegment();
+                      }
+                    }}
                     onMouseLeave={() => {
                       if (annotationType === 'detection' && isDrawing && startPos) {
                         setIsDrawing(false); setStartPos(null); setCurrentBox(null); cursorPosRef.current = null;
@@ -2080,7 +2204,7 @@ function AnnotationToolContent() {
                 <div className="h-16 flex items-center gap-1 px-4 overflow-x-auto custom-scrollbar">
                   {filteredImages.map((img, idx) => (
                     <div
-                      key={img.id}
+                      key={img.id || `img-${idx}`}
                       onClick={async () => {
                         await handleSaveAnnotations();
                         const originalIdx = img.originalIndex;
