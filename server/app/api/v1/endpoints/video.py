@@ -17,6 +17,7 @@ import logging
 
 from app.services.database import DatasetService
 from app.api.v1.endpoints.auth import get_current_user
+from app.core.access import require_role
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -47,10 +48,11 @@ async def extract_frames(
             detail=f"Unsupported video format '{ext}'. Allowed: {', '.join(allowed_extensions)}"
         )
 
-    # Verify dataset exists
+    # Verify dataset exists and caller has annotator+ access
     dataset = DatasetService.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "annotator")
 
     # Create images directory for dataset
     images_dir = Path(f"datasets/{dataset_id}/images")

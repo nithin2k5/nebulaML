@@ -149,12 +149,11 @@ async def generate_dataset_version(
     with specific preprocessing and augmentations.
     Requires authentication.
     """
-    # Verify dataset ownership
     dataset = DatasetService.get_dataset(request.dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Not authorized to generate versions for this dataset")
+    from app.core.access import require_role
+    require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
 
     engine = VersioningEngine()
     version_id = engine.generate_version(
@@ -801,6 +800,12 @@ async def start_training_from_dataset(
     """
     _ensure_jobs_loaded()
     try:
+        from app.core.access import require_role
+        dataset = DatasetService.get_dataset(request.dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
+
         active = sum(1 for j in training_jobs.values() if j.get("status") in ["running", "pending"])
         if active >= MAX_CONCURRENT_JOBS:
             raise HTTPException(
@@ -913,6 +918,12 @@ async def export_and_train(
     """
     _ensure_jobs_loaded()
     try:
+        from app.core.access import require_role
+        dataset = DatasetService.get_dataset(request.dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
+
         # Analyze dataset first
         try:
             analysis = DatasetAnalyzer.analyze_dataset(request.dataset_id)

@@ -9,6 +9,7 @@ from dataclasses import asdict
 # sys.path.append(str(Path(__file__).parent.parent.parent))
 from app.services.dataset_analyzer import DatasetAnalyzer
 from app.api.v1.endpoints.auth import get_current_user
+from app.core.access import require_role
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -29,8 +30,7 @@ async def analyze_dataset(dataset_id: str, current_user: dict = Depends(get_curr
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
-        if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
-            raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
+        require_role(dataset_id, current_user["id"], dataset["user_id"], "annotator")
 
         analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
 
@@ -67,8 +67,7 @@ async def get_quality_history(
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
-        if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
-            raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
+        require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
 
         history = QualitySnapshotService.get_history(dataset_id, min(limit, 100))
         return JSONResponse(content={"success": True, "history": history})
@@ -87,12 +86,10 @@ async def analyze_uncertainty(dataset_id: str, current_user: dict = Depends(get_
         from app.services.inference import YOLOInference
         import os
 
-        # Get dataset and verify ownership
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
-        if dataset.get("user_id") and dataset["user_id"] != current_user["id"]:
-            raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
+        require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
         
         # Get all images
         all_images = DatasetService.get_dataset_images(dataset_id)

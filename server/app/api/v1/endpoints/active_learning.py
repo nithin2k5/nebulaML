@@ -17,6 +17,7 @@ from pathlib import Path
 from app.db.session import get_db_connection
 from app.services.database import DatasetService, AnnotationService
 from app.api.v1.endpoints.auth import get_current_user
+from app.core.access import require_role
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -152,6 +153,7 @@ async def collect_uncertain(
     dataset = DatasetService.get_dataset(request.dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(request.dataset_id, current_user["id"], dataset["user_id"], "annotator")
 
     # Determine model path (absolute, same pattern as inference.py)
     weights_dir = (_RUNS_BASE / f"job_{request.model_job_id}" / "weights").resolve()
@@ -219,6 +221,11 @@ async def get_uncertain_images(
     current_user: dict = Depends(get_current_user),
 ):
     """List images with uncertain/low-confidence predictions that need human review."""
+    from app.services.database import DatasetService as DS
+    dataset = DS.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
     images = _load_uncertain_images(dataset_id)
     return {
         "dataset_id": dataset_id,
@@ -239,6 +246,7 @@ async def approve_predictions(
     dataset = DatasetService.get_dataset(request.dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(request.dataset_id, current_user["id"], dataset["user_id"], "annotator")
 
     approved_count = 0
     approved_ids = set()
@@ -287,6 +295,11 @@ async def reject_predictions(
     Reject (discard) uncertain images without adding them to training data.
     Removes the selected image_ids from the uncertain_images queue.
     """
+    from app.services.database import DatasetService as DS
+    dataset = DS.get_dataset(request.dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(request.dataset_id, current_user["id"], dataset["user_id"], "annotator")
     _remove_uncertain_images(request.dataset_id, set(request.image_ids))
     remaining = _load_uncertain_images(request.dataset_id)
     return {
