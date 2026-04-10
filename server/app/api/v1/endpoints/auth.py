@@ -2,9 +2,11 @@
 Authentication routes for login, register, and user management
 """
 
+import re
+
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 import mysql.connector
 from app.db.session import get_db_connection, migrate_users_otp_columns
@@ -32,11 +34,25 @@ router = APIRouter()
 security = HTTPBearer()
 
 
+_USERNAME_RE = re.compile(r"^[a-z0-9_]+$")
+
+
 # Pydantic models
 class UserRegister(BaseModel):
     username: str
     email: EmailStr
     role: Optional[str] = Role.USER
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Username cannot be empty")
+        if not _USERNAME_RE.match(v):
+            raise ValueError(
+                "Username may only contain lowercase letters, digits, and underscores"
+            )
+        return v
 
 
 class UserLogin(BaseModel):
@@ -465,6 +481,52 @@ async def list_users(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching users: {str(e)}"
+        )
+
+
+@router.get("/users/by-username/{username}")
+async def get_user_by_username(
+    username: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Find a user by their username (any authenticated user)"""
+    if not _USERNAME_RE.match(username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid username format",
+        )
+
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failed",
+        )
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, username, email, role, created_at FROM users WHERE username = %s",
+            (username,),
+        )
+        user = cursor.fetchone()
+        cursor.close()
+        connection.close()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
+        user["created_at"] = str(user["created_at"])
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching user: {str(e)}",
         )
 
 

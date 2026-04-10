@@ -13,7 +13,7 @@ from app.core.email import send_project_invite_email
 router = APIRouter()
 
 class AddMemberRequest(BaseModel):
-    email: str
+    query: str  # username or email address
     role: str
 
 @router.get("/{dataset_id}/members")
@@ -87,33 +87,41 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
         if not is_owner and (not mem or mem['role'] != 'admin'):
             raise HTTPException(status_code=403, detail="Only owners and admins can add members")
             
-        # Optional: verify if user exists beforehand to prevent duplicate invites, but we don't strictly reject if they don't exist
-        cursor.execute("SELECT id FROM users WHERE email = %s", (req.email,))
+        # Resolve the target user by email or username
+        query = req.query.strip()
+        if "@" in query:
+            cursor.execute("SELECT id, email FROM users WHERE email = %s", (query,))
+        else:
+            cursor.execute("SELECT id, email FROM users WHERE username = %s", (query,))
         target_user = cursor.fetchone()
-        
-        if target_user:
-            if target_user['id'] == ds['user_id']:
-                raise HTTPException(status_code=400, detail="Cannot invite the project owner")
-                
-            cursor.execute("SELECT id FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, target_user['id']))
-            if cursor.fetchone():
-                raise HTTPException(status_code=400, detail="User is already a member")
-        
+
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        invite_email = target_user["email"]
+
+        if target_user['id'] == ds['user_id']:
+            raise HTTPException(status_code=400, detail="Cannot invite the project owner")
+
+        cursor.execute("SELECT id FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, target_user['id']))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="User is already a member")
+
         # Generate JWT invite token
         invite_data = {
             "dataset_id": dataset_id,
             "dataset_name": ds['name'],
-            "email": req.email,
+            "email": invite_email,
             "role": req.role,
             "exp": datetime.utcnow() + timedelta(days=7)
         }
         token = jwt.encode(invite_data, settings.secret_key, algorithm=settings.algorithm)
         invite_link = f"{settings.frontend_url}/project/invite?token={token}"
-        
+
         inviter_name = current_user.get("username") or current_user.get("email")
-        
+
         success = send_project_invite_email(
-            to_email=req.email,
+            to_email=invite_email,
             inviter_name=inviter_name,
             project_name=ds['name'],
             role=req.role,
@@ -126,7 +134,7 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
         # Log activity
         cursor.execute(
             "INSERT INTO activity_logs (dataset_id, user_id, action, details) VALUES (%s, %s, %s, %s)",
-            (dataset_id, current_user['id'], "invite_sent", json.dumps({"target_email": req.email, "role": req.role}))
+            (dataset_id, current_user['id'], "invite_sent", json.dumps({"target_email": invite_email, "role": req.role}))
         )
         
         conn.commit()

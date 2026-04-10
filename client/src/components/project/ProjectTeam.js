@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, ShieldAlert, ShieldCheck, Mail, UserPlus, Trash2, Activity, Clock } from "lucide-react";
+import { Shield, ShieldAlert, ShieldCheck, Mail, UserPlus, Trash2, Activity, Clock, Search } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -36,7 +36,7 @@ export default function ProjectTeam({ dataset }) {
     const [activities, setActivities] = useState([]);
     const [loading, setLoading] = useState(true);
     
-    const [newMemberEmail, setNewMemberEmail] = useState("");
+    const [newMemberQuery, setNewMemberQuery] = useState("");
     const [newMemberRole, setNewMemberRole] = useState("annotator");
     const [addingMember, setAddingMember] = useState(false);
 
@@ -69,7 +69,7 @@ export default function ProjectTeam({ dataset }) {
 
     const handleAddMember = async (e) => {
         e.preventDefault();
-        if (!newMemberEmail) return;
+        if (!newMemberQuery.trim()) return;
 
         setAddingMember(true);
         try {
@@ -79,12 +79,12 @@ export default function ProjectTeam({ dataset }) {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${token}`
                 },
-                body: JSON.stringify({ email: newMemberEmail, role: newMemberRole })
+                body: JSON.stringify({ query: newMemberQuery.trim(), role: newMemberRole })
             });
 
             if (res.ok) {
-                toast.success("Member added successfully");
-                setNewMemberEmail("");
+                toast.success("Invitation sent successfully");
+                setNewMemberQuery("");
                 fetchData();
             } else {
                 const err = await res.json();
@@ -154,14 +154,18 @@ export default function ProjectTeam({ dataset }) {
                     <CardContent className="space-y-6">
                         <form onSubmit={handleAddMember} className="flex gap-4 items-end bg-muted/30 p-4 rounded-lg border">
                             <div className="space-y-2 flex-1">
-                                <Label>Email Address</Label>
-                                <Input 
-                                    type="email" 
-                                    placeholder="colleague@company.com" 
-                                    value={newMemberEmail}
-                                    onChange={e => setNewMemberEmail(e.target.value)}
-                                    required
-                                />
+                                <Label>Username or Email</Label>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                                    <Input
+                                        type="text"
+                                        placeholder="john_doe or colleague@company.com"
+                                        value={newMemberQuery}
+                                        onChange={e => setNewMemberQuery(e.target.value)}
+                                        className="pl-9"
+                                        required
+                                    />
+                                </div>
                             </div>
                             <div className="space-y-2 w-[180px]">
                                 <Label>Role</Label>
