@@ -25,36 +25,7 @@ import copy
 from app.services.database import DatasetService, AnnotationService
 from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection
-
-# Role hierarchy: owner > admin > annotator > viewer
-_ROLE_RANK = {"owner": 4, "admin": 3, "annotator": 2, "viewer": 1}
-
-
-def _effective_role(dataset_id: str, user_id: int, owner_id: int) -> str | None:
-    """Return the caller's effective role on a dataset, or None if no access."""
-    if user_id == owner_id:
-        return "owner"
-    conn = get_db_connection()
-    if not conn:
-        return None
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT role FROM project_members WHERE dataset_id = %s AND user_id = %s",
-            (dataset_id, user_id),
-        )
-        row = cursor.fetchone()
-        return row["role"] if row else None
-    finally:
-        conn.close()
-
-
-def _require_role(dataset_id: str, user_id: int, owner_id: int, minimum: str) -> str:
-    """Raise 403 unless the caller holds at least *minimum* role. Returns effective role."""
-    role = _effective_role(dataset_id, user_id, owner_id)
-    if role is None or _ROLE_RANK.get(role, 0) < _ROLE_RANK.get(minimum, 99):
-        raise HTTPException(status_code=403, detail="Not authorized to access this dataset")
-    return role
+from app.core.access import require_role, effective_role
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -189,7 +160,7 @@ async def get_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
 
     # Sync with memory
     datasets_db[dataset_id] = db_dataset
@@ -209,7 +180,7 @@ async def upload_images_to_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
 
     # Validate files list
     if not files or len(files) == 0:
@@ -371,7 +342,7 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
     db_dataset = DatasetService.get_dataset(dataset_id)
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
 
     # Verify image belongs to this dataset
     image_belongs = any(img["id"] == image_id for img in db_dataset.get("images", []))
@@ -717,7 +688,7 @@ async def export_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
 
     dataset = db_dataset
     dataset_dir = Path(f"datasets/{dataset_id}")
@@ -761,7 +732,7 @@ async def download_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
 
     dataset = db_dataset
     zip_path = Path(f"datasets/{dataset_id}/{dataset['name']}_export.zip")
@@ -787,7 +758,7 @@ async def delete_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "owner")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "owner")
 
     # Delete directory
     dataset_dir = Path(f"datasets/{dataset_id}")
@@ -817,7 +788,7 @@ async def get_dataset_stats(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
 
     stats = AnnotationService.get_dataset_stats(dataset_id)
     return stats
@@ -837,7 +808,7 @@ async def update_image_split(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
 
     split = request.get("split")
     if split and split not in ["train", "val", "test"]:
@@ -994,7 +965,7 @@ async def auto_label_images(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
 
     dataset = db_dataset
 
@@ -1086,7 +1057,7 @@ async def download_format(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
 
     images = DatasetService.get_dataset_images(dataset_id)
     classes = db_dataset.get("classes", [])

@@ -15,6 +15,8 @@ import logging
 
 from app.db.session import get_db_connection
 from app.api.v1.endpoints.auth import get_current_user
+from app.core.access import require_role
+from app.services.database import DatasetService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -112,6 +114,10 @@ async def log_inference(
     current_user: dict = Depends(get_current_user),
 ):
     """Log an inference result for monitoring."""
+    dataset = DatasetService.get_dataset(log.dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(log.dataset_id, current_user["id"], dataset["user_id"], "annotator")
     _save_log(log)
     return {"success": True, "logged": True}
 
@@ -122,6 +128,10 @@ async def get_monitoring_stats(
     current_user: dict = Depends(get_current_user),
 ):
     """Get aggregated monitoring statistics for a dataset."""
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
     logs = _load_logs(dataset_id)
 
     if not logs:
@@ -181,6 +191,10 @@ async def check_drift(
     current_user: dict = Depends(get_current_user),
 ):
     """Basic drift detection: compare class distribution in recent vs older predictions."""
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
     logs = _load_logs(dataset_id)
 
     if len(logs) < 20:
@@ -266,6 +280,10 @@ async def clear_monitoring_data(
     current_user: dict = Depends(get_current_user),
 ):
     """Clear all monitoring data for a dataset."""
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "admin")
     connection = get_db_connection()
     if not connection:
         raise HTTPException(status_code=503, detail="Database unavailable")
