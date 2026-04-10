@@ -65,6 +65,11 @@ export const API_ENDPOINTS = {
         PREDICT: `${API_BASE_URL}/api/inference/predict`,
         LIST: `${API_BASE_URL}/api/inference/models`,
     },
+    AUTH: {
+        ME: `${API_BASE_URL}/api/auth/me`,
+        UPDATE_PROFILE: `${API_BASE_URL}/api/auth/me`,
+        STATS: `${API_BASE_URL}/api/auth/me/stats`,
+    },
     HEALTH: `${API_BASE_URL}/health`,
     VIDEO: {
         EXTRACT_FRAMES: `${API_BASE_URL}/api/video/extract-frames`,
