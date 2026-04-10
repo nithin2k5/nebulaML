@@ -136,6 +136,7 @@ function AnnotationToolContent() {
   const aiHistoryRef = useRef([]);          // undo stack: [{roughBox, points, maskPolygon}]
   const aiRequestIdRef = useRef(0);         // incremented per request to ignore stale responses
   const aiMetadataRef = useRef(null);       // {algo_version, area, etc} from last server response
+  const aiHoverInsideMaskRef = useRef(false); // true when cursor is inside the current mask polygon
 
   // Render-sync refs so drawCanvas always reads current values without dep-array churn
   const activeToolRef = useRef(activeTool);
@@ -224,6 +225,12 @@ function AnnotationToolContent() {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
       switch (e.key) {
+        case 'Enter':
+          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+            e.preventDefault();
+            handleAiAccept();
+          }
+          break;
         case 'Escape':
           if (activeTool === 'ai') {
             aiRoughBoxRef.current = null;
@@ -234,8 +241,10 @@ function AnnotationToolContent() {
             aiMaskPolygonRef.current = null;
             aiHistoryRef.current = [];
             aiMetadataRef.current = null;
+            aiHoverInsideMaskRef.current = false;
             aiRequestIdRef.current++;
             setAiStateVersion(v => v + 1);
+            setAiSubTool('box');
             drawCanvas();
           } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
             setIsDrawing(false);
@@ -305,6 +314,44 @@ function AnnotationToolContent() {
               setBoxes(newBoxes);
               showToast(`Pasted ${copiedBoxes.length} annotations`);
             }
+          }
+          break;
+        case 'f':
+        case 'F':
+          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+            e.preventDefault();
+            setAiSubTool('fg');
+            if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
+          }
+          break;
+        case 'b':
+        case 'B':
+          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+            e.preventDefault();
+            setAiSubTool('bg');
+            if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
+          }
+          break;
+        case 'r':
+        case 'R':
+        case 'd':
+        case 'D':
+          if (activeTool === 'ai') {
+            e.preventDefault();
+            aiRoughBoxRef.current = null;
+            aiCurrentBoxRef.current = null;
+            aiBoxStartRef.current = null;
+            aiIsDrawingBoxRef.current = false;
+            aiPointsRef.current = [];
+            aiMaskPolygonRef.current = null;
+            aiHistoryRef.current = [];
+            aiMetadataRef.current = null;
+            aiHoverInsideMaskRef.current = false;
+            aiRequestIdRef.current++;
+            setAiStateVersion(v => v + 1);
+            setAiSubTool('box');
+            if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+            drawCanvas();
           }
           break;
         default:
@@ -552,6 +599,9 @@ function AnnotationToolContent() {
         };
       }
 
+      // Auto-switch to fg refinement mode so the next click adds points rather
+      // than drawing a new rough box over the existing selection.
+      setAiSubTool('fg');
       setAiStateVersion(v => v + 1);
       drawCanvas();
     } catch (err) {
@@ -637,7 +687,9 @@ function AnnotationToolContent() {
     aiMaskPolygonRef.current = null;
     aiHistoryRef.current = [];
     aiMetadataRef.current = null;
+    aiHoverInsideMaskRef.current = false;
     aiRequestIdRef.current++;
+    setAiSubTool('box');
     setAiStateVersion(v => v + 1);
     drawCanvas();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -752,7 +804,13 @@ function AnnotationToolContent() {
           points: [...aiPointsRef.current],
           maskPolygon: aiMaskPolygonRef.current,
         }];
-        aiPointsRef.current = [...aiPointsRef.current, { x, y, type: aiSubTool }];
+        // Clicking inside an existing selection → treat as background (remove that area)
+        const clickedInsideMask =
+          aiSubTool === 'fg' &&
+          aiMaskPolygonRef.current &&
+          isPointInPolygon(x, y, aiMaskPolygonRef.current);
+        const pointType = clickedInsideMask ? 'bg' : aiSubTool;
+        aiPointsRef.current = [...aiPointsRef.current, { x, y, type: pointType }];
         setAiStateVersion(v => v + 1);
         drawCanvas();
         callSmartSegment();
@@ -903,6 +961,19 @@ function AnnotationToolContent() {
             animFrameRef.current = null;
             drawCanvas();
           });
+        }
+      } else if (aiMaskPolygonRef.current && (aiSubTool === 'fg' || aiSubTool === 'bg')) {
+        // Dynamic cursor + hover highlight: change appearance when hovering inside existing mask
+        const insideMask = isPointInPolygon(x, y, aiMaskPolygonRef.current);
+        if (canvasRef.current) canvasRef.current.style.cursor = insideMask ? 'not-allowed' : 'cell';
+        if (insideMask !== aiHoverInsideMaskRef.current) {
+          aiHoverInsideMaskRef.current = insideMask;
+          if (!animFrameRef.current) {
+            animFrameRef.current = requestAnimationFrame(() => {
+              animFrameRef.current = null;
+              drawCanvas();
+            });
+          }
         }
       }
       return;
@@ -1223,9 +1294,10 @@ function AnnotationToolContent() {
 
         if (maskPolygon && maskPolygon.length >= 3) {
           ctx.save();
-          ctx.strokeStyle = '#c084fc';
-          ctx.lineWidth = 2 * scale;
-          ctx.fillStyle = 'rgba(192, 132, 252, 0.22)';
+          const hoverInside = aiHoverInsideMaskRef.current;
+          ctx.strokeStyle = hoverInside ? '#f87171' : '#c084fc';
+          ctx.lineWidth = (hoverInside ? 2.5 : 2) * scale;
+          ctx.fillStyle = hoverInside ? 'rgba(239, 68, 68, 0.25)' : 'rgba(192, 132, 252, 0.22)';
           ctx.beginPath();
           ctx.moveTo(maskPolygon[0].x, maskPolygon[0].y);
           for (let i = 1; i < maskPolygon.length; i++) ctx.lineTo(maskPolygon[i].x, maskPolygon[i].y);
@@ -1674,14 +1746,14 @@ function AnnotationToolContent() {
 
                     <div className="grid grid-cols-3 gap-1.5">
                       {[
-                        { id: 'box', label: 'Draw Box', icon: '⬚', desc: 'Rough region' },
-                        { id: 'fg', label: 'Foreground', icon: '+', desc: 'Mark object' },
-                        { id: 'bg', label: 'Background', icon: '−', desc: 'Mark outside' },
+                        { id: 'box', label: 'Draw Box', icon: '⬚', key: 'D' },
+                        { id: 'fg', label: 'Foreground', icon: '+', key: 'F' },
+                        { id: 'bg', label: 'Background', icon: '−', key: 'B' },
                       ].map(t => (
                         <button
                           key={t.id}
                           onClick={() => setAiSubTool(t.id)}
-                          className={`flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${aiSubTool === t.id
+                          className={`relative flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${aiSubTool === t.id
                             ? t.id === 'fg' ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300'
                               : t.id === 'bg' ? 'bg-red-600/30 border-red-500/60 text-red-300'
                                 : 'bg-orange-600/30 border-orange-500/60 text-orange-300'
@@ -1689,20 +1761,26 @@ function AnnotationToolContent() {
                         >
                           <span className="text-sm font-bold leading-none mb-0.5">{t.icon}</span>
                           <span className="text-[9px] font-medium">{t.label}</span>
+                          <span className="absolute top-0.5 right-1 text-[8px] opacity-40 font-mono">{t.key}</span>
                         </button>
                       ))}
                     </div>
 
-                    <div className="px-1 py-1.5 bg-black/30 rounded-lg border border-white/5 text-center">
+                    <div className={`px-1 py-1.5 rounded-lg border text-center transition-colors ${
+                      aiProcessing ? 'bg-purple-500/10 border-purple-500/20' :
+                      aiMaskPolygonRef.current ? 'bg-emerald-500/10 border-emerald-500/30' :
+                      aiRoughBoxRef.current ? 'bg-orange-500/10 border-orange-500/20' :
+                      'bg-black/30 border-white/5'
+                    }`}>
                       {aiProcessing ? (
-                        <span className="text-[10px] text-purple-400 animate-pulse">Analyzing...</span>
+                        <span className="text-[10px] text-purple-400 animate-pulse">Analyzing selection…</span>
                       ) : aiMaskPolygonRef.current ? (
-                        <span className="text-[10px] text-purple-300">Selection ready · refine or accept</span>
+                        <span className="text-[10px] text-emerald-400 font-medium">✓ Ready — F/B to refine, Enter to confirm</span>
                       ) : aiRoughBoxRef.current ? (
-                        <span className="text-[10px] text-orange-300">Add fg/bg points to refine</span>
+                        <span className="text-[10px] text-orange-300">Box drawn — click foreground points to refine</span>
                       ) : (
                         <span className="text-[10px] text-gray-500">
-                          {aiSubTool === 'box' ? 'Drag to draw a rough region' : aiSubTool === 'fg' ? 'Click the object to select' : 'Click areas to exclude'}
+                          {aiSubTool === 'box' ? 'Step 1: Drag to draw a rough region' : aiSubTool === 'fg' ? 'Click inside the object to mark it' : 'Click outside the object to exclude'}
                         </span>
                       )}
                     </div>
@@ -1719,11 +1797,34 @@ function AnnotationToolContent() {
                       </div>
                     )}
 
+                    {/* Class assignment — shown when a mask is ready */}
+                    {aiMaskPolygonRef.current && dataset?.classes?.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-gray-500 px-1">Assign class</p>
+                        <div className="flex flex-wrap gap-1">
+                          {dataset.classes.map((cls, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => setSelectedClass(idx)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-all ${
+                                selectedClass === idx
+                                  ? 'bg-purple-600/40 border-purple-500/60 text-purple-200'
+                                  : 'bg-black/30 border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                              }`}
+                            >
+                              {cls}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-3 gap-1.5">
                       <button
                         onClick={handleAiAccept}
                         disabled={!aiMaskPolygonRef.current || aiProcessing}
-                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-purple-500/40 bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 disabled:opacity-30 disabled:cursor-not-allowed text-[9px] font-medium transition-all"
+                        className="flex flex-col items-center justify-center py-2 rounded-lg border border-emerald-500/40 bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 disabled:opacity-30 disabled:cursor-not-allowed text-[9px] font-medium transition-all"
+                        title="Accept selection (Enter)"
                       >
                         <span className="text-base leading-none mb-0.5">✓</span>Accept
                       </button>
@@ -1737,6 +1838,7 @@ function AnnotationToolContent() {
                       <button
                         onClick={handleAiReset}
                         className="flex flex-col items-center justify-center py-2 rounded-lg border border-white/10 bg-white/5 text-gray-400 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10 text-[9px] font-medium transition-all"
+                        title="Reset selection (R/Esc)"
                       >
                         <span className="text-base leading-none mb-0.5">✕</span>Reset
                       </button>
@@ -1926,16 +2028,22 @@ function AnnotationToolContent() {
                         cursorPosRef.current = null;
                         setTimeout(() => drawCanvas(), 0);
                       }
-                      if (annotationType === 'detection' && activeTool === 'ai' && aiIsDrawingBoxRef.current) {
-                        aiIsDrawingBoxRef.current = false;
-                        aiCurrentBoxRef.current = null;
-                        aiBoxStartRef.current = null;
-                        setTimeout(() => drawCanvas(), 0);
+                      if (annotationType === 'detection' && activeTool === 'ai') {
+                        if (aiIsDrawingBoxRef.current) {
+                          aiIsDrawingBoxRef.current = false;
+                          aiCurrentBoxRef.current = null;
+                          aiBoxStartRef.current = null;
+                          setTimeout(() => drawCanvas(), 0);
+                        }
+                        // Reset cursor to sub-tool default on leave
+                        if (canvasRef.current) {
+                          canvasRef.current.style.cursor = aiSubTool === 'box' ? 'crosshair' : 'cell';
+                        }
                       }
                     }}
                     className={`border border-white/5 shadow-2xl rounded bg-black ${annotationType === 'detection'
                         ? activeTool === 'ai'
-                          ? aiSubTool === 'fg' ? 'cursor-cell' : aiSubTool === 'bg' ? 'cursor-cell' : 'cursor-crosshair'
+                          ? aiSubTool === 'box' ? 'cursor-crosshair' : 'cursor-cell'
                           : 'cursor-crosshair'
                         : 'cursor-default pointer-events-none'}`}
                     style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }}
