@@ -140,7 +140,14 @@ async def list_datasets(current_user: dict = Depends(get_current_user)):
         finally:
             conn.close()
 
-    all_datasets = owned + member_datasets
+    # Deduplicate by id (guard against any edge-case double-listing)
+    seen_ids: set = set()
+    all_datasets = []
+    for ds in owned + member_datasets:
+        if ds["id"] not in seen_ids:
+            seen_ids.add(ds["id"])
+            all_datasets.append(ds)
+
     for ds in all_datasets:
         datasets_db[ds["id"]] = ds
 

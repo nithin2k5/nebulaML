@@ -323,9 +323,9 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
                     </CardHeader>
                     <CardContent>
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                            {uncertainImages.map((img) => (
+                            {uncertainImages.map((img, imgIdx) => (
                                 <div
-                                    key={img.image_id}
+                                    key={img.image_id || `img-${imgIdx}`}
                                     onClick={() => toggleSelect(img.image_id)}
                                     className={`relative group rounded-lg border-2 p-2 cursor-pointer transition-all ${selectedImages.has(img.image_id)
                                             ? "border-primary bg-primary/5"

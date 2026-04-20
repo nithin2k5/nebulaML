@@ -36,7 +36,7 @@ def _get_sam():
 
 # ── Polygon helpers ───────────────────────────────────────────────────────────
 
-def _smooth_pts(pts, sigma: float = 2.0):
+def _smooth_pts(pts, sigma: float = 1.0):
     """Circular Gaussian smooth over polygon vertex coordinates."""
     n = len(pts)
     if n < 8:
@@ -55,26 +55,34 @@ def _smooth_pts(pts, sigma: float = 2.0):
     return list(zip(_circ(xs).astype(int), _circ(ys).astype(int)))
 
 
-def _contour_to_polygon(contour, max_pts: int = 120):
+def _contour_to_polygon(contour, max_pts: int = 200, smooth: bool = True):
+    """Convert an OpenCV contour to a simplified polygon point list.
+
+    For SAM masks (already clean), pass smooth=False to skip Gaussian
+    blurring which would destroy edge detail. GrabCut masks benefit from
+    smoothing to remove pixel-level noise.
+    """
     peri    = cv2.arcLength(contour, True)
-    epsilon = 0.007 * peri
+    # Less aggressive epsilon → more detail preserved
+    epsilon = 0.003 * peri
     approx  = cv2.approxPolyDP(contour, epsilon, True)
     pts     = approx.reshape(-1, 2).tolist()
     if len(pts) > max_pts:
         step = len(pts) / max_pts
         pts  = [pts[int(i * step)] for i in range(max_pts)]
-    pts = _smooth_pts(pts, sigma=2.0)
+    if smooth:
+        pts = _smooth_pts(pts, sigma=1.5)
     return [{"x": int(p[0]), "y": int(p[1])} for p in pts]
 
 
-def _mask_to_response(binary_mask, orig_w, orig_h, algo):
+def _mask_to_response(binary_mask, orig_w, orig_h, algo, smooth_polygon: bool = True):
     contours, _ = cv2.findContours(
-        binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         return None
     largest  = max(contours, key=cv2.contourArea)
     bx, by, bw_c, bh_c = cv2.boundingRect(largest)
-    polygon  = _contour_to_polygon(largest)
+    polygon  = _contour_to_polygon(largest, smooth=smooth_polygon)
     area_px  = int(cv2.contourArea(largest))
     return {
         "success":      True,
@@ -332,7 +340,10 @@ async def segment_object(
                         clip[by1:by2, bx1:bx2] = 255
                         binary_mask = cv2.bitwise_and(binary_mask, clip)
 
-                    resp = _mask_to_response(binary_mask, orig_w, orig_h, "sam_v1")
+                    # SAM already produces clean masks — skip Gaussian smoothing
+                    # so the polygon hugs the actual object edges
+                    resp = _mask_to_response(binary_mask, orig_w, orig_h, "sam_v1",
+                                            smooth_polygon=False)
                     if resp:
                         return resp
 
@@ -346,7 +357,8 @@ async def segment_object(
             img_path, orig_w, orig_h,
             box_norm, fg_pts_norm, bg_pts_norm, x, y)
 
-        resp = _mask_to_response(fg_mask, orig_w, orig_h, "grabcut_v5")
+        # GrabCut masks are noisy — smoothing is still beneficial here
+        resp = _mask_to_response(fg_mask, orig_w, orig_h, "grabcut_v5", smooth_polygon=True)
         if resp:
             return resp
 

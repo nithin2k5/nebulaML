@@ -413,8 +413,8 @@ export default function TrainingTab() {
                       <Activity className="w-4 h-4 text-blue-400 animate-pulse" />
                       <span className="text-sm font-semibold text-blue-400">Active Runs ({activeJobs.length})</span>
                     </div>
-                    {activeJobs.map(job => (
-                      <div key={job.job_id} className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.08)]">
+                    {activeJobs.map((job, jobIdx) => (
+                      <div key={job.job_id || `active-${jobIdx}`} className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.08)]">
                         <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
                           <div className="flex items-center gap-3">
                             {getStatusBadge(job.status)}
@@ -496,8 +496,8 @@ export default function TrainingTab() {
                         : <ChevronUp className="w-3.5 h-3.5 ml-auto" />}
                     </button>
 
-                    {!historyCollapsed && historyJobs.map(job => (
-                      <div key={job.job_id} className={cn(
+                    {!historyCollapsed && historyJobs.map((job, jobIdx) => (
+                      <div key={job.job_id || `history-${jobIdx}`} className={cn(
                         "rounded-2xl bg-card/40 border overflow-hidden transition-all duration-300",
                         selectedJobs.includes(job.job_id)
                           ? "border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)] bg-indigo-500/[0.02]"
