@@ -11,12 +11,13 @@ import TrainingTab from "@/components/TrainingTab";
 import ModelsTab from "@/components/ModelsTab";
 import SettingsTab from "@/components/SettingsTab";
 import ProfileTab from "@/components/ProfileTab";
+import ChatbotTab from "@/components/ChatbotTab";
 import OnboardingTour from "@/components/OnboardingTour";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Activity, Database, Zap, Cpu, Box,
-  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle
+  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle, MessageSquare
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -29,6 +30,7 @@ export default function DashboardPage() {
   const tabs = [
     { id: "dashboard", label: "Overview", icon: Activity },
     { id: "datasets", label: "Projects", icon: Database },
+    { id: "chat", label: "Assistant", icon: MessageSquare },
     { id: "inference", label: "Playground", icon: Zap },
     { id: "training", label: "Training", icon: Cpu },
     { id: "models", label: "Models", icon: Box },
@@ -166,6 +168,7 @@ export default function DashboardPage() {
               <div className="max-w-7xl mx-auto animate-fade-in space-y-8">
                 {activeTab === "dashboard" && <DashboardStats onNavigate={setActiveTab} />}
                 {activeTab === "datasets" && <DatasetsTab />}
+                {activeTab === "chat" && <ChatbotTab />}
                 {activeTab === "inference" && <InferenceTab />}
                 {activeTab === "training" && <TrainingTab />}
                 {activeTab === "models" && <ModelsTab />}
