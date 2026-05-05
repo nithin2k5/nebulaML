@@ -1,71 +1,59 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, formatMetricValue } from "@/lib/utils";
-import { toast } from 'sonner';
+import { toast } from "sonner";
 import {
-  Upload, Play, Square, RefreshCw, Terminal,
-  CheckCircle, XCircle, Clock, Cpu, TrendingUp,
-  Activity, History, ChevronDown, ChevronUp, Loader2
+  Upload, Play, Square, RefreshCw, CheckCircle, XCircle,
+  Clock, Cpu, Activity, Loader2, Download, Trash2,
+  Box, HardDrive, TrendingUp, ChevronDown, ChevronUp,
+  Zap, Terminal
 } from "lucide-react";
 import GamifiedTerminal from "./GamifiedTerminal";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-
-function JobMetricsChart({ jobId, status }) {
+// ── Mini chart for a single job ───────────────────────────────────────────────
+function JobChart({ jobId, status }) {
   const { token } = useAuth();
   const [metrics, setMetrics] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchMetrics();
-    // Poll only if running
-    if (status === 'running') {
-      const interval = setInterval(fetchMetrics, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [jobId, status]);
-
-  const fetchMetrics = useCallback(async () => {
+  const fetch_ = useCallback(async () => {
     if (!token) return;
     try {
       const res = await fetch(API_ENDPOINTS.TRAINING.JOB_METRICS(jobId), {
-        headers: { "Authorization": `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        const data = await res.json();
-        if (data.metrics) setMetrics(data.metrics);
+        const d = await res.json();
+        if (d.metrics) setMetrics(d.metrics);
       }
-    } catch (e) {
-      console.error("Error fetching metrics:", e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (_) {}
   }, [jobId, token]);
 
-  if (loading && metrics.length === 0) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">Loading metrics...</div>;
-  if (metrics.length === 0) return null; // No metrics yet
+  useEffect(() => {
+    fetch_();
+    if (status === "running") {
+      const t = setInterval(fetch_, 3000);
+      return () => clearInterval(t);
+    }
+  }, [jobId, status]);
 
+  if (metrics.length === 0) return null;
   return (
-    <div className="h-64 w-full mt-4 bg-black/20 rounded-lg p-2 border border-white/5">
+    <div className="h-48 w-full mt-3 bg-black/20 rounded-xl p-3 border border-white/5">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={metrics}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-          <XAxis dataKey="epoch" stroke="#666" fontSize={10} tickFormatter={(v) => `Ep ${v}`} />
-          <YAxis stroke="#666" fontSize={10} />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#111', border: '1px solid #333', fontSize: '12px' }}
-            itemStyle={{ padding: 0 }}
-          />
-          <Legend />
+          <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+          <XAxis dataKey="epoch" stroke="#555" fontSize={10} tickFormatter={v => `E${v}`} />
+          <YAxis stroke="#555" fontSize={10} />
+          <Tooltip contentStyle={{ background: "#111", border: "1px solid #333", fontSize: 11 }} />
           <Line type="monotone" dataKey="train/box_loss" stroke="#f59e0b" dot={false} strokeWidth={2} name="Box Loss" />
           <Line type="monotone" dataKey="metrics/mAP50(B)" stroke="#10b981" dot={false} strokeWidth={2} name="mAP@50" />
         </LineChart>
@@ -74,605 +62,429 @@ function JobMetricsChart({ jobId, status }) {
   );
 }
 
+// ── Status badge ──────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const map = {
+    running:   { cls: "bg-blue-500/20 text-blue-400 border-blue-500/30",    icon: Clock,        label: "Running"   },
+    completed: { cls: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", icon: CheckCircle, label: "Done"  },
+    success:   { cls: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", icon: CheckCircle, label: "Done"  },
+    cancelled: { cls: "bg-amber-500/20 text-amber-400 border-amber-500/30",  icon: Square,       label: "Stopped"   },
+    failed:    { cls: "bg-red-500/20 text-red-400 border-red-500/30",        icon: XCircle,      label: "Failed"    },
+  };
+  const cfg = map[status] || { cls: "bg-white/10 text-gray-400 border-white/10", icon: Clock, label: status };
+  const Icon = cfg.icon;
+  return (
+    <Badge className={cn("gap-1 border text-xs", cfg.cls)}>
+      <Icon className="w-3 h-3" /> {cfg.label}
+    </Badge>
+  );
+}
+
+// ── Metric pill ───────────────────────────────────────────────────────────────
+function Pill({ label, value, color = "text-white" }) {
+  return (
+    <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
+      <p className="text-[10px] text-gray-500 uppercase mb-0.5">{label}</p>
+      <p className={cn("text-sm font-mono font-semibold", color)}>{value}</p>
+    </div>
+  );
+}
+
+// ── Format bytes ──────────────────────────────────────────────────────────────
+function fmtBytes(b) {
+  if (!b) return "—";
+  const i = Math.floor(Math.log(b) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(1) + " " + ["B","KB","MB","GB"][i];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function TrainingTab() {
   const { token } = useAuth();
   const [config, setConfig] = useState({
-    model_name: "yolov8n",
+    model_name: "yolov8n.pt",
     epochs: 50,
     batch_size: 16,
     img_size: 640,
     dataset_yaml: null,
     dataset_yaml_name: "",
-    augmentations: {
-      blur: 0,
-      brightness: 1,
-      flipHorizontal: false
-    }
   });
-
   const [jobs, setJobs] = useState([]);
-  const [isTraining, setIsTraining] = useState(false);
-  const [compareMode, setCompareMode] = useState(false);
-  const [selectedJobs, setSelectedJobs] = useState([]);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
-  const logEndRef = useRef(null);
+  const [models, setModels] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState({});
 
+  // ── Fetch jobs ──────────────────────────────────────────────────────────────
   const fetchJobs = useCallback(async () => {
     if (!token) return;
     try {
-      const response = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
-        headers: { "Authorization": `Bearer ${token}` }
+      const res = await fetch(API_ENDPOINTS.TRAINING.JOBS, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (response.ok) {
-        const data = await response.json();
-        setJobs((data.jobs || []).reverse());
+      if (res.ok) {
+        const d = await res.json();
+        setJobs((d.jobs || []).reverse());
       }
-    } catch (error) {
-      console.error("Error fetching jobs:", error);
-    }
+    } catch (_) {}
+  }, [token]);
+
+  // ── Fetch models ────────────────────────────────────────────────────────────
+  const fetchModels = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(API_ENDPOINTS.MODELS.LIST, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setModels(d.models || []);
+      }
+    } catch (_) {}
   }, [token]);
 
   useEffect(() => {
-    if (token) fetchJobs();
-    const interval = setInterval(() => { if (token) fetchJobs(); }, 5000);
-    return () => clearInterval(interval);
-  }, [token, fetchJobs]);
+    fetchJobs();
+    fetchModels();
+    const jt = setInterval(fetchJobs, 5000);
+    const mt = setInterval(fetchModels, 10000);
+    return () => { clearInterval(jt); clearInterval(mt); };
+  }, [token]);
 
-  const handleStartTraining = async () => {
-    if (!config.dataset_yaml) {
-      toast.error("Please upload a dataset YAML configuration file.");
-      return;
-    }
-
-    setIsTraining(true);
-    const formData = new FormData();
-    formData.append("dataset_yaml", config.dataset_yaml);
-    formData.append("model_name", config.model_name);
-    formData.append("epochs", config.epochs);
-    formData.append("batch_size", config.batch_size);
-    formData.append("img_size", config.img_size);
-    formData.append("augmentations", JSON.stringify(config.augmentations));
-
+  // ── Start training ──────────────────────────────────────────────────────────
+  const handleStart = async () => {
+    if (!config.dataset_yaml) { toast.error("Upload a dataset YAML first"); return; }
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.append("dataset_yaml", config.dataset_yaml);
+    fd.append("model_name", config.model_name);
+    fd.append("epochs", config.epochs);
+    fd.append("batch_size", config.batch_size);
+    fd.append("img_size", config.img_size);
     try {
-      const response = await fetch(API_ENDPOINTS.TRAINING.START, {
+      const res = await fetch(API_ENDPOINTS.TRAINING.START, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
-        body: formData
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(`Training started! Job ID: ${data.job_id}`);
-        fetchJobs();
-      } else {
-        const err = await response.json();
-        toast.error(err.detail || "Failed to start training");
-      }
-    } catch (error) {
-      toast.error("Error starting training: " + error.message);
-    } finally {
-      setIsTraining(false);
-    }
+      const d = await res.json();
+      if (res.ok) { toast.success(`Training started — Job ${d.job_id}`); fetchJobs(); }
+      else toast.error(d.detail || "Failed to start");
+    } catch (e) { toast.error(e.message); }
+    finally { setSubmitting(false); }
   };
 
-  const handleTerminateJob = async (jobId) => {
-    if (!window.confirm("Stop training? The run ends after the current epoch; partial weights may be saved.")) return;
+  // ── Stop job ────────────────────────────────────────────────────────────────
+  const handleStop = async (jobId) => {
+    if (!confirm("Stop this training run?")) return;
     try {
-      const response = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}` }
+      const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
+        method: "POST", headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok) {
-        toast.success(data.message || "Cancellation requested");
-        fetchJobs();
-      } else {
-        toast.error(data.detail || "Failed to cancel job");
-      }
-    } catch (error) {
-      toast.error("Error: " + error.message);
-    }
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(d.message || "Stopped"); fetchJobs(); }
+      else toast.error(d.detail || "Failed");
+    } catch (e) { toast.error(e.message); }
   };
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case "running":
-        return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Clock className="mr-1" /> Running</Badge>;
-      case "completed":
-        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle className="mr-1" /> Done</Badge>;
-      case "cancelled":
-        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><Square className="mr-1" /> Stopped</Badge>;
-      case "failed":
-        return <Badge className="bg-red-500/20 text-red-400 border-red-500/30"><XCircle className="mr-1" /> Failed</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
+  // ── Download model ──────────────────────────────────────────────────────────
+  const handleDownload = async (name) => {
+    try {
+      const res = await fetch(API_ENDPOINTS.MODELS.DOWNLOAD(name), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${name}_best.pt`;
+      document.body.appendChild(a); a.click();
+      URL.revokeObjectURL(url); a.remove();
+      toast.success(`Downloading ${name}…`);
+    } catch (e) { toast.error("Download failed"); }
   };
+
+  // ── Delete model ────────────────────────────────────────────────────────────
+  const handleDeleteModel = async (name) => {
+    if (!confirm(`Delete model "${name}"?`)) return;
+    try {
+      const res = await fetch(API_ENDPOINTS.MODELS.DELETE(name), {
+        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) { toast.success("Deleted"); fetchModels(); }
+      else toast.error("Delete failed");
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const activeJobs  = jobs.filter(j => j.status === "running" || j.status === "pending");
+  const finishedJobs = jobs.filter(j => j.status !== "running" && j.status !== "pending");
 
   return (
-    <div className="space-y-8 animate-fade-in text-gray-100">
+    <div className="space-y-10 animate-fade-in text-gray-100">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Training</h2>
-          <p className="text-muted-foreground mt-1">Configure and monitor model training jobs.</p>
+          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+            Training
+          </h2>
+          <p className="text-muted-foreground mt-1">Configure runs, monitor progress, and manage trained models.</p>
         </div>
-        <Button
-          onClick={fetchJobs}
-          variant="outline"
-          size="sm"
-          className="border-white/10 bg-white/5 hover:bg-white/10"
-        >
-          <RefreshCw className="mr-2" /> Refresh
+        <Button onClick={() => { fetchJobs(); fetchModels(); }} variant="outline" size="sm"
+          className="border-white/10 bg-white/5 hover:bg-white/10">
+          <RefreshCw className="mr-2 w-3.5 h-3.5" /> Refresh
         </Button>
       </div>
 
+      {/* ── Layout: Config | Jobs+Models ────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Config Panel */}
-        <div className="space-y-6">
-          <Card className="bg-card/40 border-white/5">
-            <CardHeader>
-              <CardTitle className="text-base">Configuration</CardTitle>
-              <CardDescription>Set up your training run.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Dataset Config (YAML)</Label>
-                <div
-                  onClick={() => document.getElementById('yaml-upload')?.click()}
-                  className="border-2 border-dashed border-white/10 rounded-xl p-4 text-center cursor-pointer hover:border-white/20 hover:bg-white/[0.02] transition-all"
-                >
-                  <Upload className="mx-auto text-xl text-gray-500 mb-2" />
-                  <p className="text-sm text-gray-400">{config.dataset_yaml_name || "Click to upload .yaml"}</p>
-                  <input
-                    id="yaml-upload"
-                    type="file"
-                    accept=".yaml,.yml"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (file) setConfig({ ...config, dataset_yaml: file, dataset_yaml_name: file.name });
-                    }}
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <Select
-                  value={config.model_name}
-                  onValueChange={v => setConfig({ ...config, model_name: v })}
-                >
-                  <SelectTrigger className="bg-black/30 border-white/10"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="yolov8n.pt">YOLOv8 Nano</SelectItem>
-                    <SelectItem value="yolov8s.pt">YOLOv8 Small</SelectItem>
-                    <SelectItem value="yolov8m.pt">YOLOv8 Medium</SelectItem>
-                    <SelectItem value="yolov8l.pt">YOLOv8 Large</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        {/* Config panel */}
+        <div className="space-y-4 bg-card/40 border border-white/5 rounded-2xl p-5">
+          <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
+            <Cpu className="w-4 h-4 text-indigo-400" /> New Training Run
+          </h3>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-2">
-                  <Label className="text-xs">Epochs</Label>
-                  <Input
-                    type="number"
-                    value={config.epochs}
-                    onChange={e => setConfig({ ...config, epochs: parseInt(e.target.value) || 1 })}
-                    className="bg-black/30 border-white/10"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs">Batch</Label>
-                  <Input
-                    type="number"
-                    value={config.batch_size}
-                    onChange={e => setConfig({ ...config, batch_size: parseInt(e.target.value) || 1 })}
-                    className="bg-black/30 border-white/10"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs">Img Size</Label>
-                  <Select
-                    value={config.img_size.toString()}
-                    onValueChange={v => setConfig({ ...config, img_size: parseInt(v) })}
-                  >
-                    <SelectTrigger className="bg-black/30 border-white/10"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="416">416</SelectItem>
-                      <SelectItem value="640">640</SelectItem>
-                      <SelectItem value="1024">1024</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Augmentations Preview Section */}
-              <div className="pt-4 border-t border-white/5 space-y-4">
-                <Label className="text-sm font-semibold text-white">Data Augmentation Preview</Label>
-                
-                {/* Visual Preview Box */}
-                <div className="w-full aspect-video bg-black/40 rounded-xl overflow-hidden border border-white/10 relative flex items-center justify-center">
-                  {/* Standard fallback placeholder image mimicking an object detection scenario */}
-                  <img 
-                    src="https://images.unsplash.com/photo-1494976388531-d1058494cdd8?auto=format&fit=crop&w=600&q=80" 
-                    alt="Augmentation Preview"
-                    className="w-full h-full object-cover transition-all duration-300"
-                    crossOrigin="anonymous"
-                    style={{
-                      filter: `blur(${config.augmentations.blur}px) brightness(${config.augmentations.brightness})`,
-                      transform: config.augmentations.flipHorizontal ? "scaleX(-1)" : "scaleX(1)"
-                    }}
-                  />
-                  {/* Overlay bounding box to look like detection dataset */}
-                  <div 
-                    className="absolute top-[30%] left-[20%] border-2 border-emerald-500 bg-emerald-500/20 w-[40%] h-[45%] flex items-start transition-all"
-                    style={{
-                      transform: config.augmentations.flipHorizontal ? "translateX(100%)" : "translateX(0)"
-                    }}
-                  >
-                    <span className="bg-emerald-500 text-white text-[10px] px-1.5 py-0.5 font-bold tracking-wider">car 0.92</span>
-                  </div>
-                </div>
-
-                <div className="space-y-4 bg-white/[0.02] p-4 rounded-xl border border-white/5">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs text-gray-300">Horizontal Flip</Label>
-                    <div className="relative inline-flex items-center cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        className="sr-only peer"
-                        checked={config.augmentations.flipHorizontal}
-                        onChange={e => setConfig({...config, augmentations: {...config.augmentations, flipHorizontal: e.target.checked}})}
-                      />
-                      <div className="w-9 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label className="text-xs text-gray-300">Gaussian Blur ({config.augmentations.blur}px)</Label>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0" max="10" step="0.5"
-                      className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                      value={config.augmentations.blur}
-                      onChange={e => setConfig({...config, augmentations: {...config.augmentations, blur: parseFloat(e.target.value)}})}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <Label className="text-xs text-gray-300">Brightness Ratio ({config.augmentations.brightness}x)</Label>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0.2" max="2" step="0.1"
-                      className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                      value={config.augmentations.brightness}
-                      onChange={e => setConfig({...config, augmentations: {...config.augmentations, brightness: parseFloat(e.target.value)}})}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Button
-                onClick={handleStartTraining}
-                disabled={isTraining || !config.dataset_yaml}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white"
-              >
-                {isTraining ? <RefreshCw className="animate-spin mr-2" /> : <Play className="mr-2" />}
-                {isTraining ? "Starting..." : "Start Training"}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Jobs Panel */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg flex items-center gap-2">
-              <Terminal className="text-gray-500" />
-              Training Jobs
-            </h3>
-            {jobs.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { setCompareMode(!compareMode); if (compareMode) setSelectedJobs([]); }}
-                className={cn(
-                  "border-white/10 text-xs h-8 transition-all",
-                  compareMode ? "bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30" : "bg-white/5 hover:bg-white/10"
-                )}
-              >
-                <TrendingUp className="w-3.5 h-3.5 mr-1.5" />
-                {compareMode ? "Cancel Comparison" : "Compare Runs"}
-              </Button>
-            )}
+          {/* YAML upload */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-gray-400">Dataset Config (YAML)</Label>
+            <div onClick={() => document.getElementById("yaml-up")?.click()}
+              className="border-2 border-dashed border-white/10 rounded-xl p-4 text-center cursor-pointer hover:border-indigo-500/40 hover:bg-white/[0.02] transition-all">
+              <Upload className="mx-auto w-5 h-5 text-gray-500 mb-1" />
+              <p className="text-xs text-gray-400">{config.dataset_yaml_name || "Click to upload .yaml"}</p>
+              <input id="yaml-up" type="file" accept=".yaml,.yml" className="hidden"
+                onChange={e => {
+                  const f = e.target.files[0];
+                  if (f) setConfig({ ...config, dataset_yaml: f, dataset_yaml_name: f.name });
+                }} />
+            </div>
           </div>
 
-          {compareMode && <MultiJobComparisonChart selectedJobIds={selectedJobs} />}
+          {/* Model */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-gray-400">Model</Label>
+            <Select value={config.model_name} onValueChange={v => setConfig({ ...config, model_name: v })}>
+              <SelectTrigger className="bg-black/30 border-white/10 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="yolov8n.pt">YOLOv8 Nano — fastest</SelectItem>
+                <SelectItem value="yolov8s.pt">YOLOv8 Small</SelectItem>
+                <SelectItem value="yolov8m.pt">YOLOv8 Medium</SelectItem>
+                <SelectItem value="yolov8l.pt">YOLOv8 Large</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          {jobs.length === 0 ? (
-            <div className="py-16 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02]">
-              <Cpu className="mx-auto text-3xl text-gray-600 mb-3" />
-              <h3 className="font-semibold mb-1">No Training Jobs</h3>
-              <p className="text-sm text-muted-foreground">Start a training job using the configuration panel.</p>
+          {/* Hyperparams */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "Epochs",  key: "epochs",     min: 1  },
+              { label: "Batch",   key: "batch_size", min: 1  },
+            ].map(({ label, key, min }) => (
+              <div key={key} className="col-span-1 space-y-1.5">
+                <Label className="text-xs text-gray-400">{label}</Label>
+                <Input type="number" value={config[key]} min={min}
+                  onChange={e => setConfig({ ...config, [key]: parseInt(e.target.value) || min })}
+                  className="bg-black/30 border-white/10 text-sm" />
+              </div>
+            ))}
+            <div className="col-span-1 space-y-1.5">
+              <Label className="text-xs text-gray-400">Img Size</Label>
+              <Select value={config.img_size.toString()} onValueChange={v => setConfig({ ...config, img_size: +v })}>
+                <SelectTrigger className="bg-black/30 border-white/10 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="416">416</SelectItem>
+                  <SelectItem value="640">640</SelectItem>
+                  <SelectItem value="1024">1024</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          ) : (() => {
-            const activeJobs = jobs.filter(j => j.status === "running" || j.status === "pending");
-            const historyJobs = jobs.filter(j => j.status !== "running" && j.status !== "pending");
+          </div>
 
-            return (
-              <>
-                {/* ── Active Runs ── */}
-                {activeJobs.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-blue-400 animate-pulse" />
-                      <span className="text-sm font-semibold text-blue-400">Active Runs ({activeJobs.length})</span>
+          <Button onClick={handleStart} disabled={submitting || !config.dataset_yaml}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white">
+            {submitting ? <Loader2 className="animate-spin mr-2 w-4 h-4" /> : <Play className="mr-2 w-4 h-4" />}
+            {submitting ? "Starting…" : "Start Training"}
+          </Button>
+        </div>
+
+        {/* Right: Active + Finished jobs + Models */}
+        <div className="lg:col-span-2 space-y-8">
+
+          {/* ── Active Runs ─────────────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-blue-400 animate-pulse" />
+              <span className="text-sm font-semibold text-blue-400">
+                Active Runs {activeJobs.length > 0 && `(${activeJobs.length})`}
+              </span>
+            </div>
+
+            {activeJobs.length === 0 ? (
+              <div className="py-10 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] text-sm text-gray-500">
+                No active runs. Start a training run to see live progress here.
+              </div>
+            ) : activeJobs.map(job => (
+              <div key={job.job_id}
+                className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.06)]">
+                {/* Job header */}
+                <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status={job.status} />
+                    <div>
+                      <p className="text-sm font-semibold">{job.config?.model_name || "yolov8n"}</p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {job.config?.epochs} epochs · batch {job.config?.batch_size}
+                        {job.current_epoch != null && ` · epoch ${job.current_epoch}/${job.config?.epochs}`}
+                      </p>
                     </div>
-                    {activeJobs.map((job, jobIdx) => (
-                      <div key={job.job_id || `active-${jobIdx}`} className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.08)]">
-                        <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
-                          <div className="flex items-center gap-3">
-                            {getStatusBadge(job.status)}
-                            <div>
-                              <p className="text-sm font-semibold">{job.config?.model_name || "yolov8n"}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {job.config?.epochs || 0} epochs • Batch {job.config?.batch_size || 16}
-                                {job.status === "running" && job.current_epoch != null &&
-                                  ` • Epoch ${job.current_epoch}/${job.config?.epochs || "?"}`}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-xl font-bold font-mono text-blue-400 tabular-nums">
-                              {Math.round(job.progress || 0)}%
-                            </span>
-                            <Button onClick={() => handleTerminateJob(job.job_id)} variant="ghost" size="sm"
-                              className="text-red-400 hover:bg-red-400/10 h-8 px-2">
-                              <Square className="w-3.5 h-3.5 mr-1" /> Stop
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="p-4 space-y-3">
-                          {/* Progress bar */}
-                          <div>
-                            <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
-                                style={{ width: `${Math.max(2, job.progress || 0)}%` }}
-                              />
-                            </div>
-                          </div>
-
-                          {/* Live metrics */}
-                          {job.metrics && Object.keys(job.metrics).length > 0 && (
-                            <div className="grid grid-cols-3 gap-3">
-                              {job.metrics.loss != null && (
-                                <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
-                                  <p className="text-[10px] text-gray-500 uppercase mb-0.5">Loss</p>
-                                  <p className="text-sm font-mono text-amber-400">{Number(job.metrics.loss).toFixed(4)}</p>
-                                </div>
-                              )}
-                              {(job.metrics.mAP50 != null || job.metrics.map50 != null) && (
-                                <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
-                                  <p className="text-[10px] text-gray-500 uppercase mb-0.5">mAP@50</p>
-                                  <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}</p>
-                                </div>
-                              )}
-                              {job.metrics.epoch != null && (
-                                <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
-                                  <p className="text-[10px] text-gray-500 uppercase mb-0.5">Epoch</p>
-                                  <p className="text-sm font-mono text-blue-400">{formatMetricValue(job.metrics.epoch)}</p>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          <JobMetricsChart jobId={job.job_id} status={job.status} />
-                        </div>
-
-                        <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
-                      </div>
-                    ))}
                   </div>
-                )}
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-black font-mono text-blue-400 tabular-nums">
+                      {Math.round(job.progress || 0)}%
+                    </span>
+                    <Button onClick={() => handleStop(job.job_id)} variant="ghost" size="sm"
+                      className="text-red-400 hover:bg-red-400/10 h-8 px-2">
+                      <Square className="w-3.5 h-3.5 mr-1" /> Stop
+                    </Button>
+                  </div>
+                </div>
 
-                {/* ── History ── */}
-                {historyJobs.length > 0 && (
-                  <div className="space-y-3">
-                    <button
-                      onClick={() => setHistoryCollapsed(c => !c)}
-                      className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-200 transition-colors w-full text-left"
-                    >
-                      <History className="w-4 h-4" />
-                      History ({historyJobs.length})
-                      {historyCollapsed
-                        ? <ChevronDown className="w-3.5 h-3.5 ml-auto" />
-                        : <ChevronUp className="w-3.5 h-3.5 ml-auto" />}
-                    </button>
+                <div className="p-4 space-y-3">
+                  {/* Progress bar */}
+                  <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
+                    <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
+                      style={{ width: `${Math.max(2, job.progress || 0)}%` }} />
+                  </div>
 
-                    {!historyCollapsed && historyJobs.map((job, jobIdx) => (
-                      <div key={job.job_id || `history-${jobIdx}`} className={cn(
-                        "rounded-2xl bg-card/40 border overflow-hidden transition-all duration-300",
-                        selectedJobs.includes(job.job_id)
-                          ? "border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)] bg-indigo-500/[0.02]"
-                          : "border-white/5"
-                      )}>
-                        <div className="p-4 flex items-center justify-between border-b border-white/5">
-                          <div className="flex items-center gap-3">
-                            {compareMode && (
-                              <div className="relative inline-flex items-center mr-1">
-                                <input type="checkbox" className="peer sr-only"
-                                  checked={selectedJobs.includes(job.job_id)}
-                                  onChange={e => {
-                                    if (e.target.checked) setSelectedJobs([...selectedJobs, job.job_id]);
-                                    else setSelectedJobs(selectedJobs.filter(id => id !== job.job_id));
-                                  }}
-                                />
-                                <div className="w-5 h-5 rounded border-2 border-white/20 peer-checked:border-indigo-500 peer-checked:bg-indigo-500 flex items-center justify-center transition-colors">
-                                  {selectedJobs.includes(job.job_id) && <CheckCircle className="w-3.5 h-3.5 text-white" />}
-                                </div>
-                              </div>
-                            )}
-                            {getStatusBadge(job.status)}
-                            {job.status === "completed" && typeof job.metrics?.epoch === "number" && job.metrics.epoch < job.config?.epochs && (
-                              <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20">
-                                Early stop (Ep {formatMetricValue(job.metrics.epoch)})
-                              </Badge>
-                            )}
-                            <div>
-                              <p className="text-sm font-medium">{job.config?.model_name || "yolov8n"}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {job.config?.epochs || 0} epochs • Batch {job.config?.batch_size || 16}
-                              </p>
-                            </div>
-                          </div>
+                  {/* Live metrics */}
+                  {job.metrics && Object.keys(job.metrics).length > 0 && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {job.metrics.loss != null && (
+                        <Pill label="Box Loss" value={Number(job.metrics.loss).toFixed(4)} color="text-amber-400" />
+                      )}
+                      {(job.metrics.mAP50 ?? job.metrics.map50) != null && (
+                        <Pill label="mAP@50" value={Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)} color="text-emerald-400" />
+                      )}
+                      {job.metrics.epoch != null && (
+                        <Pill label="Epoch" value={formatMetricValue(job.metrics.epoch)} color="text-blue-400" />
+                      )}
+                    </div>
+                  )}
+
+                  <JobChart jobId={job.job_id} status={job.status} />
+                  <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
+                </div>
+              </div>
+            ))}
+          </section>
+
+          {/* ── Trained Models ──────────────────────────────────────────────── */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Box className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-semibold text-emerald-400">
+                Trained Models {models.length > 0 && `(${models.length})`}
+              </span>
+            </div>
+
+            {models.length === 0 ? (
+              <div className="py-10 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] text-sm text-gray-500">
+                No trained models yet. Completed training runs will appear here.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {models.map((model, i) => (
+                  <div key={i}
+                    className="group rounded-2xl bg-card/40 border border-white/5 hover:border-emerald-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden">
+                    <div className="p-5 flex-1">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500/20 transition-all">
+                          <Box className="w-5 h-5" />
                         </div>
-
-                        {(job.progress !== undefined || job.metrics) && (
-                          <div className="p-4 space-y-3">
-                            {job.progress !== undefined && (
-                              <div>
-                                <div className="flex justify-between text-xs mb-1.5">
-                                  <span className="text-gray-500">Progress</span>
-                                  <span className="font-mono text-indigo-400">{Math.round(job.progress || 0)}%</span>
-                                </div>
-                                <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-                                  <div
-                                    className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-500"
-                                    style={{ width: `${job.progress || 0}%` }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                            {job.metrics && (
-                              <div className="grid grid-cols-3 gap-4 pt-2">
-                                {job.metrics.loss != null && typeof job.metrics.loss === "number" && (
-                                  <div className="text-center p-2 rounded-lg bg-white/[0.03]">
-                                    <p className="text-[10px] text-gray-500 uppercase">Loss</p>
-                                    <p className="text-sm font-mono text-amber-400">{Number(job.metrics.loss).toFixed(4)}</p>
-                                  </div>
-                                )}
-                                {(job.metrics.mAP50 != null || job.metrics.map50 != null) && (
-                                  <div className="text-center p-2 rounded-lg bg-white/[0.03]">
-                                    <p className="text-[10px] text-gray-500 uppercase">mAP@50</p>
-                                    <p className="text-sm font-mono text-emerald-400">{Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}</p>
-                                  </div>
-                                )}
-                                {job.metrics.epoch != null && (
-                                  <div className="text-center p-2 rounded-lg bg-white/[0.03]">
-                                    <p className="text-[10px] text-gray-500 uppercase">Epoch</p>
-                                    <p className="text-sm font-mono text-blue-400">{formatMetricValue(job.metrics.epoch)}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            <JobMetricsChart jobId={job.job_id} status={job.status} />
+                        <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">Ready</Badge>
+                      </div>
+                      <h3 className="font-bold text-white truncate mb-1" title={model.name}>{model.name}</h3>
+                      <div className="space-y-2 mt-3 text-sm text-gray-400">
+                        <div className="flex justify-between">
+                          <div className="flex items-center gap-1.5"><HardDrive className="w-3.5 h-3.5 text-gray-500" /> Size</div>
+                          <span className="text-gray-200 font-mono text-xs">{fmtBytes(model.size)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-gray-500" /> Created</div>
+                          <span className="text-gray-200 text-xs">{new Date(model.created * 1000).toLocaleDateString()}</span>
+                        </div>
+                        {model.metrics?.mAP50 != null && (
+                          <div className="flex justify-between">
+                            <div className="flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-gray-500" /> mAP@50</div>
+                            <span className="text-emerald-400 font-mono text-xs font-semibold">
+                              {Number(model.metrics.mAP50).toFixed(3)}
+                            </span>
                           </div>
                         )}
-
-                        <GamifiedTerminal output={job.output} isRunning={false} />
                       </div>
-                    ))}
+                    </div>
+                    <div className="p-3 bg-white/[0.02] border-t border-white/5 flex gap-2">
+                      <Button onClick={() => handleDownload(model.name)} size="sm"
+                        className="flex-1 bg-white text-black hover:bg-gray-200 text-xs h-8">
+                        <Download className="w-3.5 h-3.5 mr-1.5" /> Download .pt
+                      </Button>
+                      <Button onClick={() => handleDeleteModel(model.name)} variant="ghost" size="icon"
+                        className="text-gray-400 hover:text-red-400 hover:bg-red-400/10 h-8 w-8">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                )}
-              </>
-            );
-          })()}
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* ── Finished Job History ─────────────────────────────────────────── */}
+          {finishedJobs.length > 0 && (
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Run History</p>
+              <div className="space-y-2">
+                {finishedJobs.map((job, i) => {
+                  const open = expandedLogs[job.job_id];
+                  return (
+                    <div key={job.job_id || i}
+                      className="rounded-xl border border-white/5 bg-card/30 overflow-hidden">
+                      <button className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors"
+                        onClick={() => setExpandedLogs(p => ({ ...p, [job.job_id]: !p[job.job_id] }))}>
+                        <div className="flex items-center gap-3">
+                          <StatusBadge status={job.status} />
+                          <div className="text-left">
+                            <p className="text-sm font-medium">{job.config?.model_name || "yolov8n"}</p>
+                            <p className="text-xs text-gray-500">{job.config?.epochs} epochs · batch {job.config?.batch_size}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          {(job.metrics?.mAP50 ?? job.metrics?.map50) != null && (
+                            <span className="text-xs font-mono text-emerald-400">
+                              mAP {Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)}
+                            </span>
+                          )}
+                          {open ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="border-t border-white/5">
+                          {job.metrics && (
+                            <div className="grid grid-cols-3 gap-2 p-4">
+                              {job.metrics.loss != null && <Pill label="Loss" value={Number(job.metrics.loss).toFixed(4)} color="text-amber-400" />}
+                              {(job.metrics.mAP50 ?? job.metrics.map50) != null && <Pill label="mAP@50" value={Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)} color="text-emerald-400" />}
+                              {job.metrics.epoch != null && <Pill label="Epoch" value={formatMetricValue(job.metrics.epoch)} color="text-blue-400" />}
+                            </div>
+                          )}
+                          <JobChart jobId={job.job_id} status={job.status} />
+                          <GamifiedTerminal output={job.output} isRunning={false} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>
   );
 }
-
-function MultiJobComparisonChart({ selectedJobIds }) {
-  const { token } = useAuth();
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    async function loadMetrics() {
-      if (!selectedJobIds.length) {
-        setData([]);
-        return;
-      }
-      setLoading(true);
-      try {
-        const promises = selectedJobIds.map(id => 
-          fetch(API_ENDPOINTS.TRAINING.JOB_METRICS(id), { headers: { "Authorization": `Bearer ${token}` } })
-            .then(res => res.json())
-            .then(d => ({id, metrics: d.metrics || []}))
-            .catch(() => ({id, metrics: []}))
-        );
-        const results = await Promise.all(promises);
-        
-        // Merge data by epoch
-        const merged = {};
-        results.forEach(({id, metrics}) => {
-          metrics.forEach(m => {
-            if (!merged[m.epoch]) merged[m.epoch] = { epoch: m.epoch };
-            merged[m.epoch][`loss_${id.substring(0,4)}`] = m['train/box_loss'];
-            merged[m.epoch][`map_${id.substring(0,4)}`] = m['metrics/mAP50(B)'];
-          });
-        });
-        
-        setData(Object.values(merged).sort((a,b) => a.epoch - b.epoch));
-      } catch (e) {
-        console.error(e);
-      }
-      setLoading(false);
-    }
-    loadMetrics();
-  }, [selectedJobIds, token]);
-
-  if (selectedJobIds.length === 0) return (
-    <div className="p-6 text-center text-sm text-gray-500 bg-white/[0.02] border border-white/5 rounded-2xl mb-6">
-      <TrendingUp className="mx-auto w-6 h-6 mb-2 opacity-50" />
-      Select checkboxes on the jobs below to compare their mAP metrics.
-    </div>
-  );
-  if (loading) return <div className="p-6 text-center text-sm text-gray-500 bg-white/[0.02] border border-white/5 rounded-2xl mb-6">Loading metrics...</div>;
-  
-  const colors = ["#8b5cf6", "#10b981", "#f59e0b", "#ef4444", "#3b82f6"];
-  
-  return (
-    <div className="h-72 w-full bg-black/20 rounded-2xl p-5 border border-white/5 mb-6 shadow-xl animate-fade-in">
-      <div className="flex items-center justify-between mb-4">
-        <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-indigo-400" />
-          mAP@50 Comparison
-        </h4>
-        <span className="text-xs text-gray-500">{selectedJobIds.length} runs selected</span>
-      </div>
-      <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-            <XAxis dataKey="epoch" stroke="#666" fontSize={10} tickFormatter={(v) => `Ep ${v}`} />
-            <YAxis stroke="#666" fontSize={10} />
-            <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #333', fontSize: '12px', borderRadius: '8px' }} />
-            <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-            {selectedJobIds.map((id, i) => (
-               <Line 
-                 key={id} 
-                 type="monotone" 
-                 dataKey={`map_${id.substring(0,4)}`} 
-                 stroke={colors[i % colors.length]} 
-                 name={`Job ${id.substring(0,4)}`} 
-                 dot={false} 
-                 strokeWidth={3} 
-                 activeDot={{ r: 6 }} 
-               />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-}
-
