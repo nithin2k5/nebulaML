@@ -494,3 +494,11 @@
     transform: translate(0);
   }
 }
+
+/* Custom Cursor Hide Native */
+@media (pointer: fine) {
+  body.custom-cursor-active,
+  body.custom-cursor-active * {
+    cursor: none !important;
+  }
+}
