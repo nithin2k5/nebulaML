@@ -165,9 +165,9 @@ export default function DashboardPage() {
           </header>
 
           {/* Content */}
-          <main className="flex-1 overflow-y-auto px-4 pb-4 md:px-6 custom-scrollbar">
-            <div className="h-full rounded-2xl border border-white/5 bg-card/20 backdrop-blur-sm p-6 md:p-8">
-              <div className="max-w-7xl mx-auto animate-fade-in space-y-8">
+          <main className="flex-1 overflow-y-auto custom-scrollbar">
+            <div className="h-full">
+              <div className="max-w-7xl mx-auto animate-fade-in space-y-8 p-6 md:p-8">
                 {activeTab === "dashboard" && <DashboardStats onNavigate={setActiveTab} />}
                 {activeTab === "datasets" && <DatasetsTab />}
                 {activeTab === "workflow" && <WorkflowGuide />}
