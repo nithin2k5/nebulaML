@@ -58,7 +58,7 @@ export default function ChatbotTab() {
   ];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] max-h-[850px] relative font-sans overflow-hidden w-full">
+    <div className="flex flex-col h-[calc(100vh-4rem)] relative font-sans overflow-hidden w-full">
       
       {/* Background Ambience */}
       <div className="absolute inset-0 z-0 pointer-events-none">

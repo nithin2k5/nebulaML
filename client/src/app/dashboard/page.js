@@ -13,11 +13,12 @@ import SettingsTab from "@/components/SettingsTab";
 import ProfileTab from "@/components/ProfileTab";
 import ChatbotTab from "@/components/ChatbotTab";
 import OnboardingTour from "@/components/OnboardingTour";
+import WorkflowGuide from "@/components/WorkflowGuide";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Activity, Database, Zap, Cpu, Box,
-  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle, MessageSquare
+  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle, MessageSquare, BookOpen
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   const tabs = [
     { id: "dashboard", label: "Overview", icon: Activity },
     { id: "datasets", label: "Projects", icon: Database },
+    { id: "workflow", label: "CV Guide", icon: BookOpen },
     { id: "chat", label: "Assistant", icon: MessageSquare },
     { id: "inference", label: "Playground", icon: Zap },
     { id: "training", label: "Training", icon: Cpu },
@@ -163,11 +165,12 @@ export default function DashboardPage() {
           </header>
 
           {/* Content */}
-          <main className="flex-1 overflow-y-auto px-4 pb-4 md:px-6 custom-scrollbar">
-            <div className="h-full rounded-2xl border border-white/5 bg-card/20 backdrop-blur-sm p-6 md:p-8">
-              <div className="max-w-7xl mx-auto animate-fade-in space-y-8">
+          <main className="flex-1 overflow-y-auto custom-scrollbar">
+            <div className="h-full">
+              <div className="max-w-7xl mx-auto animate-fade-in space-y-8 p-6 md:p-8">
                 {activeTab === "dashboard" && <DashboardStats onNavigate={setActiveTab} />}
                 {activeTab === "datasets" && <DatasetsTab />}
+                {activeTab === "workflow" && <WorkflowGuide />}
                 {activeTab === "chat" && <ChatbotTab />}
                 {activeTab === "inference" && <InferenceTab />}
                 {activeTab === "training" && <TrainingTab />}
