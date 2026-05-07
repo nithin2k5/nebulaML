@@ -5,7 +5,7 @@ Collects low-confidence predictions from deployed models,
 flags uncertain images for human review, and supports re-training loops.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 _SERVER_ROOT = Path(__file__).resolve().parents[4]
 _RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
+
+active_learning_jobs: Dict[str, Dict] = {}
 
 
 class CollectRequest(BaseModel):
@@ -138,81 +140,112 @@ def _remove_uncertain_images(dataset_id: str, image_ids: set) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+def _collect_task(dataset_id: str, model_job_id: str, confidence_threshold: float, max_images: int):
+    try:
+        from app.services.inference import YOLOInference
+        from PIL import Image as PILImage
+        
+        # Determine model path
+        weights_dir = (_RUNS_BASE / f"job_{model_job_id}" / "weights").resolve()
+        onnx_path = weights_dir / "best.onnx"
+        pt_path = weights_dir / "best.pt"
+
+        if onnx_path.exists():
+            model_path = str(onnx_path)
+        elif pt_path.exists():
+            model_path = str(pt_path)
+        else:
+            raise Exception("Model not found")
+
+        inference = YOLOInference(model_path)
+        images = DatasetService.get_dataset_images(dataset_id)
+
+        uncertain = []
+        for img_data in images[: max_images * 3]:
+            if len(uncertain) >= max_images:
+                break
+
+            img_path = Path(img_data.get("path", ""))
+            if not img_path.exists():
+                continue
+
+            try:
+                pil_img = PILImage.open(str(img_path))
+                detections = inference.predict(pil_img, conf_threshold=0.01)
+
+                low_conf = [d for d in detections if d.get("confidence", 1.0) < confidence_threshold]
+                high_conf = [d for d in detections if d.get("confidence", 1.0) >= confidence_threshold]
+
+                if low_conf or (not detections):
+                    uncertain.append({
+                        "image_id": img_data["id"],
+                        "filename": img_data.get("filename", ""),
+                        "path": img_data.get("path", ""),
+                        "low_confidence_detections": low_conf,
+                        "high_confidence_detections": high_conf,
+                        "total_detections": len(detections),
+                        "min_confidence": min((d.get("confidence", 0) for d in detections), default=0),
+                        "needs_review": True,
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to process image {img_data.get('filename')}: {e}")
+
+        _save_uncertain_batch(dataset_id, uncertain)
+        
+        active_learning_jobs[dataset_id] = {
+            "status": "completed",
+            "uncertain_count": len(uncertain)
+        }
+    except Exception as e:
+        logger.error(f"Active learning collection failed: {e}")
+        active_learning_jobs[dataset_id] = {
+            "status": "failed",
+            "error": str(e)
+        }
+
+
 @router.post("/collect")
 async def collect_uncertain(
     request: CollectRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
 ):
     """
     Run inference on dataset images and collect predictions with confidence
     below the threshold. These are flagged for human review.
     """
-    from app.services.inference import YOLOInference
-    from PIL import Image as PILImage
-
     dataset = DatasetService.get_dataset(request.dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
     require_role(request.dataset_id, current_user["id"], dataset["user_id"], "annotator")
 
-    # Determine model path (absolute, same pattern as inference.py)
     weights_dir = (_RUNS_BASE / f"job_{request.model_job_id}" / "weights").resolve()
     if not str(weights_dir).startswith(str(_RUNS_BASE)):
         raise HTTPException(status_code=400, detail="Invalid job ID")
-    onnx_path = weights_dir / "best.onnx"
-    pt_path = weights_dir / "best.pt"
 
-    if onnx_path.exists():
-        model_path = str(onnx_path)
-    elif pt_path.exists():
-        model_path = str(pt_path)
-    else:
-        raise HTTPException(status_code=404, detail=f"Model for job {request.model_job_id} not found")
+    active_learning_jobs[request.dataset_id] = {
+        "status": "processing"
+    }
 
-    inference = YOLOInference(model_path)
-    images = DatasetService.get_dataset_images(request.dataset_id)
-
-    uncertain = []
-    for img_data in images[: request.max_images * 3]:
-        if len(uncertain) >= request.max_images:
-            break
-
-        img_path = Path(img_data.get("path", ""))
-        if not img_path.exists():
-            continue
-
-        try:
-            pil_img = PILImage.open(str(img_path))
-            detections = inference.predict(pil_img, conf_threshold=0.01)
-
-            low_conf = [d for d in detections if d.get("confidence", 1.0) < request.confidence_threshold]
-            high_conf = [d for d in detections if d.get("confidence", 1.0) >= request.confidence_threshold]
-
-            if low_conf or (not detections):
-                uncertain.append({
-                    "image_id": img_data["id"],
-                    "filename": img_data.get("filename", ""),
-                    "path": img_data.get("path", ""),
-                    "low_confidence_detections": low_conf,
-                    "high_confidence_detections": high_conf,
-                    "total_detections": len(detections),
-                    "min_confidence": min((d.get("confidence", 0) for d in detections), default=0),
-                    "needs_review": True,
-                })
-        except Exception as e:
-            logger.warning(f"Failed to process image {img_data.get('filename')}: {e}")
-
-    _save_uncertain_batch(request.dataset_id, uncertain)
+    background_tasks.add_task(
+        _collect_task,
+        request.dataset_id,
+        request.model_job_id,
+        request.confidence_threshold,
+        request.max_images
+    )
 
     return JSONResponse(content={
-        "success": True,
-        "dataset_id": request.dataset_id,
-        "model_job_id": request.model_job_id,
-        "confidence_threshold": request.confidence_threshold,
-        "images_scanned": min(len(images), request.max_images * 3),
-        "uncertain_count": len(uncertain),
-        "uncertain_images": uncertain[:20],
+        "status": "processing",
+        "message": "Scanning dataset in background"
     })
+
+@router.get("/collect-status/{dataset_id}")
+async def get_collect_status(dataset_id: str, current_user: dict = Depends(get_current_user)):
+    if dataset_id not in active_learning_jobs:
+        # Default to completed if no job exists to prevent infinite polling
+        return {"status": "completed", "uncertain_count": 0}
+    return active_learning_jobs[dataset_id]
 
 
 @router.get("/uncertain/{dataset_id}")
