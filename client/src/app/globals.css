@@ -498,7 +498,7 @@
 /* Custom Cursor Hide Native */
 @media (pointer: fine) {
   body.custom-cursor-active,
-  body.custom-cursor-active * {
+  body.custom-cursor-active *:not(canvas):not(.show-native-cursor):not(.show-native-cursor *) {
     cursor: none !important;
   }
 }

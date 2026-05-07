@@ -1,57 +1,70 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import sys
 import logging
 from dataclasses import asdict
 
-# Add parent directory to path for imports
-# sys.path.append(str(Path(__file__).parent.parent.parent))
 from app.services.dataset_analyzer import DatasetAnalyzer
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.access import require_role
+from app.services.database import DatasetService, QualitySnapshotService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def run_analysis_task(dataset_id: str):
+    """Background task to run heavy dataset analysis and save snapshot."""
+    try:
+        logger.info(f"Starting background analysis for {dataset_id}")
+        analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
+        result = asdict(analysis)
+        QualitySnapshotService.save_snapshot(dataset_id, result)
+        logger.info(f"Finished background analysis for {dataset_id}")
+    except Exception as e:
+        logger.error(f"Background analysis failed for {dataset_id}: {e}", exc_info=True)
+
 @router.get("/datasets/{dataset_id}/analyze")
-async def analyze_dataset(dataset_id: str, current_user: dict = Depends(get_current_user)):
+async def analyze_dataset(
+    dataset_id: str, 
+    background_tasks: BackgroundTasks,
+    force_refresh: bool = False,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Perform comprehensive dataset analysis for training readiness
-    Returns analysis including:
-    - Class distribution
-    - Object size/aspect ratio analysis
-    - Quality metrics (including image quality, per-class, near-duplicates)
-    - Training recommendations
-    - Warnings and issues
+    Returns cached analysis if available and recent, or kicks off a background task.
     """
     try:
-        from app.services.database import DatasetService, QualitySnapshotService
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
         require_role(dataset_id, current_user["id"], dataset["user_id"], "annotator")
 
-        analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
-
-        # Convert dataclass to dict for JSON serialization
-        result = asdict(analysis)
-
-        # Persist snapshot for trend tracking (non-blocking — failure is silent)
-        try:
-            QualitySnapshotService.save_snapshot(dataset_id, result)
-        except Exception as snap_err:
-            logger.warning(f"Failed to save quality snapshot: {snap_err}")
-
+        # Try to get latest snapshot
+        latest = QualitySnapshotService.get_latest_snapshot(dataset_id)
+        
+        if latest and not force_refresh:
+            return JSONResponse(content={
+                "success": True,
+                "status": "completed",
+                "analysis": latest
+            })
+            
+        # We need to run it. Kick off background task
+        background_tasks.add_task(run_analysis_task, dataset_id)
+        
         return JSONResponse(content={
             "success": True,
-            "analysis": result
+            "status": "processing",
+            "message": "Analysis started in background"
         })
+
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         import traceback
-        logger.error(f"Error analyzing dataset: {e}", exc_info=True)
+        logger.error(f"Error starting dataset analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

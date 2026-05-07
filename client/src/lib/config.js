@@ -3,6 +3,7 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost
 export const API_ENDPOINTS = {
     DATASETS: {
         LIST: `${API_BASE_URL}/api/annotations/datasets/list`,
+        SUMMARY: `${API_BASE_URL}/api/annotations/datasets/summary`,
         CREATE: `${API_BASE_URL}/api/annotations/datasets/create`,
         GET: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
         DELETE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,

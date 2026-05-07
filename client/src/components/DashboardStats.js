@@ -29,29 +29,18 @@ export default function DashboardStats({ onNavigate }) {
   const fetchLiveStats = async () => {
     try {
       const headers = { "Authorization": `Bearer ${token}` };
-      const [datasetsRes, modelsRes] = await Promise.allSettled([
-        fetch(API_ENDPOINTS.DATASETS.LIST, { headers }),
+      const [summaryRes, modelsRes] = await Promise.allSettled([
+        fetch(API_ENDPOINTS.DATASETS.SUMMARY, { headers }),
         fetch(`${API_ENDPOINTS.MODELS.LIST}`, { headers }),
       ]);
 
       let totalDatasets = 0, totalImages = 0, totalAnnotated = 0, totalReviewed = 0;
-      if (datasetsRes.status === 'fulfilled' && datasetsRes.value.ok) {
-        const rawDatasets = await datasetsRes.value.json();
-        // Handle cases where API returns { datasets: [...] } or just [...]
-        const datasets = Array.isArray(rawDatasets) ? rawDatasets : (rawDatasets.datasets || []);
-        totalDatasets = datasets.length;
-
-        const statsPromises = datasets?.map(ds =>
-          fetch(API_ENDPOINTS.DATASETS.STATS(ds.id), { headers }).then(r => r.ok ? r.json() : null).catch(() => null)
-        ) || [];
-        const allStats = await Promise.allSettled(statsPromises);
-        allStats.forEach(result => {
-          if (result.status === 'fulfilled' && result.value) {
-            totalImages += result.value.total_images || 0;
-            totalAnnotated += result.value.annotated_images || 0;
-            totalReviewed += result.value.reviewed_images || 0;
-          }
-        });
+      if (summaryRes.status === 'fulfilled' && summaryRes.value.ok) {
+        const summaryData = await summaryRes.value.json();
+        totalDatasets = summaryData.total_datasets || 0;
+        totalImages = summaryData.total_images || 0;
+        totalAnnotated = summaryData.annotated_images || 0;
+        totalReviewed = summaryData.reviewed_images || 0;
       }
 
       let totalModels = 0;

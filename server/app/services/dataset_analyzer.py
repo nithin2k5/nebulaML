@@ -221,17 +221,43 @@ class DatasetAnalyzer:
             valid_boxes = [b for b in boxes if b.get("width", 0) > 0 and b.get("height", 0) > 0]
             overlap_pairs = 0
             total_pairs = 0
-            for ii in range(len(valid_boxes)):
-                b1 = valid_boxes[ii]
-                x1, y1 = b1.get("x", 0), b1.get("y", 0)
-                x1m, y1m = x1 + b1.get("width", 0), y1 + b1.get("height", 0)
-                for jj in range(ii + 1, len(valid_boxes)):
-                    b2 = valid_boxes[jj]
-                    x2, y2 = b2.get("x", 0), b2.get("y", 0)
-                    x2m, y2m = x2 + b2.get("width", 0), y2 + b2.get("height", 0)
-                    total_pairs += 1
-                    if not (x1m <= x2 or x2m <= x1 or y1m <= y2 or y2m <= y1):
-                        overlap_pairs += 1
+            n_boxes = len(valid_boxes)
+            
+            if n_boxes > 1:
+                total_pairs = (n_boxes * (n_boxes - 1)) // 2
+                if HAS_NUMPY and n_boxes < 15000:  # Prevent OOM for huge classes
+                    import numpy as np
+                    coords = np.zeros((n_boxes, 4), dtype=np.float32)
+                    for i, b in enumerate(valid_boxes):
+                        x = b.get("x", 0)
+                        y = b.get("y", 0)
+                        coords[i] = [x, y, x + b.get("width", 0), y + b.get("height", 0)]
+                        
+                    x1 = coords[:, 0]
+                    y1 = coords[:, 1]
+                    x2 = coords[:, 2]
+                    y2 = coords[:, 3]
+                    
+                    # Compute intersection boolean matrix using broadcasting
+                    overlaps = ~(
+                        (x2[:, None] <= x1[None, :]) |
+                        (x1[:, None] >= x2[None, :]) |
+                        (y2[:, None] <= y1[None, :]) |
+                        (y1[:, None] >= y2[None, :])
+                    )
+                    
+                    overlap_pairs = int(np.sum(np.triu(overlaps, k=1)))
+                else:
+                    for ii in range(n_boxes):
+                        b1 = valid_boxes[ii]
+                        x1, y1 = b1.get("x", 0), b1.get("y", 0)
+                        x1m, y1m = x1 + b1.get("width", 0), y1 + b1.get("height", 0)
+                        for jj in range(ii + 1, n_boxes):
+                            b2 = valid_boxes[jj]
+                            x2, y2 = b2.get("x", 0), b2.get("y", 0)
+                            x2m, y2m = x2 + b2.get("width", 0), y2 + b2.get("height", 0)
+                            if not (x1m <= x2 or x2m <= x1 or y1m <= y2 or y2m <= y1):
+                                overlap_pairs += 1
 
             iou_overlap_ratio = overlap_pairs / total_pairs if total_pairs else 0.0
 
@@ -844,35 +870,51 @@ class DatasetAnalyzer:
                 valid_boxes += 1
         
         # Check for overlapping boxes (simplified IoU check)
-        for i, box1 in enumerate(annotations):
-            x1 = box1.get("x", 0)
-            y1 = box1.get("y", 0)
-            w1 = box1.get("width", 0)
-            h1 = box1.get("height", 0)
-            
-            if w1 <= 0 or h1 <= 0:
-                continue
-            
-            x1_max = x1 + w1
-            y1_max = y1 + h1
-            
-            for j, box2 in enumerate(annotations[i+1:], start=i+1):
-                x2 = box2.get("x", 0)
-                y2 = box2.get("y", 0)
-                w2 = box2.get("width", 0)
-                h2 = box2.get("height", 0)
+        valid_boxes_list = [box for box in annotations if box.get("width", 0) > 0 and box.get("height", 0) > 0]
+        n_boxes = len(valid_boxes_list)
+        
+        if n_boxes > 1:
+            total_pairs = (n_boxes * (n_boxes - 1)) // 2
+            if HAS_NUMPY and n_boxes < 15000:
+                import numpy as np
+                coords = np.zeros((n_boxes, 4), dtype=np.float32)
+                for i, b in enumerate(valid_boxes_list):
+                    x = b.get("x", 0)
+                    y = b.get("y", 0)
+                    coords[i] = [x, y, x + b.get("width", 0), y + b.get("height", 0)]
+                    
+                x1 = coords[:, 0]
+                y1 = coords[:, 1]
+                x2 = coords[:, 2]
+                y2 = coords[:, 3]
                 
-                if w2 <= 0 or h2 <= 0:
-                    continue
+                overlaps = ~(
+                    (x2[:, None] <= x1[None, :]) |
+                    (x1[:, None] >= x2[None, :]) |
+                    (y2[:, None] <= y1[None, :]) |
+                    (y1[:, None] >= y2[None, :])
+                )
                 
-                total_pairs += 1
-                
-                x2_max = x2 + w2
-                y2_max = y2 + h2
-                
-                # Check if boxes overlap
-                if not (x1_max <= x2 or x2_max <= x1 or y1_max <= y2 or y2_max <= y1):
-                    overlapping_pairs += 1
+                overlapping_pairs = int(np.sum(np.triu(overlaps, k=1)))
+            else:
+                for i, box1 in enumerate(valid_boxes_list):
+                    x1 = box1.get("x", 0)
+                    y1 = box1.get("y", 0)
+                    w1 = box1.get("width", 0)
+                    h1 = box1.get("height", 0)
+                    x1_max = x1 + w1
+                    y1_max = y1 + h1
+                    
+                    for j, box2 in enumerate(valid_boxes_list[i+1:], start=i+1):
+                        x2 = box2.get("x", 0)
+                        y2 = box2.get("y", 0)
+                        w2 = box2.get("width", 0)
+                        h2 = box2.get("height", 0)
+                        x2_max = x2 + w2
+                        y2_max = y2 + h2
+                        
+                        if not (x1_max <= x2 or x2_max <= x1 or y1_max <= y2 or y2_max <= y1):
+                            overlapping_pairs += 1
         
         # Score based on valid boxes and reasonable overlap ratio
         valid_ratio = valid_boxes / len(annotations) if annotations else 0.0
