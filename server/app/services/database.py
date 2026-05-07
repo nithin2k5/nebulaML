@@ -748,3 +748,33 @@ class QualitySnapshotService:
             if connection:
                 connection.close()
             return []
+
+    @staticmethod
+    def get_latest_snapshot(dataset_id: str) -> Optional[Dict]:
+        """Return the most recent full snapshot for a dataset."""
+        connection = get_db_connection()
+        if not connection:
+            return None
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT full_snapshot
+                FROM dataset_quality_snapshots
+                WHERE dataset_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (dataset_id,),
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            if row and row.get("full_snapshot"):
+                return json.loads(row["full_snapshot"])
+            return None
+        except Error as e:
+            print(f"Error fetching latest quality snapshot: {e}")
+            if connection:
+                connection.close()
+            return None

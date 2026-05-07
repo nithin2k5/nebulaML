@@ -19,22 +19,35 @@ export default function ProjectHealth({ params }) {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isPolling, setIsPolling] = useState(false);
 
-    const fetchAnalysis = async () => {
-        setLoading(true);
+    const fetchAnalysis = async (forceRefresh = false) => {
+        if (!analysis && !isPolling) setLoading(true);
         setError(null);
         try {
+            const url = forceRefresh 
+                ? `${API_ENDPOINTS.DATASETS.ANALYZE(params.id)}?force_refresh=true` 
+                : API_ENDPOINTS.DATASETS.ANALYZE(params.id);
+            
             const [analysisRes, historyRes] = await Promise.all([
-                fetch(API_ENDPOINTS.DATASETS.ANALYZE(params.id), {
-                    headers: { "Authorization": `Bearer ${token}` }
-                }),
+                fetch(url, { headers: { "Authorization": `Bearer ${token}` } }),
                 fetch(API_ENDPOINTS.DATASETS.QUALITY_HISTORY(params.id), {
                     headers: { "Authorization": `Bearer ${token}` }
                 }).catch(() => null),
             ]);
+            
             if (!analysisRes.ok) throw new Error("Analysis failed");
             const data = await analysisRes.json();
+            
+            if (data.status === "processing") {
+                setIsPolling(true);
+                setTimeout(() => fetchAnalysis(false), 3000);
+                return;
+            }
+            
+            setIsPolling(false);
             setAnalysis(data.analysis || data);
+            
             if (historyRes?.ok) {
                 const hData = await historyRes.json();
                 setHistory(hData.history || []);
@@ -42,6 +55,7 @@ export default function ProjectHealth({ params }) {
         } catch (e) {
             console.error(e);
             setError(e.message);
+            setIsPolling(false);
         } finally {
             setLoading(false);
         }
@@ -52,7 +66,7 @@ export default function ProjectHealth({ params }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [params.id]);
 
-    if (loading) {
+    if (loading && !analysis) {
         return (
             <div className="flex flex-col items-center justify-center h-64 space-y-4">
                 <RefreshCw className="w-8 h-8 animate-spin text-purple-500" />
@@ -61,11 +75,11 @@ export default function ProjectHealth({ params }) {
         );
     }
 
-    if (error) {
+    if (error && !analysis) {
         return (
             <div className="p-4 text-center">
                 <p className="text-red-400 mb-4">Failed to load analysis: {error}</p>
-                <Button onClick={fetchAnalysis}>Retry</Button>
+                <Button onClick={() => fetchAnalysis()}>Retry</Button>
             </div>
         );
     }
@@ -91,7 +105,31 @@ export default function ProjectHealth({ params }) {
     const perClassQuality = analysis.per_class_quality || {};
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500">
+        <div className="space-y-6 animate-in fade-in duration-500 relative">
+            
+            {/* Header / Actions */}
+            <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                    Health Overview
+                    {isPolling && (
+                        <span className="flex items-center gap-1.5 text-xs font-normal text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            Analyzing in background...
+                        </span>
+                    )}
+                </h2>
+                <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => fetchAnalysis(true)}
+                    disabled={isPolling || loading}
+                    className="border-white/10 hover:bg-white/5"
+                >
+                    <RotateCcw className={`w-4 h-4 mr-2 ${isPolling ? 'animate-spin' : ''}`} />
+                    Refresh Analysis
+                </Button>
+            </div>
+
             {/* Top Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="bg-zinc-900 border-white/10">

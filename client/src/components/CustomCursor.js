@@ -29,7 +29,14 @@ export default function CustomCursor() {
     document.body.classList.add('custom-cursor-active');
 
     const updateMousePosition = (e) => {
-      if (!isVisible) setIsVisible(true);
+      const target = e.target;
+      const shouldHide = target.tagName?.toLowerCase() === 'canvas' || target.closest?.('.hide-custom-cursor');
+      
+      if (shouldHide) {
+        if (isVisible) setIsVisible(false);
+      } else {
+        if (!isVisible) setIsVisible(true);
+      }
       mouseX.set(e.clientX);
       mouseY.set(e.clientY);
     };
