@@ -7,6 +7,22 @@ from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 
+def get_safe_model_dir(model_name: str) -> Path:
+    """Securely resolve the model directory, preventing path traversal."""
+    base_dir = Path("runs/detect").resolve()
+    model_dir = (base_dir / model_name).resolve()
+    
+    try:
+        # Ensure the resolved path is inside the base directory
+        model_dir.relative_to(base_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid model name (path traversal detected)")
+        
+    if model_dir == base_dir:
+        raise HTTPException(status_code=400, detail="Invalid model name")
+        
+    return model_dir
+
 @router.get("/list")
 async def list_models(current_user: dict = Depends(get_current_user)):
     """
@@ -38,11 +54,8 @@ async def download_model(model_name: str, current_user: dict = Depends(get_curre
     """
     Download a trained model
     """
-    # Prevent path traversal
-    if ".." in model_name or "/" in model_name or "\\" in model_name:
-        raise HTTPException(status_code=400, detail="Invalid model name")
-
-    model_path = Path(f"runs/detect/{model_name}/weights/best.pt")
+    model_dir = get_safe_model_dir(model_name)
+    model_path = model_dir / "weights" / "best.pt"
     
     if not model_path.exists():
         raise HTTPException(status_code=404, detail="Model not found")
@@ -58,10 +71,7 @@ async def delete_model(model_name: str, current_user: dict = Depends(get_current
     """
     Delete a trained model
     """
-    if ".." in model_name or "/" in model_name or "\\" in model_name:
-        raise HTTPException(status_code=400, detail="Invalid model name")
-
-    model_dir = Path(f"runs/detect/{model_name}")
+    model_dir = get_safe_model_dir(model_name)
     
     if not model_dir.exists():
         raise HTTPException(status_code=404, detail="Model not found")
@@ -76,10 +86,7 @@ async def get_model_info(model_name: str, current_user: dict = Depends(get_curre
     """
     Get detailed information about a model
     """
-    if ".." in model_name or "/" in model_name or "\\" in model_name:
-        raise HTTPException(status_code=400, detail="Invalid model name")
-
-    model_dir = Path(f"runs/detect/{model_name}")
+    model_dir = get_safe_model_dir(model_name)
     
     if not model_dir.exists():
         raise HTTPException(status_code=404, detail="Model not found")
@@ -147,15 +154,14 @@ async def export_model(model_name: str, format: str = "onnx", current_user: dict
     """
     Export a trained model to a different format (e.g., onnx, engine, openvino, coreml, torchscript)
     """
-    if ".." in model_name or "/" in model_name or "\\" in model_name:
-        raise HTTPException(status_code=400, detail="Invalid model name")
+    model_dir = get_safe_model_dir(model_name)
 
     # Whitelist export formats
     allowed_formats = {"onnx", "torchscript", "openvino", "coreml", "engine", "tflite", "paddle", "ncnn"}
     if format not in allowed_formats:
         raise HTTPException(status_code=400, detail=f"Unsupported format '{format}'. Allowed: {sorted(allowed_formats)}")
 
-    model_path = Path(f"runs/detect/{model_name}/weights/best.pt")
+    model_path = model_dir / "weights" / "best.pt"
     
     if not model_path.exists():
         raise HTTPException(status_code=404, detail="Model not found")

@@ -153,6 +153,71 @@ async def list_datasets(current_user: dict = Depends(get_current_user)):
 
     return {"datasets": all_datasets}
 
+@router.get("/datasets/summary")
+async def get_datasets_summary(current_user: dict = Depends(get_current_user)):
+    """
+    Get aggregated statistics across all accessible datasets for the current user.
+    Solves the N+1 API request problem on the dashboard.
+    """
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=503, detail="Database connection failed")
+        
+    try:
+        cursor = connection.cursor(dictionary=True)
+        
+        # Get all dataset IDs the user has access to
+        cursor.execute("SELECT id FROM datasets WHERE user_id = %s", (current_user["id"],))
+        owned_ids = [r["id"] for r in cursor.fetchall()]
+        
+        cursor.execute("SELECT dataset_id FROM project_members WHERE user_id = %s", (current_user["id"],))
+        member_ids = [r["dataset_id"] for r in cursor.fetchall()]
+        
+        all_dataset_ids = list(set(owned_ids + member_ids))
+        
+        if not all_dataset_ids:
+            return {
+                "total_datasets": 0,
+                "total_images": 0,
+                "annotated_images": 0,
+                "reviewed_images": 0
+            }
+            
+        format_strings = ','.join(['%s'] * len(all_dataset_ids))
+        
+        # Aggregate counts from dataset_images
+        cursor.execute(f"""
+            SELECT 
+                COUNT(id) as total_images,
+                SUM(CASE WHEN annotated = TRUE THEN 1 ELSE 0 END) as annotated_images
+            FROM dataset_images
+            WHERE dataset_id IN ({format_strings})
+        """, tuple(all_dataset_ids))
+        
+        counts = cursor.fetchone()
+        
+        # Aggregate reviewed count from annotations table
+        cursor.execute(f"""
+            SELECT COUNT(DISTINCT image_id) as reviewed_images
+            FROM annotations
+            WHERE dataset_id IN ({format_strings}) AND status = 'reviewed'
+        """, tuple(all_dataset_ids))
+        
+        reviewed = cursor.fetchone()
+        
+        return {
+            "total_datasets": len(all_dataset_ids),
+            "total_images": counts["total_images"] or 0,
+            "annotated_images": counts["annotated_images"] or 0,
+            "reviewed_images": reviewed["reviewed_images"] or 0
+        }
+    except Exception as e:
+        logger.error(f"Error getting datasets summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        connection.close()
+
 @router.get("/datasets/{dataset_id}")
 async def get_dataset(
     dataset_id: str,
