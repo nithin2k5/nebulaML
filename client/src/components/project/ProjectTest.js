@@ -18,8 +18,20 @@ export default function ProjectTest({ dataset }) {
     const [uploading, setUploading] = useState(false);
     const [viewMode, setViewMode] = useState("grid");
     const [selectedResult, setSelectedResult] = useState(null);
+    const [confidence, setConfidence] = useState(0.25);
+    const [iou, setIou] = useState(0.45);
     const canvasRef = useRef(null);
     const fileInputRef = useRef(null);
+
+    // Cleanup object URLs on unmount to prevent memory leaks
+    useEffect(() => {
+        return () => {
+            setTestImages(current => {
+                current.forEach(img => URL.revokeObjectURL(img.url));
+                return [];
+            });
+        };
+    }, []);
 
     useEffect(() => {
         fetchModels();
@@ -78,20 +90,14 @@ export default function ProjectTest({ dataset }) {
         for (const file of files) {
             if (!file.type.startsWith('image/')) continue;
             
-            const reader = new FileReader();
-            await new Promise((resolve) => {
-                reader.onload = (evt) => {
-                    newImages.push({
-                        id: Math.random().toString(36).substr(2, 9),
-                        file,
-                        name: file.name,
-                        url: evt.target.result,
-                        result: null,
-                        loading: false
-                    });
-                    resolve();
-                };
-                reader.readAsDataURL(file);
+            // Use createObjectURL instead of FileReader to save massive amounts of browser memory
+            newImages.push({
+                id: Math.random().toString(36).substr(2, 9),
+                file,
+                name: file.name,
+                url: URL.createObjectURL(file),
+                result: null,
+                loading: false
             });
         }
 
@@ -119,8 +125,8 @@ export default function ProjectTest({ dataset }) {
             const formData = new FormData();
             formData.append("file", testImages[imageIdx].file);
             formData.append("model_name", selectedModel);
-            formData.append("confidence", "0.25");
-            formData.append("iou", "0.45");
+            formData.append("confidence", confidence.toString());
+            formData.append("iou", iou.toString());
 
             const res = await fetch(API_ENDPOINTS.INFERENCE.PREDICT, {
                 method: "POST",
@@ -172,17 +178,25 @@ export default function ProjectTest({ dataset }) {
         }
 
         setLoading(true);
-        for (const img of testImages) {
-            if (!img.result) {
-                await runInference(img.id);
-            }
+        const pendingImages = testImages.filter(img => !img.result);
+        
+        // Process in chunks of 3 to avoid overwhelming the backend
+        const chunkSize = 3;
+        for (let i = 0; i < pendingImages.length; i += chunkSize) {
+            const chunk = pendingImages.slice(i, i + chunkSize);
+            await Promise.allSettled(chunk.map(img => runInference(img.id)));
         }
+        
         setLoading(false);
         toast.success("Batch inference complete");
     };
 
     const removeImage = (imageId) => {
-        setTestImages(prev => prev.filter(img => img.id !== imageId));
+        setTestImages(prev => {
+            const img = prev.find(i => i.id === imageId);
+            if (img && img.url) URL.revokeObjectURL(img.url);
+            return prev.filter(i => i.id !== imageId);
+        });
         setResults(prev => prev.filter(r => r.imageId !== imageId));
         if (selectedResult?.id === imageId) {
             setSelectedResult(null);
@@ -190,6 +204,9 @@ export default function ProjectTest({ dataset }) {
     };
 
     const clearAll = () => {
+        testImages.forEach(img => {
+            if (img.url) URL.revokeObjectURL(img.url);
+        });
         setTestImages([]);
         setResults([]);
         setSelectedResult(null);
@@ -356,12 +373,38 @@ export default function ProjectTest({ dataset }) {
                             ))}
                         </select>
                         {selectedModel && (
-                            <div className="text-xs text-muted-foreground space-y-1">
+                            <div className="text-xs text-muted-foreground space-y-4 mt-4">
                                 <div className="flex items-center justify-between">
                                     <span>Format:</span>
                                     <Badge variant="outline" className="text-xs">
                                         {models.find(m => m.name === selectedModel)?.format || 'PyTorch'}
                                     </Badge>
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <label className="font-medium text-foreground">Confidence Threshold</label>
+                                        <span>{confidence.toFixed(2)}</span>
+                                    </div>
+                                    <input 
+                                        type="range" 
+                                        min="0.05" max="0.95" step="0.05" 
+                                        value={confidence} 
+                                        onChange={(e) => setConfidence(parseFloat(e.target.value))}
+                                        className="w-full accent-primary"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <label className="font-medium text-foreground">IoU Threshold</label>
+                                        <span>{iou.toFixed(2)}</span>
+                                    </div>
+                                    <input 
+                                        type="range" 
+                                        min="0.1" max="0.9" step="0.05" 
+                                        value={iou} 
+                                        onChange={(e) => setIou(parseFloat(e.target.value))}
+                                        className="w-full accent-primary"
+                                    />
                                 </div>
                             </div>
                         )}
