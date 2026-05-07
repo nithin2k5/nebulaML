@@ -64,6 +64,7 @@ export const API_ENDPOINTS = {
     },
     INFERENCE: {
         PREDICT: `${API_BASE_URL}/api/inference/predict`,
+        PREDICT_BATCH: `${API_BASE_URL}/api/inference/predict-batch`,
         LIST: `${API_BASE_URL}/api/inference/models`,
     },
     AUTH: {

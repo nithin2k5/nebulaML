@@ -177,18 +177,90 @@ export default function ProjectTest({ dataset }) {
             return;
         }
 
-        setLoading(true);
         const pendingImages = testImages.filter(img => !img.result);
+        if (pendingImages.length === 0) return;
+
+        setLoading(true);
         
-        // Process in chunks of 3 to avoid overwhelming the backend
-        const chunkSize = 3;
+        // Mark all pending as loading
+        setTestImages(prev => prev.map(img => 
+            pendingImages.some(p => p.id === img.id) ? { ...img, loading: true } : img
+        ));
+
+        // Process in chunks of 20 (backend limit)
+        const chunkSize = 20;
+        let successCount = 0;
+
         for (let i = 0; i < pendingImages.length; i += chunkSize) {
             const chunk = pendingImages.slice(i, i + chunkSize);
-            await Promise.allSettled(chunk.map(img => runInference(img.id)));
+            try {
+                const formData = new FormData();
+                formData.append("model_name", selectedModel);
+                formData.append("confidence", confidence.toString());
+                formData.append("iou", iou.toString());
+                
+                chunk.forEach(img => {
+                    formData.append("files", img.file, img.name);
+                });
+
+                const res = await fetch(API_ENDPOINTS.INFERENCE.PREDICT_BATCH, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                    body: formData
+                });
+
+                if (!res.ok) throw new Error(`Batch inference failed for chunk ${i}`);
+                
+                const data = await res.json();
+                const newResults = [];
+
+                setTestImages(prev => {
+                    const updated = [...prev];
+                    data.results.forEach((resultData, idx) => {
+                        // Find matching image in original array
+                        const img = chunk[idx];
+                        const imgIdx = updated.findIndex(u => u.id === img.id);
+                        
+                        if (imgIdx !== -1) {
+                            const normalizedResult = {
+                                predictions: (resultData.detections || []).map(det => ({
+                                    class: det.class_name || det.class,
+                                    confidence: det.confidence,
+                                    bbox: det.bbox || [],
+                                    polygon: det.polygon || null
+                                }))
+                            };
+                            
+                            updated[imgIdx] = { 
+                                ...updated[imgIdx], 
+                                loading: false,
+                                result: normalizedResult
+                            };
+                            
+                            newResults.push({ imageId: img.id, result: normalizedResult });
+                        }
+                    });
+                    return updated;
+                });
+                
+                setResults(prev => [...prev, ...newResults]);
+                successCount += chunk.length;
+
+            } catch (error) {
+                console.error(error);
+                toast.error(error.message);
+                
+                // Unmark loading on failure for this chunk
+                setTestImages(prev => prev.map(img => 
+                    chunk.some(c => c.id === img.id) ? { ...img, loading: false } : img
+                ));
+            }
         }
         
         setLoading(false);
-        toast.success("Batch inference complete");
+        if (successCount > 0) {
+            toast.success(`Batch inference complete (${successCount} images)`);
+        }
     };
 
     const removeImage = (imageId) => {
