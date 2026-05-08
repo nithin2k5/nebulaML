@@ -299,53 +299,56 @@ export default function HomePage() {
         initial={{ y: -100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
-        className="fixed top-0 w-full z-50 border-b border-white/5 bg-black/40 backdrop-blur-2xl"
+        className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-5xl"
       >
-        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="flex items-center justify-between px-3 h-14 rounded-full border border-white/10 bg-black/60 backdrop-blur-2xl shadow-[0_20px_40px_rgba(0,0,0,0.5)]">
           <motion.div 
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="flex items-center gap-3 cursor-pointer group" 
+            className="flex items-center gap-2 cursor-pointer group pl-2" 
             onClick={() => router.push("/")}
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)] transition-all">
-              <Zap className="text-white text-lg drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)] transition-all">
+              <Zap className="text-white w-4 h-4 drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
             </div>
-            <span className="text-lg font-bold tracking-tight bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent group-hover:text-white transition-colors">
+            <span className="text-base font-bold tracking-tight bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent group-hover:text-white transition-colors">
               Nebula
             </span>
           </motion.div>
 
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-400">
-            {['Features', 'Workflow', 'Stats'].map((item) => (
-              <a key={item} href={`#${item.toLowerCase()}`} className="relative hover:text-white transition-colors group">
+          <nav className="hidden md:flex items-center bg-white/5 rounded-full px-1 py-1 border border-white/5">
+            {['Features', 'Workflow', 'Pricing'].map((item) => (
+              <a 
+                key={item} 
+                href={`#${item.toLowerCase()}`} 
+                className="relative px-4 py-1.5 text-sm font-medium text-gray-400 hover:text-white transition-colors rounded-full hover:bg-white/10"
+              >
                 {item}
-                <span className="absolute -bottom-1 left-0 w-0 h-px bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-300 group-hover:w-full" />
               </a>
             ))}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {user ? (
               <Button
                 onClick={() => router.push("/dashboard")}
-                className="bg-white text-black hover:bg-white/90 rounded-full px-6 font-semibold shadow-[0_0_20px_rgba(255,255,255,0.15)] transition-all hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] hover:-translate-y-0.5 h-9 text-sm"
+                className="bg-white text-black hover:bg-white/90 rounded-full px-5 font-semibold shadow-[0_0_20px_rgba(255,255,255,0.15)] transition-all hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] h-9 text-sm"
               >
                 Dashboard
                 <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
             ) : (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
                   onClick={() => router.push("/login")}
-                  className="text-gray-400 hover:text-white h-9 text-sm hover:bg-white/5"
+                  className="text-gray-400 hover:text-white h-9 text-sm rounded-full hover:bg-white/5"
                 >
                   Sign In
                 </Button>
                 <Button
                   onClick={() => router.push("/register")}
-                  className="bg-white text-black hover:bg-white/90 rounded-full px-5 font-semibold h-9 text-sm shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all hover:-translate-y-0.5"
+                  className="bg-white text-black hover:bg-white/90 rounded-full px-5 font-semibold h-9 text-sm shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all"
                 >
                   Get Started
                 </Button>
