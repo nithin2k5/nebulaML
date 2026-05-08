@@ -296,10 +296,10 @@ export default function HomePage() {
 
       {/* Header */}
       <motion.header 
-        initial={{ y: -100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
+        initial={{ y: -100, x: "-50%", opacity: 0 }}
+        animate={{ y: 0, x: "-50%", opacity: 1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
-        className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-5xl"
+        className="fixed top-6 left-1/2 z-50 w-[95%] max-w-5xl"
       >
         <div className="flex items-center justify-between px-3 h-14 rounded-full border border-white/10 bg-black/60 backdrop-blur-2xl shadow-[0_20px_40px_rgba(0,0,0,0.5)]">
           <motion.div 
