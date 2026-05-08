@@ -777,12 +777,26 @@ function AnnotationToolContent() {
       }
       setSelectedBoxIndex(clickedIndex);
       if (clickedIndex !== -1) {
-        setIsDrawing(true);
         const box = boxesRef.current[clickedIndex];
+        
+        // Check for vertex hits if it's a polygon/line
+        if (box.type === 'polygon' || box.type === 'line') {
+          const hitRadius = 12 * (scaleRef.current || 1);
+          for (let vi = 0; vi < box.points.length; vi++) {
+            const p = box.points[vi];
+            if (Math.hypot(x - p.x, y - p.y) < hitRadius) {
+              setIsDrawing(true);
+              setDragOffset({ type: 'vertex', index: vi, initialBox: { ...box } });
+              return;
+            }
+          }
+        }
+
+        setIsDrawing(true);
         if (!box.type || box.type === 'box' || box.type === 'joint') {
-          setDragOffset({ dx: x - box.x, dy: y - box.y });
+          setDragOffset({ type: 'move', dx: x - box.x, dy: y - box.y });
         } else if (box.type === 'polygon' || box.type === 'line') {
-          setDragOffset({ x, y }); // store initial click
+          setDragOffset({ type: 'move', x, y }); // store initial click
         }
       } else {
         setIsDrawing(false);
@@ -794,9 +808,9 @@ function AnnotationToolContent() {
     if (activeTool === 'ai') {
       // Check if clicking near a mask polygon vertex → start vertex drag
       if (aiMaskPolygonRef.current && aiSubTool !== 'box') {
-        const hitRadius = 10;
+        const hitRadius = 12 * (scaleRef.current || 1);
         const poly = aiMaskPolygonRef.current;
-        for (let vi = 0; vi < poly.length; vi += 3) {
+        for (let vi = 0; vi < poly.length; vi++) {
           if (Math.hypot(x - poly[vi].x, y - poly[vi].y) < hitRadius) {
             aiDragVertexIdxRef.current = vi;
             return;
@@ -938,17 +952,35 @@ function AnnotationToolContent() {
     if (activeTool === 'select' && isDrawing && selectedBoxIndex !== -1 && dragOffset) {
       const box = boxesRef.current[selectedBoxIndex];
       const newBoxes = [...boxesRef.current];
-      if (!box.type || box.type === 'box' || box.type === 'joint') {
-        newBoxes[selectedBoxIndex] = { ...box, x: x - dragOffset.dx, y: y - dragOffset.dy };
-      } else if ((box.type === 'polygon' || box.type === 'line') && dragOffset.x !== undefined) {
-        const dx = x - dragOffset.x;
-        const dy = y - dragOffset.y;
-        newBoxes[selectedBoxIndex] = {
-          ...box,
-          points: box.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
+      
+      if (dragOffset.type === 'vertex') {
+        const newPoints = [...box.points];
+        newPoints[dragOffset.index] = { x, y };
+        newBoxes[selectedBoxIndex] = { 
+          ...box, 
+          points: newPoints,
+          // Update bounding box
+          x: Math.min(...newPoints.map(p => p.x)),
+          y: Math.min(...newPoints.map(p => p.y)),
+          width: Math.max(...newPoints.map(p => p.x)) - Math.min(...newPoints.map(p => p.x)),
+          height: Math.max(...newPoints.map(p => p.y)) - Math.min(...newPoints.map(p => p.y))
         };
-        setDragOffset({ x, y });
+      } else if (dragOffset.type === 'move') {
+        if (!box.type || box.type === 'box' || box.type === 'joint') {
+          newBoxes[selectedBoxIndex] = { ...box, x: x - dragOffset.dx, y: y - dragOffset.dy };
+        } else if ((box.type === 'polygon' || box.type === 'line') && dragOffset.x !== undefined) {
+          const dx = x - dragOffset.x;
+          const dy = y - dragOffset.y;
+          newBoxes[selectedBoxIndex] = {
+            ...box,
+            points: box.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
+            x: box.x + dx,
+            y: box.y + dy
+          };
+          setDragOffset({ ...dragOffset, x, y });
+        }
       }
+      
       boxesRef.current = newBoxes;
       setBoxes(newBoxes);
       drawCanvas();
@@ -1227,6 +1259,17 @@ function AnnotationToolContent() {
               ctx.setLineDash([4 * scale, 4 * scale]);
               ctx.strokeRect(box.x, box.y, box.width, box.height);
               ctx.setLineDash([]);
+
+              // Draw vertices for selected polygon
+              box.points.forEach((p, idx) => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4 * scale, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                ctx.strokeStyle = color.stroke;
+                ctx.lineWidth = 1.5 * scale;
+                ctx.stroke();
+              });
             }
           }
         } else if (box.type === 'joint') {
@@ -1369,13 +1412,16 @@ function AnnotationToolContent() {
             ctx.stroke();
           }
 
-          // Vertex handles (every 3rd point) for drag editing
+          // Vertex handles for drag editing
           const dragIdx = aiDragVertexIdxRef.current;
-          for (let vi = 0; vi < maskPolygon.length; vi += 3) {
+          for (let vi = 0; vi < maskPolygon.length; vi++) {
             const vp = maskPolygon[vi];
+            // Show all dots if few, or every 2nd if many, to keep it "sharp" but usable
+            if (maskPolygon.length > 100 && vi % 2 !== 0 && dragIdx !== vi) continue;
+            
             ctx.beginPath();
-            ctx.arc(vp.x, vp.y, (dragIdx === vi ? 5 : 3.5) * scale, 0, Math.PI * 2);
-            ctx.fillStyle = dragIdx === vi ? '#f97316' : 'rgba(192, 132, 252, 0.9)';
+            ctx.arc(vp.x, vp.y, (dragIdx === vi ? 6 : 4) * scale, 0, Math.PI * 2);
+            ctx.fillStyle = dragIdx === vi ? '#f97316' : '#c084fc';
             ctx.fill();
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1 * scale;
