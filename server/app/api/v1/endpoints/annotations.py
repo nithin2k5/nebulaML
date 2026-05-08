@@ -586,6 +586,8 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
             import random
             random.shuffle(annotated_images)
             split_idx = int(len(annotated_images) * split_ratio)
+            if split_idx == 0 and len(annotated_images) > 0:
+                split_idx = 1
             train_images = annotated_images[:split_idx]
             val_images = annotated_images[split_idx:]
             test_images = []
@@ -626,10 +628,11 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
             return line
         
         for split_dir, images, split_name in splits:
-            if images:
+            if split_name in ["train", "val"] or images:
                 (split_dir / "images").mkdir(parents=True, exist_ok=True)
                 (split_dir / "labels").mkdir(parents=True, exist_ok=True)
-                
+            
+            if images:
                 for img in images:
                     src_img = dataset_dir / "images" / img["filename"]
                     dst_img = split_dir / "images" / img["filename"]

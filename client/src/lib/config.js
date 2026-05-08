@@ -64,6 +64,7 @@ export const API_ENDPOINTS = {
     },
     INFERENCE: {
         PREDICT: `${API_BASE_URL}/api/inference/predict`,
+        PREDICT_BATCH: `${API_BASE_URL}/api/inference/predict-batch`,
         LIST: `${API_BASE_URL}/api/inference/models`,
     },
     AUTH: {
@@ -77,6 +78,7 @@ export const API_ENDPOINTS = {
     },
     ACTIVE_LEARNING: {
         COLLECT: `${API_BASE_URL}/api/active-learning/collect`,
+        COLLECT_STATUS: (datasetId) => `${API_BASE_URL}/api/active-learning/collect-status/${datasetId}`,
         UNCERTAIN: (datasetId) => `${API_BASE_URL}/api/active-learning/uncertain/${datasetId}`,
         APPROVE: `${API_BASE_URL}/api/active-learning/approve`,
         REJECT: `${API_BASE_URL}/api/active-learning/reject`,

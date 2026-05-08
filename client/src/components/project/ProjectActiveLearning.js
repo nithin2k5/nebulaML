@@ -83,15 +83,44 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
 
             if (res.ok) {
                 const data = await res.json();
-                toast.success(`Found ${data.uncertain_count} uncertain images`);
-                fetchUncertain();
+                if (data.status === "processing") {
+                    toast.info("Scanning dataset in background...");
+                    
+                    const pollInterval = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(API_ENDPOINTS.ACTIVE_LEARNING.COLLECT_STATUS(dataset.id), {
+                                headers: { "Authorization": `Bearer ${token}` }
+                            });
+                            if (statusRes.ok) {
+                                const statusData = await statusRes.json();
+                                if (statusData.status === "completed") {
+                                    clearInterval(pollInterval);
+                                    toast.success(`Found ${statusData.uncertain_count} uncertain images`);
+                                    fetchUncertain();
+                                    setCollecting(false);
+                                } else if (statusData.status === "failed") {
+                                    clearInterval(pollInterval);
+                                    toast.error(statusData.error || "Collection failed");
+                                    setCollecting(false);
+                                }
+                            }
+                        } catch (e) {
+                            clearInterval(pollInterval);
+                            setCollecting(false);
+                        }
+                    }, 3000);
+                } else {
+                    toast.success(`Found ${data.uncertain_count} uncertain images`);
+                    fetchUncertain();
+                    setCollecting(false);
+                }
             } else {
                 const err = await res.json();
                 toast.error(err.detail || "Failed to collect predictions");
+                setCollecting(false);
             }
         } catch (e) {
             toast.error("Error: " + e.message);
-        } finally {
             setCollecting(false);
         }
     };
