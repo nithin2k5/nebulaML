@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Zap, ArrowRight, Database, Cpu, Image as ImageIcon, Activity,
-  CheckCircle, Box, Code, Star, Shield, TrendingUp, Github, Twitter, Mail, Layers, Command, ChevronDown, Plus
+  CheckCircle, Box, Code, Star, Shield, TrendingUp, Github, Twitter, Mail, Layers, Command, ChevronDown, Plus, Terminal as TerminalIcon
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
@@ -692,6 +692,59 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* Developer Experience / Terminal */}
+        <section className="py-32 relative overflow-hidden border-t border-white/5 bg-zinc-950">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(99,102,241,0.1),transparent_70%)]" />
+          <div className="container mx-auto px-6 relative z-10 flex flex-col md:flex-row items-center gap-16">
+            <div className="flex-1 space-y-8">
+              <h2 className="text-4xl md:text-5xl font-bold tracking-tight">Built for Developers.</h2>
+              <p className="text-gray-400 text-lg font-light leading-relaxed">
+                Interact with NebulaML using our robust CLI or Python SDK. Automate your entire pipeline from dataset ingestion to training without leaving your terminal.
+              </p>
+              <div className="flex gap-4">
+                <Button className="rounded-full bg-white text-black hover:bg-gray-200">
+                  <Code className="w-4 h-4 mr-2" /> Read Docs
+                </Button>
+                <Button variant="outline" className="rounded-full border-white/10 text-white hover:bg-white/5 bg-black/50">
+                  <TerminalIcon className="w-4 h-4 mr-2" /> CLI Reference
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 w-full relative">
+              <div className="absolute -inset-4 bg-gradient-to-r from-indigo-500/30 to-purple-500/30 blur-2xl opacity-50" />
+              <div className="relative rounded-2xl bg-[#0a0a0a] border border-white/10 overflow-hidden shadow-2xl">
+                {/* Terminal Header */}
+                <div className="h-10 border-b border-white/10 bg-white/5 flex items-center px-4 gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500/80" />
+                  <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                  <div className="w-3 h-3 rounded-full bg-green-500/80" />
+                  <div className="mx-auto text-xs font-mono text-gray-500">nebula-cli — bash</div>
+                </div>
+                {/* Terminal Body */}
+                <div className="p-6 font-mono text-sm space-y-4">
+                  <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }}>
+                    <span className="text-emerald-400">~</span> <span className="text-white">$ pip install nebulaml</span>
+                  </motion.div>
+                  <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 0.5 }} className="text-gray-500">
+                    Successfully installed nebulaml-2.1.0
+                  </motion.div>
+                  <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 1.2 }}>
+                    <span className="text-emerald-400">~</span> <span className="text-white">$ nebula train --dataset vehicles-v2 --epochs 100</span>
+                  </motion.div>
+                  <motion.div initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 2 }}>
+                    <span className="text-indigo-400">Initializing cluster...</span><br/>
+                    <span className="text-blue-400">Downloading dataset... 100%</span><br/>
+                    <span className="text-purple-400">Starting YOLOv8 training on 4x A100...</span><br/>
+                    <span className="text-white">Epoch 1/100 [====&gt;................] 20% - loss: 0.84</span>
+                  </motion.div>
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: [0, 1, 0] }} transition={{ delay: 2.5, repeat: Infinity, duration: 0.8 }} className="w-2 h-4 bg-white/80 inline-block align-middle" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Integrations & Export Targets */}
         <section className="py-24 border-t border-white/5 relative overflow-hidden bg-black">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(99,102,241,0.05),transparent_70%)]" />
@@ -700,17 +753,30 @@ export default function HomePage() {
               <p className="text-sm font-semibold tracking-widest text-indigo-400 uppercase mb-4">Export Anywhere</p>
               <h2 className="text-3xl md:text-5xl font-bold tracking-tight">Deploy to Any Architecture</h2>
             </div>
-            <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16 opacity-60 hover:opacity-100 transition-opacity duration-700">
-              {["PyTorch", "ONNX", "TensorRT", "CoreML", "TFLite", "OpenVINO"].map((target, idx) => (
-                <motion.div 
-                  key={idx}
-                  whileHover={{ scale: 1.1, opacity: 1 }}
-                  className="text-2xl md:text-4xl font-black tracking-tighter text-gray-500 hover:text-white transition-colors cursor-default"
-                >
-                  {target}
-                </motion.div>
+          </div>
+          
+          <div className="relative flex overflow-x-hidden group max-w-[100vw]">
+            <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-black to-transparent z-10" />
+            <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-black to-transparent z-10" />
+            
+            <motion.div 
+              className="flex whitespace-nowrap items-center opacity-60 hover:opacity-100 transition-opacity duration-500 min-w-max"
+              animate={{ x: ["0%", "-50%"] }}
+              transition={{ ease: "linear", duration: 30, repeat: Infinity }}
+            >
+              {[...Array(2)].map((_, i) => (
+                <div key={i} className="flex space-x-16 px-8 items-center min-w-max">
+                  {["PyTorch", "ONNX", "TensorRT", "CoreML", "TFLite", "OpenVINO", "NVIDIA Triton", "AWS SageMaker", "GCP Vertex AI", "Hugging Face"].map((target, idx) => (
+                    <div 
+                      key={idx}
+                      className="text-2xl md:text-5xl font-black tracking-tighter text-gray-500 hover:text-white transition-colors cursor-default"
+                    >
+                      {target}
+                    </div>
+                  ))}
+                </div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </section>
 
