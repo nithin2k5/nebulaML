@@ -267,6 +267,14 @@ export default function TrainingTab() {
                 <SelectItem value="yolov8s.pt">YOLOv8 Small</SelectItem>
                 <SelectItem value="yolov8m.pt">YOLOv8 Medium</SelectItem>
                 <SelectItem value="yolov8l.pt">YOLOv8 Large</SelectItem>
+                <SelectItem value="yolov9t.pt">YOLOv9 Tiny</SelectItem>
+                <SelectItem value="yolov9s.pt">YOLOv9 Small</SelectItem>
+                <SelectItem value="yolov9c.pt">YOLOv9 Compact</SelectItem>
+                <SelectItem value="yolov9e.pt">YOLOv9 Extended</SelectItem>
+                <SelectItem value="yolov10n.pt">YOLOv10 Nano</SelectItem>
+                <SelectItem value="yolov10s.pt">YOLOv10 Small</SelectItem>
+                <SelectItem value="yolo11n.pt">YOLO11 Nano</SelectItem>
+                <SelectItem value="yolo11s.pt">YOLO11 Small</SelectItem>
               </SelectContent>
             </Select>
           </div>
