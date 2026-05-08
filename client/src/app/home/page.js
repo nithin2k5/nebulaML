@@ -541,7 +541,7 @@ export default function HomePage() {
               </div>
               <div className="flex-1 w-full max-w-xl">
                 <SpotlightCard className="aspect-video relative bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden p-0 flex items-center justify-center">
-                  <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1494205577727-d32e58564756?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-40"></div>
+                  <img src="https://images.unsplash.com/photo-1580273916550-e323be2ae537?auto=format&fit=crop&w=1000&q=80" alt="Demo Background" className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />
                   
                   {/* Faux Bounding Boxes */}
                   <motion.div 
