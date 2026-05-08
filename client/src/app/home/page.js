@@ -463,6 +463,7 @@ export default function HomePage() {
                 <div className="flex items-center gap-2 text-xl font-black tracking-tighter"><Layers className="w-6 h-6"/> Anthropic</div>
               </div>
             </motion.div>
+
             {/* Hero 3D Interactive Card */}
             <motion.div 
               initial={{ y: 100, opacity: 0, rotateX: 20 }}
