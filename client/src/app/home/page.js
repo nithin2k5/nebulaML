@@ -359,7 +359,7 @@ export default function HomePage() {
         {/* Hero Section */}
         <section className="container mx-auto px-6 pb-24 lg:pb-36 relative min-h-[80vh] flex flex-col justify-center">
           <motion.div 
-            style={{ y: yHero, opacity: opacityHero }}
+            style={{ y: yHero }}
             className="flex flex-col items-center text-center max-w-5xl mx-auto space-y-8"
           >
             <motion.div 
@@ -510,6 +510,70 @@ export default function HomePage() {
               </motion.div>
             </motion.div>
           </motion.div>
+        </section>
+
+        {/* Interactive Demo Section */}
+        <section className="py-32 border-t border-white/5 relative bg-black overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(16,185,129,0.05),transparent_70%)]" />
+          <div className="container mx-auto px-6 relative z-10">
+            <div className="flex flex-col md:flex-row items-center gap-16">
+              <div className="flex-1 space-y-8">
+                <Badge variant="outline" className="border-emerald-500/30 text-emerald-400 bg-emerald-500/10">Real-time Inference</Badge>
+                <h2 className="text-4xl md:text-5xl font-bold tracking-tight">See it in action. <br/> <span className="text-gray-500">Live edge deployment.</span></h2>
+                <p className="text-gray-400 text-lg font-light leading-relaxed">
+                  Our optimized ONNX runtime allows you to run your deployed YOLO models directly in the browser or at the edge with sub-millisecond latency. 
+                  Experience the precision of foundation models fine-tuned to your custom datasets.
+                </p>
+                <ul className="space-y-4">
+                  {[
+                    "Zero server latency for edge devices.",
+                    "WebAssembly & WebGL hardware acceleration.",
+                    "Dynamic thresholding and NMS."
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-center gap-3 text-gray-300">
+                      <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                        <CheckCircle className="w-3 h-3 text-emerald-400" />
+                      </div>
+                      <span className="font-light">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="flex-1 w-full max-w-xl">
+                <SpotlightCard className="aspect-video relative bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden p-0 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1494205577727-d32e58564756?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-40"></div>
+                  
+                  {/* Faux Bounding Boxes */}
+                  <motion.div 
+                    initial={{ width: 0, height: 0, opacity: 0 }}
+                    whileInView={{ width: "40%", height: "50%", opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.8, delay: 0.5, type: "spring" }}
+                    className="absolute top-[20%] left-[10%] border-2 border-emerald-400 bg-emerald-400/10 z-10 flex items-start"
+                  >
+                    <span className="bg-emerald-400 text-black text-[10px] font-bold px-2 py-0.5">Vehicle 0.98</span>
+                  </motion.div>
+                  
+                  <motion.div 
+                    initial={{ width: 0, height: 0, opacity: 0 }}
+                    whileInView={{ width: "25%", height: "40%", opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.8, delay: 0.8, type: "spring" }}
+                    className="absolute top-[40%] right-[15%] border-2 border-indigo-400 bg-indigo-400/10 z-10 flex items-start"
+                  >
+                    <span className="bg-indigo-400 text-black text-[10px] font-bold px-2 py-0.5">Pedestrian 0.92</span>
+                  </motion.div>
+                  
+                  {/* Scanner line over demo */}
+                  <motion.div 
+                    animate={{ left: ["0%", "100%", "0%"] }}
+                    transition={{ duration: 4, ease: "linear", repeat: Infinity }}
+                    className="absolute top-0 bottom-0 w-px bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.8)] z-20"
+                  />
+                </SpotlightCard>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* Features Bento Grid */}
@@ -671,6 +735,64 @@ export default function HomePage() {
                     <stat.icon className="w-4 h-4 text-indigo-400" />
                     <span className="text-sm font-medium tracking-wide">{stat.label}</span>
                   </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing Section */}
+        <section id="pricing" className="py-32 relative overflow-hidden bg-black border-t border-white/5">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(99,102,241,0.05),transparent_60%)]" />
+          <div className="container mx-auto px-6 relative z-10">
+            <motion.div 
+              initial={{ y: 40, opacity: 0 }}
+              whileInView={{ y: 0, opacity: 1 }}
+              viewport={{ once: true }}
+              className="text-center mb-20"
+            >
+              <h2 className="text-4xl md:text-6xl font-bold mb-4 tracking-tight">Simple, Transparent Pricing</h2>
+              <p className="text-gray-400 max-w-2xl mx-auto text-lg md:text-xl font-light">Scale your vision without the surprise bills.</p>
+            </motion.div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+              {[
+                { name: "Starter", price: "Free", desc: "For personal projects and exploration.", features: ["3 Projects", "10,000 Annotations", "Community Support", "Basic Models"], button: "Start Free", popular: false },
+                { name: "Pro", price: "$49", period: "/mo", desc: "For professionals building serious ML.", features: ["Unlimited Projects", "100,000 Annotations", "Priority Support", "Advanced Foundation Models", "Custom Exports"], button: "Get Pro", popular: true },
+                { name: "Enterprise", price: "Custom", desc: "For teams deploying at massive scale.", features: ["Unlimited Everything", "Dedicated Account Manager", "On-Premises Options", "SLA Guarantees", "Custom Model Integration"], button: "Contact Sales", popular: false }
+              ].map((tier, i) => (
+                <motion.div 
+                  key={i}
+                  initial={{ y: 50, opacity: 0 }}
+                  whileInView={{ y: 0, opacity: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.1, duration: 0.5 }}
+                  className={cn("relative p-8 rounded-3xl border flex flex-col h-full bg-zinc-950 transition-all", tier.popular ? "border-indigo-500 shadow-[0_0_30px_rgba(99,102,241,0.15)] scale-[1.02] md:scale-105 z-10" : "border-white/10 hover:border-white/20")}
+                >
+                  {tier.popular && (
+                    <div className="absolute -top-4 left-1/2 -translate-x-1/2">
+                      <span className="bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider py-1 px-4 rounded-full shadow-lg">Most Popular</span>
+                    </div>
+                  )}
+                  <h3 className="text-2xl font-bold mb-2">{tier.name}</h3>
+                  <p className="text-gray-400 text-sm mb-6 h-10">{tier.desc}</p>
+                  <div className="mb-8">
+                    <span className="text-5xl font-black">{tier.price}</span>
+                    {tier.period && <span className="text-gray-400">{tier.period}</span>}
+                  </div>
+                  <ul className="space-y-4 mb-8 flex-1">
+                    {tier.features.map((feature, fIdx) => (
+                      <li key={fIdx} className="flex items-center gap-3 text-gray-300">
+                        <CheckCircle className="w-5 h-5 text-indigo-400 shrink-0" />
+                        <span className="font-light">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Button 
+                    className={cn("w-full h-12 rounded-xl font-semibold transition-all", tier.popular ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40" : "bg-white/5 hover:bg-white/10 text-white border border-white/10")}
+                  >
+                    {tier.button}
+                  </Button>
                 </motion.div>
               ))}
             </div>
