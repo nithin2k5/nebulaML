@@ -288,9 +288,21 @@ export default function HomePage() {
         <canvas ref={canvasRef} className="absolute inset-0 opacity-40 mix-blend-screen" />
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
         <motion.div style={{ y: yBg }} className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-[-20%] left-[20%] w-[800px] h-[800px] rounded-full bg-indigo-600/10 blur-[150px] animate-pulse-glow" />
-          <div className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] rounded-full bg-violet-600/10 blur-[150px]" />
-          <div className="absolute top-[40%] left-[-10%] w-[500px] h-[500px] rounded-full bg-blue-600/10 blur-[150px]" />
+          <motion.div 
+            animate={{ scale: [1, 1.2, 1], x: [0, 50, 0], y: [0, 30, 0] }}
+            transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-[-20%] left-[20%] w-[800px] h-[800px] rounded-full bg-indigo-600/15 blur-[120px]" 
+          />
+          <motion.div 
+            animate={{ scale: [1, 1.3, 1], x: [0, -40, 0], y: [0, -50, 0] }}
+            transition={{ duration: 20, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+            className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] rounded-full bg-violet-600/15 blur-[120px]" 
+          />
+          <motion.div 
+            animate={{ scale: [1, 1.1, 1], x: [0, 30, 0], y: [0, 40, 0] }}
+            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+            className="absolute top-[40%] left-[-10%] w-[500px] h-[500px] rounded-full bg-emerald-600/10 blur-[120px]" 
+          />
         </motion.div>
       </div>
 
@@ -389,9 +401,13 @@ export default function HomePage() {
               <br className="hidden sm:block" />
               <span className="relative inline-block mt-2">
                 <span className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 blur-2xl opacity-40 rounded-full" />
-                <span className="relative bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]">
+                <motion.span 
+                  animate={{ backgroundPosition: ["0% center", "200% center"] }}
+                  transition={{ repeat: Infinity, duration: 8, ease: "linear" }}
+                  className="relative bg-[linear-gradient(110deg,#818cf8,45%,#f472b6,55%,#818cf8)] bg-[length:200%_auto] bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]"
+                >
                   Without Limits
-                </span>
+                </motion.span>
               </span>
             </motion.h1>
 
@@ -432,6 +448,21 @@ export default function HomePage() {
               </Button>
             </motion.div>
 
+            {/* Trusted By Banner */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1, duration: 0.8 }}
+              className="mt-16 pt-8 border-t border-white/5 w-full max-w-4xl mx-auto flex flex-col items-center gap-6"
+            >
+              <p className="text-xs font-semibold tracking-widest uppercase text-gray-500">Trusted by innovative teams worldwide</p>
+              <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16 opacity-50 grayscale hover:grayscale-0 transition-all duration-700">
+                <div className="flex items-center gap-2 text-xl font-black tracking-tighter"><div className="w-6 h-6 bg-white rounded-md flex items-center justify-center text-black text-xs">▲</div> Vercel</div>
+                <div className="flex items-center gap-2 text-xl font-black tracking-tighter"><Box className="w-6 h-6"/> Scale AI</div>
+                <div className="flex items-center gap-2 text-xl font-black tracking-tighter"><Command className="w-6 h-6"/> Linear</div>
+                <div className="flex items-center gap-2 text-xl font-black tracking-tighter"><Layers className="w-6 h-6"/> Anthropic</div>
+              </div>
+            </motion.div>
             {/* Hero 3D Interactive Card */}
             <motion.div 
               initial={{ y: 100, opacity: 0, rotateX: 20 }}
