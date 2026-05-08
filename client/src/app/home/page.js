@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Zap, ArrowRight, Database, Cpu, Image as ImageIcon, Activity,
-  CheckCircle, Box, Code, Star, Shield, TrendingUp, Github, Twitter, Mail, Layers, Command
+  CheckCircle, Box, Code, Star, Shield, TrendingUp, Github, Twitter, Mail, Layers, Command, ChevronDown, Plus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
@@ -55,6 +55,40 @@ function SpotlightCard({ children, className }) {
         }}
       />
       <div className="relative z-20 h-full">{children}</div>
+    </div>
+  );
+}
+
+function FAQItem({ question, answer }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className="border-b border-white/5 last:border-0">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full py-6 flex items-center justify-between text-left focus:outline-none group"
+      >
+        <span className="text-lg font-medium text-white group-hover:text-indigo-400 transition-colors">{question}</span>
+        <motion.div
+          animate={{ rotate: isOpen ? 45 : 0 }}
+          transition={{ duration: 0.3, ease: "anticipate" }}
+          className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:border-indigo-500/30"
+        >
+          <Plus className="w-4 h-4 text-gray-400 group-hover:text-indigo-400" />
+        </motion.div>
+      </button>
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "anticipate" }}
+            className="overflow-hidden"
+          >
+            <p className="pb-6 text-gray-400 leading-relaxed font-light">{answer}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -594,6 +628,28 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* Integrations & Export Targets */}
+        <section className="py-24 border-t border-white/5 relative overflow-hidden bg-black">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(99,102,241,0.05),transparent_70%)]" />
+          <div className="container mx-auto px-6 relative z-10">
+            <div className="text-center mb-16">
+              <p className="text-sm font-semibold tracking-widest text-indigo-400 uppercase mb-4">Export Anywhere</p>
+              <h2 className="text-3xl md:text-5xl font-bold tracking-tight">Deploy to Any Architecture</h2>
+            </div>
+            <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16 opacity-60 hover:opacity-100 transition-opacity duration-700">
+              {["PyTorch", "ONNX", "TensorRT", "CoreML", "TFLite", "OpenVINO"].map((target, idx) => (
+                <motion.div 
+                  key={idx}
+                  whileHover={{ scale: 1.1, opacity: 1 }}
+                  className="text-2xl md:text-4xl font-black tracking-tighter text-gray-500 hover:text-white transition-colors cursor-default"
+                >
+                  {target}
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* Stats Section */}
         <section id="stats-section" className="py-32 relative overflow-hidden border-t border-white/5 bg-black">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(79,70,229,0.1),transparent_50%)]"></div>
@@ -617,6 +673,40 @@ export default function HomePage() {
                   </div>
                 </motion.div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ Section */}
+        <section className="py-32 border-t border-white/5 relative bg-zinc-950">
+          <div className="container mx-auto px-6 max-w-4xl relative z-10">
+            <motion.div 
+              initial={{ y: 40, opacity: 0 }}
+              whileInView={{ y: 0, opacity: 1 }}
+              viewport={{ once: true }}
+              className="text-center mb-16"
+            >
+              <h2 className="text-3xl md:text-5xl font-bold tracking-tight mb-4">Frequently Asked Questions</h2>
+              <p className="text-gray-400 font-light">Everything you need to know about the platform.</p>
+            </motion.div>
+            
+            <div className="space-y-2">
+              <FAQItem 
+                question="What models does NebulaML support?" 
+                answer="We currently provide native, zero-config support for the entire Ultralytics YOLO ecosystem (v8, v9, v10, v11) for object detection, segmentation, and classification." 
+              />
+              <FAQItem 
+                question="Can I export my datasets and models?" 
+                answer="Yes. You maintain full ownership of your data. Datasets can be exported in standard YOLO format at any time. Trained models can be downloaded as PyTorch weights (.pt) or exported to ONNX, TensorRT, and CoreML." 
+              />
+              <FAQItem 
+                question="How does the auto-annotation work?" 
+                answer="We integrate with advanced foundation models to automatically propose bounding boxes and segmentation masks for your uploaded images, which you can quickly accept or adjust." 
+              />
+              <FAQItem 
+                question="Do I need my own GPU?" 
+                answer="No. Our distributed infrastructure handles all the training workload. You just click 'Train' and we provision the necessary A100/H100 instances behind the scenes." 
+              />
             </div>
           </div>
         </section>
