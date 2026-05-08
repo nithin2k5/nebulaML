@@ -388,8 +388,8 @@ export default function HomePage() {
               Build Computer Vision{" "}
               <br className="hidden sm:block" />
               <span className="relative inline-block mt-2">
-                <span className="absolute -inset-2 bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-pink-500/20 blur-xl rounded-full opacity-0 animate-pulse-glow" />
-                <span className="relative bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent" style={{ textShadow: '0 0 40px rgba(99,102,241,0.4)' }}>
+                <span className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 blur-2xl opacity-40 rounded-full" />
+                <span className="relative bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]">
                   Without Limits
                 </span>
               </span>
