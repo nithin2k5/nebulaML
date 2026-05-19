@@ -326,7 +326,7 @@ export default function WorkflowGuide() {
                 <div className="text-lg shrink-0 mt-0.5">💡</div>
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">Analogy</div>
-                  <p className="text-sm text-gray-300 italic">"{stage.analogy}"</p>
+                  <p className="text-sm text-gray-300 italic">&ldquo;{stage.analogy}&rdquo;</p>
                 </div>
               </div>
 

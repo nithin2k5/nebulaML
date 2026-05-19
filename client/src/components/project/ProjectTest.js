@@ -559,7 +559,7 @@ export default function ProjectTest({ dataset }) {
                             <ImageIcon className="w-12 h-12 text-muted-foreground mb-4" />
                             <h3 className="font-semibold text-lg mb-2">No Test Images</h3>
                             <p className="text-sm text-muted-foreground mb-4 max-w-md">
-                                Upload images to test your trained model's performance and validate predictions
+                                Upload images to test your trained model&apos;s performance and validate predictions
                             </p>
                             <Button onClick={() => fileInputRef.current?.click()}>
                                 <Upload className="w-4 h-4 mr-2" />
