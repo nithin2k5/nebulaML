@@ -532,6 +532,81 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
                     img["split"] = split
                 break
     
+    # ── Auto-retrain trigger ─────────────────────────────────────────────
+    # Runs in the background so annotation save stays fast for the caller
+    try:
+        from app.services.database import AutoRetrainConfigService
+        new_count = AutoRetrainConfigService.increment_annotation_count(dataset_id)
+        if new_count > 0:
+            cfg = AutoRetrainConfigService.get_config(dataset_id)
+            if cfg.get("enabled") and new_count >= cfg.get("min_new_annotations", 50):
+                logger.info(
+                    f"Auto-retrain threshold reached for dataset {dataset_id} "
+                    f"({new_count}/{cfg['min_new_annotations']}). Triggering training."
+                )
+                AutoRetrainConfigService.reset_annotation_count(dataset_id)
+                # Fire the export-and-train pipeline via an internal async background task
+                # We defer to the training router's helper rather than duplicating logic
+                import asyncio
+                from app.api.v1.endpoints import training as _training_mod
+                from app.services.trainer import YOLOTrainer
+                # Build a minimal config using defaults; can be customised later via the UI
+                from app.api.v1.endpoints.training import (
+                    ExportAndTrainRequest, TrainingConfig, run_training,
+                    training_jobs, _persist_job, MAX_CONCURRENT_JOBS
+                )
+                active_count = sum(
+                    1 for j in training_jobs.values()
+                    if j.get("status") in ("running", "pending")
+                )
+                if active_count < MAX_CONCURRENT_JOBS:
+                    import uuid
+                    from datetime import datetime
+                    from app.services.versioning import VersioningEngine
+                    from app.services.database import DatasetVersionService
+                    try:
+                        auto_config = TrainingConfig(
+                            epochs=50, batch_size=16, img_size=640,
+                            model_name="yolov8n.pt", patience=20, strict_epochs=False
+                        )
+                        engine = VersioningEngine()
+                        versions = DatasetVersionService.list_dataset_versions(dataset_id)
+                        version_num = len(versions) + 1
+                        new_version_id = engine.generate_version(
+                            dataset_id=dataset_id,
+                            name=f"Auto-Retrain v{version_num}",
+                            preprocessing={}, augmentations={}
+                        )
+                        if new_version_id:
+                            version = DatasetVersionService.get_version(new_version_id)
+                            if version and version.get("yaml_path"):
+                                job_id = str(uuid.uuid4())
+                                training_jobs[job_id] = {
+                                    "status": "pending",
+                                    "config": auto_config.dict(),
+                                    "progress": 0,
+                                    "dataset_id": dataset_id,
+                                    "version_id": new_version_id,
+                                    "created_at": datetime.now().isoformat(),
+                                    "user_id": current_user["id"],
+                                    "cancel_requested": False,
+                                    "auto_triggered": True,
+                                }
+                                _persist_job(job_id)
+                                asyncio.ensure_future(
+                                    run_training(job_id, version["yaml_path"], auto_config)
+                                )
+                                logger.info(f"Auto-retrain job {job_id} queued for dataset {dataset_id}")
+                    except Exception as train_err:
+                        logger.error(f"Auto-retrain setup failed: {train_err}")
+                else:
+                    logger.info(
+                        f"Auto-retrain skipped for {dataset_id}: queue full ({active_count}/{MAX_CONCURRENT_JOBS})"
+                    )
+    except Exception as ar_err:
+        # Never fail the annotation save because of auto-retrain errors
+        logger.warning(f"Auto-retrain check failed (non-fatal): {ar_err}")
+
     return JSONResponse(content={
         "success": True,
         "annotation_id": annotation_id,
@@ -737,6 +812,99 @@ val: val/images
         logger.error(f"Export task failed: {str(e)}")
         export_jobs[job_id]["status"] = "failed"
         export_jobs[job_id]["error"] = str(e)
+
+
+@router.post("/datasets/{dataset_id}/split")
+async def split_dataset(
+    dataset_id: str,
+    request: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Automatically re-balance dataset images into Train/Val/Test splits using stratified sampling.
+    """
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+        
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "editor")
+
+    train_ratio = request.get("train", 0.7)
+    val_ratio = request.get("val", 0.2)
+    test_ratio = request.get("test", 0.1)
+    
+    # Normalize if they don't sum to 1.0 (with a small tolerance)
+    total = train_ratio + val_ratio + test_ratio
+    if abs(total - 1.0) > 0.01:
+        if total == 0:
+            train_ratio, val_ratio, test_ratio = 0.7, 0.2, 0.1
+        else:
+            train_ratio /= total
+            val_ratio /= total
+            test_ratio /= total
+
+    # Fetch images and annotations
+    images = DatasetService.get_dataset_images(dataset_id)
+    annotations = {ann['image_id']: ann['boxes'] for ann in AnnotationService.get_all_dataset_annotations(dataset_id)}
+    
+    # Merge annotations into images for the splitter
+    for img in images:
+        img['annotations'] = annotations.get(img['id'], [])
+        
+    # Perform stratified split
+    from utils.dataset_utils import split_dataset_stratified
+    splits = split_dataset_stratified(
+        images=images,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio
+    )
+    
+    # Update DB and memory cache
+    from app.services.database import get_db_connection
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+        
+    try:
+        cursor = connection.cursor()
+        
+        # We can optimize this by updating in batches if there are many images
+        for split_name, split_imgs in splits.items():
+            for img in split_imgs:
+                cursor.execute("""
+                    UPDATE dataset_images SET split = %s WHERE id = %s AND dataset_id = %s
+                """, (split_name, img['id'], dataset_id))
+                
+                # Update memory cache
+                if dataset_id in datasets_db:
+                    for mem_img in datasets_db[dataset_id].get("images", []):
+                        if mem_img["id"] == img['id']:
+                            mem_img["split"] = split_name
+                            break
+                            
+        connection.commit()
+        
+        cursor.execute("UPDATE datasets SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (dataset_id,))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Successfully split dataset: {len(splits['train'])} train, {len(splits['val'])} val, {len(splits['test'])} test",
+            "counts": {
+                "train": len(splits.get('train', [])),
+                "val": len(splits.get('val', [])),
+                "test": len(splits.get('test', []))
+            }
+        })
+    except Exception as e:
+        if connection:
+            connection.close()
+        logger.error(f"Error splitting dataset: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to apply splits: {str(e)}")
 
 
 @router.get("/datasets/{dataset_id}/export-status/{job_id}")

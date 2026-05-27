@@ -19,7 +19,7 @@ import shutil
 # Import trainer
 from app.services.trainer import YOLOTrainer
 from app.services.dataset_analyzer import DatasetAnalyzer
-from app.services.database import DatasetService, DatasetVersionService, TrainingJobService
+from app.services.database import DatasetService, DatasetVersionService, TrainingJobService, AutoRetrainConfigService
 from app.services.versioning import VersioningEngine
 from app.api.v1.endpoints.auth import get_current_user
 from utils.dataset_utils import split_dataset_stratified
@@ -37,6 +37,16 @@ def _ensure_jobs_loaded():
     if not _jobs_loaded:
         try:
             persisted = TrainingJobService.load_all_jobs()
+            # Mark any jobs that were left in 'running'/'pending' state as 'failed'
+            # — they were interrupted by a server restart and will never complete.
+            for jid, jdata in persisted.items():
+                if jdata.get("status") in ("running", "pending"):
+                    jdata["status"] = "failed"
+                    jdata["error"] = "Server restarted while job was in progress"
+                    try:
+                        TrainingJobService.upsert_job(jid, jdata)
+                    except Exception:
+                        pass
             training_jobs.update(persisted)
             _jobs_loaded = True
             logger.info(f"Loaded {len(persisted)} training jobs from DB")
@@ -45,8 +55,21 @@ def _ensure_jobs_loaded():
             _jobs_loaded = True
 
 def _persist_job(job_id: str):
+    """Persist full job state to DB — includes extended fields beyond the base schema."""
     try:
-        TrainingJobService.upsert_job(job_id, training_jobs[job_id])
+        job = training_jobs[job_id]
+        # Build an enriched data dict so the DB load can restore all runtime fields
+        enriched = dict(job)
+        # Pack extended fields that the base upsert stores in the results JSON blob
+        enriched.setdefault("results", {
+            "metrics": job.get("metrics", {}),
+            "model_path": job.get("model_path", ""),
+            "per_class_metrics": job.get("per_class_metrics", []),
+            "confusion_matrix_path": job.get("confusion_matrix_path"),
+            "current_epoch": job.get("current_epoch", 0),
+            "version_id": job.get("version_id"),
+        })
+        TrainingJobService.upsert_job(job_id, enriched)
     except Exception as e:
         logger.warning(f"Could not persist job {job_id}: {e}")
 
@@ -731,17 +754,15 @@ async def get_per_class_metrics(job_id: str):
 @router.post("/auto-retrain-config")
 async def set_auto_retrain_config(config: AutoRetrainConfig):
     """
-    Configure auto-retrain triggers for a dataset.
+    Configure auto-retrain triggers for a dataset. Persisted to MySQL.
     """
-    auto_retrain_configs[config.dataset_id] = {
-        "enabled": config.enabled,
-        "min_new_annotations": config.min_new_annotations,
-        "annotations_since_last_train": 0
-    }
-    return {
-        "success": True,
-        "config": auto_retrain_configs[config.dataset_id]
-    }
+    AutoRetrainConfigService.upsert_config(
+        dataset_id=config.dataset_id,
+        enabled=config.enabled,
+        min_new_annotations=config.min_new_annotations,
+    )
+    saved = AutoRetrainConfigService.get_config(config.dataset_id)
+    return {"success": True, "config": saved}
 
 
 @router.get("/auto-retrain-config/{dataset_id}")
@@ -749,11 +770,7 @@ async def get_auto_retrain_config(dataset_id: str):
     """
     Get auto-retrain configuration for a dataset.
     """
-    config = auto_retrain_configs.get(dataset_id, {
-        "enabled": False,
-        "min_new_annotations": 50,
-        "annotations_since_last_train": 0
-    })
+    config = AutoRetrainConfigService.get_config(dataset_id)
     return {"success": True, "config": config}
 
 

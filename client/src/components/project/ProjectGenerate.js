@@ -27,6 +27,9 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
     const [qualityCheck, setQualityCheck] = useState(null);
     const [qualityLoading, setQualityLoading] = useState(false);
 
+    const [splitRatios, setSplitRatios] = useState({ train: 70, val: 20, test: 10 });
+    const [isSplitting, setIsSplitting] = useState(false);
+
     useEffect(() => {
         if (dataset?.id) fetchQualityCheck();
     }, [dataset?.id]);
@@ -40,6 +43,40 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
             if (res.ok) setQualityCheck(await res.json());
         } catch(e) { /* non-critical */ }
         finally { setQualityLoading(false); }
+    };
+
+    const handleSplit = async () => {
+        const total = splitRatios.train + splitRatios.val + splitRatios.test;
+        if (total !== 100) {
+            return toast.error("Split percentages must sum up to exactly 100%");
+        }
+
+        setIsSplitting(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/annotations/datasets/${dataset.id}/split`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    train: splitRatios.train / 100,
+                    val: splitRatios.val / 100,
+                    test: splitRatios.test / 100
+                })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                toast.success(data.message);
+                if (onGenerate) onGenerate(); // Refreshes stats
+            } else {
+                toast.error(data.detail || "Failed to split dataset");
+            }
+        } catch (e) {
+            toast.error("Error: " + e.message);
+        } finally {
+            setIsSplitting(false);
+        }
     };
 
     const handleGenerate = async () => {
@@ -217,6 +254,70 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                     )}
                 </div>
             )}
+
+            {/* Dataset Split */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Dataset Split</CardTitle>
+                    <CardDescription>Re-balance your dataset into Train, Val, and Test sets using stratified sampling to preserve class distribution.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    <div className="grid grid-cols-3 gap-4 mb-2">
+                        <div className="space-y-2">
+                            <Label>Train (%)</Label>
+                            <input 
+                                type="number" 
+                                min="0" max="100" 
+                                value={splitRatios.train}
+                                onChange={(e) => setSplitRatios(s => ({ ...s, train: parseInt(e.target.value) || 0 }))}
+                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Valid (%)</Label>
+                            <input 
+                                type="number" 
+                                min="0" max="100" 
+                                value={splitRatios.val}
+                                onChange={(e) => setSplitRatios(s => ({ ...s, val: parseInt(e.target.value) || 0 }))}
+                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Test (%)</Label>
+                            <input 
+                                type="number" 
+                                min="0" max="100" 
+                                value={splitRatios.test}
+                                onChange={(e) => setSplitRatios(s => ({ ...s, test: parseInt(e.target.value) || 0 }))}
+                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex h-4 w-full rounded-full overflow-hidden bg-muted">
+                        <div className="bg-indigo-500 transition-all" style={{ width: `${splitRatios.train}%` }} title={`Train: ${splitRatios.train}%`} />
+                        <div className="bg-violet-500 transition-all" style={{ width: `${splitRatios.val}%` }} title={`Val: ${splitRatios.val}%`} />
+                        <div className="bg-purple-500 transition-all" style={{ width: `${splitRatios.test}%` }} title={`Test: ${splitRatios.test}%`} />
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-sm">
+                        <div className="flex gap-4">
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-indigo-500"/>Train ({stats?.split_counts?.train || 0})</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-violet-500"/>Val ({stats?.split_counts?.val || 0})</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-purple-500"/>Test ({stats?.split_counts?.test || 0})</div>
+                        </div>
+                        <div className="font-mono text-muted-foreground">Sum: {splitRatios.train + splitRatios.val + splitRatios.test}%</div>
+                    </div>
+
+                    <Button onClick={handleSplit} disabled={isSplitting} className="w-full">
+                        {isSplitting ? <RefreshCw className="mr-2 animate-spin w-4 h-4" /> : <Layers className="mr-2 w-4 h-4" />}
+                        Re-balance Splits
+                    </Button>
+                </CardContent>
+            </Card>
+
+
 
             <div className="grid md:grid-cols-2 gap-6">
                 {/* Pre-processing */}
