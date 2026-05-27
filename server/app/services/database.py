@@ -610,7 +610,11 @@ class TrainingJobService:
 
     @staticmethod
     def load_all_jobs() -> dict:
-        """Load all persisted jobs as the in-memory dict format used by training.py."""
+        """Load all persisted jobs as the in-memory dict format used by training.py.
+        
+        Extended fields stored inside the results JSON blob are unpacked back to
+        the top-level dict so callers can access them without special handling.
+        """
         connection = get_db_connection()
         if not connection:
             return {}
@@ -628,15 +632,25 @@ class TrainingJobService:
             jobs = {}
             for row in rows:
                 config_data = json.loads(row["config"]) if row["config"] else {}
-                jobs[row["id"]] = {
+                results_data = json.loads(row["results"]) if row["results"] else {}
+
+                job = {
                     "status": row["status"],
                     "progress": row["progress"],
                     "dataset_id": row["dataset_id"],
                     "config": config_data,
-                    "metrics": json.loads(row["results"]) if row["results"] else {},
                     "error": row["error_message"],
                     "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    # Restore extended runtime fields from results blob
+                    "metrics": results_data.get("metrics", {}),
+                    "model_path": results_data.get("model_path", ""),
+                    "per_class_metrics": results_data.get("per_class_metrics", []),
+                    "confusion_matrix_path": results_data.get("confusion_matrix_path"),
+                    "current_epoch": results_data.get("current_epoch", 0),
+                    "version_id": results_data.get("version_id"),
+                    "cancel_requested": False,
                 }
+                jobs[row["id"]] = job
             return jobs
         except Error as e:
             print(f"Error loading training jobs: {e}")
@@ -778,3 +792,128 @@ class QualitySnapshotService:
             if connection:
                 connection.close()
             return None
+
+
+class AutoRetrainConfigService:
+    """Persist auto-retrain configurations and annotation counters to MySQL."""
+
+    @staticmethod
+    def get_config(dataset_id: str) -> Dict:
+        """Return config for a dataset, or sensible defaults if not found."""
+        connection = get_db_connection()
+        if not connection:
+            return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM auto_retrain_configs WHERE dataset_id = %s",
+                (dataset_id,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            if row:
+                return {
+                    "enabled": bool(row["enabled"]),
+                    "min_new_annotations": row["min_new_annotations"],
+                    "annotations_since_last_train": row["annotations_since_last_train"],
+                    "last_triggered_at": row["last_triggered_at"].isoformat() if row.get("last_triggered_at") else None,
+                }
+            return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
+        except Error as e:
+            print(f"Error fetching auto-retrain config: {e}")
+            if connection:
+                connection.close()
+            return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
+
+    @staticmethod
+    def upsert_config(dataset_id: str, enabled: bool, min_new_annotations: int) -> bool:
+        """Create or update auto-retrain config (resets annotation counter when re-enabled)."""
+        connection = get_db_connection()
+        if not connection:
+            return False
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                INSERT INTO auto_retrain_configs (dataset_id, enabled, min_new_annotations, annotations_since_last_train)
+                VALUES (%s, %s, %s, 0)
+                ON DUPLICATE KEY UPDATE
+                    enabled = VALUES(enabled),
+                    min_new_annotations = VALUES(min_new_annotations)
+                """,
+                (dataset_id, enabled, min_new_annotations)
+            )
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return True
+        except Error as e:
+            print(f"Error upserting auto-retrain config: {e}")
+            if connection:
+                connection.close()
+            return False
+
+    @staticmethod
+    def increment_annotation_count(dataset_id: str) -> int:
+        """Increment the annotation counter and return the new count.
+        Returns -1 if the dataset has no config or auto-retrain is disabled."""
+        connection = get_db_connection()
+        if not connection:
+            return -1
+        try:
+            cursor = connection.cursor(dictionary=True)
+            # Only increment if auto-retrain is enabled for this dataset
+            cursor.execute(
+                """
+                UPDATE auto_retrain_configs
+                SET annotations_since_last_train = annotations_since_last_train + 1
+                WHERE dataset_id = %s AND enabled = TRUE
+                """,
+                (dataset_id,)
+            )
+            if cursor.rowcount == 0:
+                cursor.close()
+                connection.close()
+                return -1  # not enabled / not configured
+            connection.commit()
+            # Fetch new count
+            cursor.execute(
+                "SELECT annotations_since_last_train FROM auto_retrain_configs WHERE dataset_id = %s",
+                (dataset_id,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            return row["annotations_since_last_train"] if row else -1
+        except Error as e:
+            print(f"Error incrementing annotation count: {e}")
+            if connection:
+                connection.close()
+            return -1
+
+    @staticmethod
+    def reset_annotation_count(dataset_id: str) -> bool:
+        """Reset the counter and record last trigger timestamp after a retrain fires."""
+        connection = get_db_connection()
+        if not connection:
+            return False
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                """
+                UPDATE auto_retrain_configs
+                SET annotations_since_last_train = 0, last_triggered_at = NOW()
+                WHERE dataset_id = %s
+                """,
+                (dataset_id,)
+            )
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return True
+        except Error as e:
+            print(f"Error resetting annotation count: {e}")
+            if connection:
+                connection.close()
+            return False

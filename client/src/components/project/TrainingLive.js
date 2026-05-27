@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Activity, TrendingUp, CheckCircle2, XCircle, Loader2, BarChart3, Square } from "lucide-react";
+import { ArrowLeft, Activity, TrendingUp, CheckCircle2, XCircle, Loader2, BarChart3, Square, ImageIcon } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
@@ -14,10 +14,13 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
     const [job, setJob] = useState(null);
     const [metrics, setMetrics] = useState([]);
     const [perClass, setPerClass] = useState([]);
-    const [confusionMatrix, setConfusionMatrix] = useState(null);
+    const [confusionMatrixUrl, setConfusionMatrixUrl] = useState(null);
+    const [confusionMatrixLoading, setConfusionMatrixLoading] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const pollRef = useRef(null);
     const canvasRef = useRef(null);
+    // Keep blob URL alive for gc cleanup
+    const blobUrlRef = useRef(null);
 
     // Poll job status
     useEffect(() => {
@@ -33,7 +36,9 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
 
                     if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
                         clearInterval(pollRef.current);
-                        if (data.status === "completed") fetchPostTraining();
+                        if (data.status === "completed" || data.status === "cancelled") {
+                            fetchPostTraining();
+                        }
                     }
                 }
 
@@ -52,6 +57,13 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
         pollRef.current = setInterval(poll, 3000);
         return () => clearInterval(pollRef.current);
     }, [jobId, token]);
+
+    // Cleanup blob URL on unmount
+    useEffect(() => {
+        return () => {
+            if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+        };
+    }, []);
 
     const handleCancelTraining = async () => {
         if (!window.confirm("Stop training? The run ends after the current epoch finishes.")) return;
@@ -85,9 +97,30 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                 if (data.per_class_metrics?.length > 0) setPerClass(data.per_class_metrics);
             }
 
-            // Confusion matrix
-            setConfusionMatrix(API_ENDPOINTS.TRAINING.CONFUSION_MATRIX(jobId));
+            // Confusion matrix — fetch with auth and create a blob URL
+            await fetchConfusionMatrix();
         } catch(e) { console.error(e); }
+    };
+
+    const fetchConfusionMatrix = async () => {
+        setConfusionMatrixLoading(true);
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.CONFUSION_MATRIX(jobId), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const blob = await res.blob();
+                // Revoke old blob URL to avoid memory leaks
+                if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+                const url = URL.createObjectURL(blob);
+                blobUrlRef.current = url;
+                setConfusionMatrixUrl(url);
+            }
+        } catch (e) {
+            console.warn("Confusion matrix not available:", e);
+        } finally {
+            setConfusionMatrixLoading(false);
+        }
     };
 
     // Draw live charts on canvas
@@ -162,6 +195,7 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
     const isCompleted = job?.status === "completed";
     const isFailed = job?.status === "failed";
     const isCancelled = job?.status === "cancelled";
+    const hasResults = isCompleted || isCancelled;
 
     return (
         <div className="space-y-6">
@@ -264,32 +298,48 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
             </Card>
 
             {/* Post-training: Confusion Matrix */}
-            {isCompleted && confusionMatrix && (
+            {hasResults && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <BarChart3 className="w-5 h-5" /> Confusion Matrix
                         </CardTitle>
+                        <CardDescription>Normalized confusion matrix from validation set</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <img 
-                            src={confusionMatrix}
-                            alt="Confusion Matrix"
-                            className="w-full max-w-2xl mx-auto rounded-lg border border-border"
-                            onError={() => setConfusionMatrix(null)}
-                        />
+                        {confusionMatrixLoading ? (
+                            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                                <span className="text-sm">Loading confusion matrix…</span>
+                            </div>
+                        ) : confusionMatrixUrl ? (
+                            <img 
+                                src={confusionMatrixUrl}
+                                alt="Confusion Matrix"
+                                className="w-full max-w-2xl mx-auto rounded-lg border border-border"
+                            />
+                        ) : (
+                            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+                                <ImageIcon className="w-8 h-8 opacity-40" />
+                                <p className="text-sm">Confusion matrix not available for this run.</p>
+                                <p className="text-xs opacity-60">This is generated only when a validation set is present.</p>
+                                <Button size="sm" variant="outline" onClick={fetchConfusionMatrix}>
+                                    Retry
+                                </Button>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             )}
 
             {/* Post-training: Per-class Metrics */}
-            {isCompleted && perClass.length > 0 && (
+            {hasResults && perClass.length > 0 && (
                 <Card>
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <TrendingUp className="w-5 h-5" /> Per-Class Performance
                         </CardTitle>
-                        <CardDescription>Sorted by weakest mAP50 first</CardDescription>
+                        <CardDescription>Sorted by weakest mAP50 first — focus on the red rows</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="overflow-x-auto">
@@ -299,37 +349,64 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                                         <th className="text-left py-2 font-medium">Class</th>
                                         <th className="text-right py-2 font-medium">Precision</th>
                                         <th className="text-right py-2 font-medium">Recall</th>
-                                        <th className="text-right py-2 font-medium">mAP50</th>
+                                        <th className="py-2 font-medium" style={{minWidth: 120}}>mAP50</th>
                                         <th className="text-right py-2 font-medium">mAP50-95</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {[...perClass].sort((a, b) => a.mAP50 - b.mAP50).map((cls) => (
-                                        <tr key={cls.class_id} className="border-b border-border/50">
-                                            <td className="py-2 font-medium">{cls.class_name}</td>
-                                            <td className="py-2 text-right">
-                                                <Badge variant={cls.precision > 0.7 ? "default" : "destructive"} className="text-xs">
-                                                    {(cls.precision * 100).toFixed(1)}%
-                                                </Badge>
-                                            </td>
-                                            <td className="py-2 text-right">
-                                                <Badge variant={cls.recall > 0.7 ? "default" : "destructive"} className="text-xs">
-                                                    {(cls.recall * 100).toFixed(1)}%
-                                                </Badge>
-                                            </td>
-                                            <td className="py-2 text-right">
-                                                <Badge variant={cls.mAP50 > 0.5 ? "default" : "destructive"} className="text-xs">
-                                                    {(cls.mAP50 * 100).toFixed(1)}%
-                                                </Badge>
-                                            </td>
-                                            <td className="py-2 text-right text-muted-foreground">
-                                                {(cls.mAP50_95 * 100).toFixed(1)}%
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {[...perClass].sort((a, b) => a.mAP50 - b.mAP50).map((cls) => {
+                                        const map50Pct = Math.round((cls.mAP50 || 0) * 100);
+                                        const barColor = map50Pct >= 70 ? "bg-emerald-500" : map50Pct >= 40 ? "bg-amber-500" : "bg-red-500";
+                                        return (
+                                            <tr key={cls.class_id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                                                <td className="py-2.5 font-medium pr-4">
+                                                    <span className="flex items-center gap-2">
+                                                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${barColor}`} />
+                                                        {cls.class_name}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2.5 text-right">
+                                                    <Badge variant={cls.precision > 0.7 ? "default" : "destructive"} className="text-xs font-mono">
+                                                        {(cls.precision * 100).toFixed(1)}%
+                                                    </Badge>
+                                                </td>
+                                                <td className="py-2.5 text-right">
+                                                    <Badge variant={cls.recall > 0.7 ? "default" : "destructive"} className="text-xs font-mono">
+                                                        {(cls.recall * 100).toFixed(1)}%
+                                                    </Badge>
+                                                </td>
+                                                <td className="py-2.5 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                                                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${map50Pct}%` }} />
+                                                        </div>
+                                                        <span className="text-xs font-mono w-10 text-right">{map50Pct}%</span>
+                                                    </div>
+                                                </td>
+                                                <td className="py-2.5 text-right text-muted-foreground text-xs font-mono">
+                                                    {((cls.mAP50_95 || 0) * 100).toFixed(1)}%
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Cancelled note */}
+            {isCancelled && (
+                <Card className="border-amber-500/30 bg-amber-500/5">
+                    <CardContent className="p-4">
+                        <p className="text-amber-500 font-medium mb-1 flex items-center gap-2">
+                            <Square className="w-4 h-4" /> Training Stopped
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            Training was cancelled at epoch {currentEpoch}/{totalEpochs} ({progress.toFixed(1)}% complete).
+                            {perClass.length > 0 ? " Partial metrics from the last completed epoch are shown above." : ""}
+                        </p>
                     </CardContent>
                 </Card>
             )}

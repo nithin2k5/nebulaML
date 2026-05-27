@@ -394,6 +394,20 @@ def create_tables():
         """)
         logger.info("✓ Table 'uncertain_images' ready")
 
+        # Auto-retrain configuration table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auto_retrain_configs (
+                dataset_id VARCHAR(255) PRIMARY KEY,
+                enabled BOOLEAN DEFAULT FALSE,
+                min_new_annotations INT DEFAULT 50,
+                annotations_since_last_train INT DEFAULT 0,
+                last_triggered_at TIMESTAMP NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+            )
+        """)
+        logger.info("✓ Table 'auto_retrain_configs' ready")
+
         connection.commit()
         cursor.close()
         connection.close()
