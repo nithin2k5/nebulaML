@@ -363,6 +363,33 @@ class AnnotationService:
             if connection:
                 connection.close()
             return None
+
+    @staticmethod
+    def get_all_dataset_annotations(dataset_id: str) -> List[Dict]:
+        """Get all annotations for a dataset"""
+        connection = get_db_connection()
+        if not connection:
+            return []
+        
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT image_id, boxes
+                FROM annotations
+                WHERE dataset_id = %s
+            """, (dataset_id,))
+            annotations = cursor.fetchall()
+            cursor.close()
+            connection.close()
+            
+            for ann in annotations:
+                ann['boxes'] = json.loads(ann['boxes']) if ann['boxes'] else []
+            return annotations
+        except Error as e:
+            print(f"Error getting all dataset annotations: {e}")
+            if connection:
+                connection.close()
+            return []
     
     @staticmethod
     def get_dataset_stats(dataset_id: str) -> Dict:

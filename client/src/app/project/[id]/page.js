@@ -355,7 +355,7 @@ export default function ProjectPage() {
                 <div className="flex-1 overflow-auto bg-muted/5 p-6">
                     <div className="max-w-7xl mx-auto h-full">
                         <TabsContent value="overview" className="mt-0 h-full">
-                            <ProjectOverview dataset={dataset} stats={stats} onRefresh={() => { fetchDataset(dataset.id); fetchStats(dataset.id); }} />
+                            <ProjectOverview dataset={dataset} stats={stats} trainingJobs={trainingJobs} onRefresh={() => { fetchDataset(dataset.id); fetchStats(dataset.id); }} />
                         </TabsContent>
 
                         <TabsContent value="upload" className="mt-0 h-full">
