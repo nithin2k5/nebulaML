@@ -500,8 +500,48 @@ async def get_training_job_by_id(job_id: str, current_user: dict = Depends(get_c
     _ensure_jobs_loaded()
     if job_id not in training_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
-    return training_jobs[job_id]
+    
+    job = training_jobs[job_id]
+    if not _job_owner_ok(job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to view this job")
+        
+    return job
 
+@router.get("/job/{job_id}/stream")
+async def stream_job_details(job_id: str, current_user: dict = Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
+    import json
+    
+    _ensure_jobs_loaded()
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    job = training_jobs[job_id]
+    if not _job_owner_ok(job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to view this job")
+
+    async def event_stream():
+        last_status = None
+        last_epoch = None
+        while True:
+            # Re-fetch the job from the dict to get latest reference
+            current_job = training_jobs.get(job_id)
+            if not current_job:
+                break
+                
+            status = current_job.get("status")
+            epoch = current_job.get("current_epoch")
+            
+            # Yield if something changed (status or epoch) or periodically to keep-alive
+            payload = json.dumps(current_job, default=str)
+            yield f"data: {payload}\n\n"
+            
+            if status in ("completed", "failed", "cancelled", "success"):
+                break
+                
+            await asyncio.sleep(2.0)
+            
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @router.post("/cancel/{job_id}")
 async def cancel_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
