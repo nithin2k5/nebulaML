@@ -1291,11 +1291,14 @@ function AnnotationToolContent() {
         const labelWidth = ctx.measureText(labelText).width + 12 * scale;
         const labelHeight = 22 * scale;
 
-        // Label background
+        // Label background — clamped so it never clips outside the canvas
         ctx.fillStyle = color.stroke;
         const radius = 4 * scale;
-        const lx = box.x;
-        const ly = box.y - labelHeight;
+        // Clamp horizontally so label doesn't overflow the right edge
+        const lx = Math.min(box.x, canvas.width - labelWidth);
+        // If too close to top, render label BELOW the top edge instead
+        const aboveBox = box.y - labelHeight;
+        const ly = aboveBox < 0 ? box.y : aboveBox;
         ctx.beginPath();
         ctx.moveTo(lx + radius, ly);
         ctx.lineTo(lx + labelWidth - radius, ly);
@@ -1307,9 +1310,9 @@ function AnnotationToolContent() {
         ctx.closePath();
         ctx.fill();
 
-        // Label text
+        // Label text (aligned to clamped background position)
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(labelText, box.x + 6 * scale, box.y - 6 * scale);
+        ctx.fillText(labelText, lx + 6 * scale, ly + labelHeight - 6 * scale);
       });
 
       // Draw current polygon being drawn (read ref so paint matches clicks before React re-renders)
