@@ -23,6 +23,11 @@ export default function ProjectDeploy({ dataset }) {
     const [isLoading, setIsLoading] = useState(false);
     const [results, setResults] = useState(null);
     const [activeLearningEnabled, setActiveLearningEnabled] = useState(true);
+    const [apiKeys, setApiKeys] = useState([]);
+    const [generatingKey, setGeneratingKey] = useState(false);
+    const [newKeyName, setNewKeyName] = useState("");
+    const [newKeyToken, setNewKeyToken] = useState(null);
+
     const canvasRef = useRef(null);
     // Keep a stable ref to the current preview URL so the draw effect always has fresh data
     const previewUrlRef = useRef(null);
@@ -48,9 +53,66 @@ export default function ProjectDeploy({ dataset }) {
         }
     }, [dataset?.id, token]);
 
+    const fetchApiKeys = useCallback(async () => {
+        if (!token) return;
+        try {
+            const res = await fetch(`${API_ENDPOINTS.AUTH.BASE || (API_ENDPOINTS.BASE_URL + "/auth")}/api-keys`, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setApiKeys(data.api_keys || []);
+            }
+        } catch (e) {
+            console.error("Error loading API keys:", e);
+        }
+    }, [token]);
+
+    const handleGenerateKey = async () => {
+        if (!newKeyName.trim()) { toast.error("Key name required"); return; }
+        setGeneratingKey(true);
+        try {
+            const res = await fetch(`${API_ENDPOINTS.AUTH.BASE || (API_ENDPOINTS.BASE_URL + "/auth")}/api-keys`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ name: newKeyName.trim() })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setNewKeyToken(data.api_key);
+                setNewKeyName("");
+                fetchApiKeys();
+                toast.success("API Key generated");
+            } else {
+                toast.error("Failed to generate key");
+            }
+        } catch (e) {
+            toast.error("Error: " + e.message);
+        } finally {
+            setGeneratingKey(false);
+        }
+    };
+
+    const handleDeleteKey = async (keyId) => {
+        if (!window.confirm("Revoke this API Key? Any scripts using it will break.")) return;
+        try {
+            const res = await fetch(`${API_ENDPOINTS.AUTH.BASE || (API_ENDPOINTS.BASE_URL + "/auth")}/api-keys/${keyId}`, {
+                method: "DELETE",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                fetchApiKeys();
+                toast.success("API Key revoked");
+            }
+        } catch (e) {}
+    };
+
     useEffect(() => {
-        if (token) fetchJobs();
-    }, [token, fetchJobs]);
+        if (token) { 
+            fetchJobs(); 
+            fetchApiKeys(); 
+        }
+    }, [token, fetchJobs, fetchApiKeys]);
 
     const handleFileChange = (e) => {
         const file = e.target.files[0];
@@ -251,20 +313,61 @@ export default function ProjectDeploy({ dataset }) {
 
                     <Card>
                         <CardHeader>
-                            <CardTitle>API Usage</CardTitle>
-                            <CardDescription>Python Example</CardDescription>
+                            <CardTitle>API Keys & Usage</CardTitle>
+                            <CardDescription>Generate a permanent key for deployments</CardDescription>
                         </CardHeader>
-                        <CardContent>
-                            <pre className="bg-muted p-3 rounded-md text-xs overflow-x-auto">
-                                {`import requests
+                        <CardContent className="space-y-4">
+                            {newKeyToken && (
+                                <div className="bg-primary/10 border border-primary/20 p-3 rounded-md mb-4">
+                                    <p className="text-xs font-semibold mb-1 text-primary">Key Generated! Copy it now:</p>
+                                    <code className="text-xs break-all bg-background p-1.5 rounded block mb-2">{newKeyToken}</code>
+                                    <p className="text-[10px] text-muted-foreground">This key will not be shown again.</p>
+                                </div>
+                            )}
+                            
+                            <div className="flex gap-2">
+                                <Input 
+                                    placeholder="e.g. Production Server" 
+                                    value={newKeyName} 
+                                    onChange={e => setNewKeyName(e.target.value)}
+                                    className="h-8 text-xs"
+                                />
+                                <Button size="sm" onClick={handleGenerateKey} disabled={generatingKey} className="h-8 text-xs shrink-0">
+                                    {generatingKey ? <Loader className="w-3 h-3 animate-spin mr-1" /> : null}
+                                    Generate
+                                </Button>
+                            </div>
 
-url = "${API_ENDPOINTS.INFERENCE.PREDICT}"
+                            {apiKeys.length > 0 && (
+                                <div className="space-y-2 mt-4 max-h-32 overflow-y-auto">
+                                    {apiKeys.map(k => (
+                                        <div key={k.id} className="flex items-center justify-between bg-muted/40 p-2 rounded text-xs border border-border">
+                                            <div>
+                                                <p className="font-medium">{k.name}</p>
+                                                <p className="text-[10px] text-muted-foreground">Created: {new Date(k.created_at).toLocaleDateString()}</p>
+                                            </div>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => handleDeleteKey(k.id)}>
+                                                <X className="w-3 h-3" />
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="pt-4 border-t border-border mt-4">
+                                <Label className="text-xs mb-2 block">Python Example (Using API Key)</Label>
+                                <pre className="bg-muted p-3 rounded-md text-[10px] overflow-x-auto text-muted-foreground">
+                                    {`import requests
+
+url = "${API_ENDPOINTS.INFERENCE.PREDICT || (API_ENDPOINTS.BASE_URL + "/inference/predict")}"
+headers = {"X-API-Key": "YOUR_API_KEY_HERE"}
 files = {'file': open('image.jpg', 'rb')}
-data = {'job_id': '${selectedJob}', 'confidence': ${confidence}}
+data = {'job_id': '${selectedJob || "JOB_ID"}', 'confidence': ${confidence}}
 
-response = requests.post(url, files=files, data=data)
+response = requests.post(url, headers=headers, files=files, data=data)
 print(response.json())`}
-                            </pre>
+                                </pre>
+                            </div>
                         </CardContent>
                     </Card>
                 </div>

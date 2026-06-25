@@ -104,7 +104,6 @@ export default function DatasetsTab() {
         toast.success(`Dataset "${newDataset.name}" created!`);
         setNewDataset({ name: "", description: "", classes: "" });
         setShowCreate(false);
-        fetchDatasets();
         // Mark first project for onboarding wizard
         if (typeof window !== "undefined" && !localStorage.getItem("nebula_first_project")) {
           localStorage.setItem("nebula_first_project", "1");
@@ -312,119 +311,126 @@ export default function DatasetsTab() {
             return (
               <div
                 key={dataset.id || `ds-${dsIdx}`}
-                className="group rounded-2xl bg-card/40 backdrop-blur-md border border-white/5 hover:border-indigo-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden shadow-lg"
+                className="group relative rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 hover:border-indigo-500/50 hover:shadow-[0_0_40px_rgba(99,102,241,0.2)] hover:-translate-y-1 transition-all duration-500 flex flex-col overflow-hidden"
               >
-                <div className="p-6 flex flex-col flex-1 h-full">
+                {/* Subtle gradient overlay on hover */}
+                <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                
+                <div className="p-6 flex flex-col flex-1 h-full relative z-10">
                   {/* Header */}
-                  <div className="flex items-center justify-between mb-3 gap-2">
-                    <div className="flex items-center gap-3 w-full overflow-hidden">
-                      <div className="w-10 h-10 rounded-xl flex-shrink-0 bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500/20 transition-all">
-                        <FolderKanban className="text-lg" />
+                  <div className="flex items-start justify-between mb-4 gap-3">
+                    <div className="flex items-center gap-4 w-full overflow-hidden">
+                      <div className="w-12 h-12 rounded-2xl flex-shrink-0 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-indigo-300 group-hover:scale-110 group-hover:from-indigo-500 group-hover:to-purple-500 group-hover:text-white transition-all duration-500 shadow-inner">
+                        <FolderKanban className="w-6 h-6" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-lg text-white truncate" title={dataset.name}>{dataset.name}</h3>
-                        {dataset.description && (
-                          <p className="text-xs text-gray-500 truncate" title={dataset.description}>{dataset.description}</p>
+                        <h3 className="font-bold text-xl text-white truncate tracking-tight group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-indigo-400 group-hover:to-purple-400 transition-all duration-300" title={dataset.name}>{dataset.name}</h3>
+                        {dataset.description ? (
+                          <p className="text-sm text-gray-400 truncate mt-0.5" title={dataset.description}>{dataset.description}</p>
+                        ) : (
+                          <p className="text-sm text-gray-500 italic mt-0.5">No description</p>
                         )}
                       </div>
                     </div>
-                    <Badge variant="outline" className="text-[10px] h-6 px-2 flex-shrink-0 border-white/10 whitespace-nowrap">
-                      {dataset.type || "Detection"}
-                    </Badge>
                   </div>
 
-                  {/* Spacer to push content down if needed, but we keep structure tight */}
-                  
-                  {/* Stats Grid - Strict Alignment */}
-                  <div className="grid grid-cols-3 gap-2 my-4 bg-white/[0.02] p-3 rounded-xl border border-white/5">
-                    <div className="flex flex-col items-start gap-1">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
-                        <Image className="w-3.5 h-3.5" />
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-3 gap-3 my-5 bg-white/5 p-4 rounded-2xl border border-white/5 shadow-inner">
+                    <div className="flex flex-col items-center justify-center text-center">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mb-1">
+                        <Image className="w-3.5 h-3.5 text-indigo-400" />
                         <span>Images</span>
                       </div>
-                      <span className="text-sm font-medium text-gray-200 pl-5">{total}</span>
+                      <span className="text-lg font-bold text-white">{total}</span>
                     </div>
-                    <div className="flex flex-col items-start gap-1">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
-                        <Box className="w-3.5 h-3.5" />
+                    <div className="flex flex-col items-center justify-center text-center border-x border-white/10">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mb-1">
+                        <Box className="w-3.5 h-3.5 text-purple-400" />
                         <span>Classes</span>
                       </div>
-                      <span className="text-sm font-medium text-gray-200 pl-5">{dataset.classes?.length || 0}</span>
+                      <span className="text-lg font-bold text-white">{dataset.classes?.length || 0}</span>
                     </div>
-                    <div className="flex flex-col items-start gap-1">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
-                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    <div className="flex flex-col items-center justify-center text-center">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mb-1">
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Reviewed</span>
                       </div>
-                      <span className="text-sm font-medium text-emerald-400 pl-5">{dataset.stats?.reviewed_images || 0}</span>
+                      <span className="text-lg font-bold text-emerald-400">{dataset.stats?.reviewed_images || 0}</span>
                     </div>
                   </div>
 
-                  {/* Progress & Classes aligned at bottom area using mt-auto */}
-                  <div className="mt-auto space-y-4 pt-2 border-t border-white/5">
-                    {/* Class badges - aligned strictly */}
+                  {/* Progress & Classes */}
+                  <div className="mt-auto space-y-5 pt-2">
+                    {/* Class badges */}
                     {dataset.classes?.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5 h-auto min-h-[24px]">
-                        {dataset.classes.slice(0, 4).map((cls, i) => (
-                          <Badge key={i} variant="outline" className="text-[10px] font-normal px-2 py-0 h-5 border-white/10 bg-white/[0.03]">
+                      <div className="flex flex-wrap gap-2 min-h-[28px]">
+                        {dataset.classes.slice(0, 3).map((cls, i) => (
+                          <Badge key={i} variant="secondary" className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border-indigo-500/20 text-xs px-3 py-1 font-medium transition-colors">
                             {cls}
                           </Badge>
                         ))}
-                        {dataset.classes.length > 4 && (
-                          <Badge variant="outline" className="text-[10px] font-normal px-2 py-0 h-5 border-white/10 bg-white/[0.03]">
-                            +{dataset.classes.length - 4}
+                        {dataset.classes.length > 3 && (
+                          <Badge variant="secondary" className="bg-purple-500/10 text-purple-300 border-purple-500/20 text-xs px-3 py-1 font-medium">
+                            +{dataset.classes.length - 3} more
                           </Badge>
                         )}
                       </div>
                     ) : (
-                      <div className="h-6" /> // spacer to maintain height if no classes
+                      <div className="h-[28px]" />
                     )}
 
                     {/* Progress Bar */}
-                    <div>
-                      <div className="flex justify-between items-end text-xs mb-1.5">
-                        <span className="text-gray-500 tracking-wide">Annotation Progress</span>
-                        <span className={cn(
-                          "font-mono font-medium",
-                          progress === 100 ? "text-emerald-400" : progress > 0 ? "text-indigo-400" : "text-gray-600"
-                        )}>{progress}%</span>
+                    <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-semibold text-gray-400 tracking-wider uppercase">Annotation Progress</span>
+                        <Badge variant="outline" className={cn(
+                          "text-[10px] px-2 py-0.5 border-0 font-bold",
+                          progress === 100 ? "bg-emerald-500/20 text-emerald-400" : progress > 0 ? "bg-indigo-500/20 text-indigo-400" : "bg-white/10 text-gray-400"
+                        )}>{progress}%</Badge>
                       </div>
-                      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden w-full">
+                      <div className="h-2 rounded-full bg-black/50 overflow-hidden w-full shadow-inner">
                         <div
                           className={cn(
-                            "h-full rounded-full transition-all duration-500",
-                            progress === 100 ? "bg-emerald-500" : "bg-indigo-500"
+                            "h-full rounded-full transition-all duration-1000 ease-out relative",
+                            progress === 100 ? "bg-emerald-500" : "bg-gradient-to-r from-indigo-500 to-purple-500"
                           )}
                           style={{ width: `${progress}%` }}
-                        />
+                        >
+                          {progress > 0 && progress < 100 && (
+                             <div className="absolute top-0 right-0 bottom-0 left-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] bg-[length:1rem_1rem] animate-[progress-bar-stripes_1s_linear_infinite]" />
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Actions */}
-                <div className="p-4 bg-white/[0.02] border-t border-white/5 flex items-center gap-2">
+                <div className="px-6 py-4 bg-black/40 border-t border-white/10 flex items-center gap-3 relative z-10">
                   <Button
                     onClick={() => router.push(`/project/${dataset.id}`)}
-                    className="flex-1 bg-white text-black hover:bg-gray-200"
-                    size="sm"
+                    className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-lg shadow-indigo-500/25 border-0"
                   >
-                    Open <ChevronRight className="ml-1" />
+                    Open Workspace <ChevronRight className="ml-1 w-4 h-4" />
                   </Button>
-                  <Button
-                    variant="ghost" size="icon"
-                    onClick={() => handleExport(dataset.id)}
-                    className="text-gray-400 hover:text-white hover:bg-white/5 h-8 w-8"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost" size="icon"
-                    onClick={() => handleDelete(dataset.id, dataset.name)}
-                    className="text-gray-400 hover:text-red-400 hover:bg-red-400/10 h-8 w-8"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  <div className="flex gap-1.5">
+                    <Button
+                      variant="ghost" size="icon"
+                      onClick={() => handleExport(dataset.id)}
+                      className="bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5 transition-colors"
+                      title="Export Dataset"
+                    >
+                      <Download className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="icon"
+                      onClick={() => handleDelete(dataset.id, dataset.name)}
+                      className="bg-red-500/10 text-red-400 hover:text-white hover:bg-red-500 border border-red-500/20 transition-colors"
+                      title="Delete Dataset"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             );

@@ -31,7 +31,7 @@ from slowapi.util import get_remote_address
 limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 _USERNAME_RE = re.compile(r"^[a-z0-9_]+$")
@@ -80,23 +80,40 @@ class TokenResponse(BaseModel):
     user: dict
 
 
-# Dependency to get current user from token
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Get current authenticated user"""
-    token = credentials.credentials
-    payload = decode_access_token(token)
+# Dependency to get current user from token or API key
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """Get current authenticated user via JWT or X-API-Key"""
+    user_id = None
+
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        import hashlib
+        from app.services.database import ApiKeyService
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        key_data = ApiKeyService.get_api_key_by_hash(key_hash)
+        if not key_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API Key"
+            )
+        user_id = key_data["user_id"]
+    elif credentials:
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        user_id = payload.get("user_id")
     
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    user_id = payload.get("user_id")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
+            detail="Not authenticated. Provide Bearer token or X-API-Key header."
         )
     
     # Get user from database
@@ -715,3 +732,57 @@ async def delete_user(
             detail=f"Error deleting user: {str(e)}"
         )
 
+
+# ---------------------------------------------------------------------------
+# API Key Management
+# ---------------------------------------------------------------------------
+
+class ApiKeyCreate(BaseModel):
+    name: str
+
+@router.post("/api-keys")
+async def create_api_key(
+    request: ApiKeyCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate a new permanent API key"""
+    import secrets
+    import hashlib
+    from app.services.database import ApiKeyService
+
+    # Generate a random 32-byte hex string
+    raw_key = secrets.token_hex(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_id = str(uuid.uuid4())
+
+    success = ApiKeyService.create_api_key(
+        key_id=key_id,
+        user_id=current_user["id"],
+        name=request.name,
+        key_hash=key_hash
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to create API key")
+
+    # Only return the raw key once
+    return {
+        "id": key_id,
+        "name": request.name,
+        "api_key": raw_key
+    }
+
+@router.get("/api-keys")
+async def list_api_keys(current_user: dict = Depends(get_current_user)):
+    """List all API keys for the current user"""
+    from app.services.database import ApiKeyService
+    keys = ApiKeyService.get_user_api_keys(current_user["id"])
+    return {"api_keys": keys}
+
+@router.delete("/api-keys/{key_id}")
+async def delete_api_key(key_id: str, current_user: dict = Depends(get_current_user)):
+    """Revoke an API key"""
+    from app.services.database import ApiKeyService
+    success = ApiKeyService.delete_api_key(key_id, current_user["id"])
+    if not success:
+        raise HTTPException(status_code=404, detail="API Key not found")
+    return {"success": True, "message": "API key deleted"}
