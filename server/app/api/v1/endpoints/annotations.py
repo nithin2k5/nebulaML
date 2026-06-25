@@ -446,7 +446,8 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
         height=height,
         boxes=boxes,
         split=split,
-        status=status
+        status=status,
+        annotation_type=annotation_type
     )
     
     if not success:
@@ -560,8 +561,7 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
                     if j.get("status") in ("running", "pending")
                 )
                 if active_count < MAX_CONCURRENT_JOBS:
-                    import uuid
-                    from datetime import datetime
+                    # uuid and datetime are already imported at module level
                     from app.services.versioning import VersioningEngine
                     from app.services.database import DatasetVersionService
                     try:
@@ -1009,7 +1009,9 @@ async def delete_dataset(
         shutil.rmtree(dataset_dir)
     
     # Remove from database
-    del datasets_db[dataset_id]
+    DatasetService.delete_dataset(dataset_id)
+    if dataset_id in datasets_db:
+        del datasets_db[dataset_id]
     
     # Remove annotations
     keys_to_delete = [k for k in annotations_db.keys() if k.startswith(f"{dataset_id}_")]

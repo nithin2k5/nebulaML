@@ -31,10 +31,13 @@ function validateBox(box, imageWidth, imageHeight) {
   const errors = [];
   const { x, y, width, height } = box;
   if (imageWidth > 0 && imageHeight > 0) {
-    if (x < 0 || y < 0 || x + width > imageWidth || y + height > imageHeight) {
-      errors.push("Box extends outside image boundaries.");
-    }
-    const relSize = (width * height) / (imageWidth * imageHeight);
+    // Clamp coordinates to image boundaries rather than failing
+    box.x = Math.max(0, Math.min(x, imageWidth));
+    box.y = Math.max(0, Math.min(y, imageHeight));
+    box.width = Math.min(width, imageWidth - box.x);
+    box.height = Math.min(height, imageHeight - box.y);
+    
+    const relSize = (box.width * box.height) / (imageWidth * imageHeight);
     if (relSize < BOX_VALIDATION.MIN_RELATIVE_SIZE) {
       errors.push("Box is too small (< 0.1% of image area).");
     }
@@ -1036,7 +1039,7 @@ function AnnotationToolContent() {
         }
         // Dynamic cursor + hover highlight: change appearance when hovering inside existing mask
         const insideMask = isPointInPolygon(x, y, aiMaskPolygonRef.current);
-        if (canvasRef.current) canvasRef.current.style.cursor = nearVertex ? 'grab' : (insideMask ? 'not-allowed' : 'cell');
+        if (canvasRef.current) canvasRef.current.style.cursor = nearVertex ? 'grab' : 'crosshair';
         if (insideMask !== aiHoverInsideMaskRef.current) {
           aiHoverInsideMaskRef.current = insideMask;
           if (!animFrameRef.current) {
@@ -1423,7 +1426,7 @@ function AnnotationToolContent() {
             if (maskPolygon.length > 100 && vi % 2 !== 0 && dragIdx !== vi) continue;
             
             ctx.beginPath();
-            ctx.arc(vp.x, vp.y, (dragIdx === vi ? 6 : 4) * scale, 0, Math.PI * 2);
+            ctx.arc(vp.x, vp.y, (dragIdx === vi ? 4 : 2) * scale, 0, Math.PI * 2);
             ctx.fillStyle = dragIdx === vi ? '#f97316' : '#c084fc';
             ctx.fill();
             ctx.strokeStyle = '#ffffff';
@@ -1438,14 +1441,14 @@ function AnnotationToolContent() {
           ctx.save();
           const isFg = pt.type === 'fg';
           ctx.beginPath();
-          ctx.arc(pt.x, pt.y, 7 * scale, 0, Math.PI * 2);
+          ctx.arc(pt.x, pt.y, 4 * scale, 0, Math.PI * 2);
           ctx.fillStyle = isFg ? 'rgba(16, 185, 129, 0.9)' : 'rgba(239, 68, 68, 0.9)';
           ctx.fill();
           ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.5 * scale;
+          ctx.lineWidth = 1 * scale;
           ctx.stroke();
           ctx.fillStyle = '#ffffff';
-          const dotFs = Math.round(11 * scale);
+          const dotFs = Math.round(7 * scale);
           ctx.font = `bold ${dotFs}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -1723,13 +1726,13 @@ function AnnotationToolContent() {
 
       {/* Main Content */}
       <main className="flex-1 min-h-0 overflow-hidden">
-        <div className="grid grid-cols-[220px_1fr_220px] h-full">
+        <div className="grid grid-cols-[280px_1fr_280px] h-full">
 
           {/* Left Sidebar - Filters & Classes */}
-          <div className="border-r border-white/5 bg-zinc-950/60 flex flex-col h-full">
+          <div className="border-r border-white/10 bg-black/60 backdrop-blur-xl flex flex-col h-full shadow-2xl relative z-10">
 
             {/* Filter Section */}
-            <div className="p-3 border-b border-white/5 space-y-3">
+            <div className="p-5 border-b border-white/10 space-y-4">
               <div>
                 <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Filter Images</h3>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -2014,10 +2017,10 @@ function AnnotationToolContent() {
 
             </div>
 
-            <div className="p-3 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-zinc-950/30 backdrop-blur-xl">
               {/* Tools Selection */}
               <div>
-                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Tools</h3>
+                <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-3 px-1">Tools</h3>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => { setActiveTool('select'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); cursorPosRef.current = null; }}
@@ -2309,9 +2312,9 @@ function AnnotationToolContent() {
           </div>
 
           {/* Right Sidebar - Annotations & Actions */}
-          <div className="border-l border-white/5 bg-zinc-950/60 p-3 overflow-y-auto custom-scrollbar space-y-4">
+          <div className="border-l border-white/10 bg-black/60 backdrop-blur-xl p-5 overflow-y-auto custom-scrollbar space-y-6 shadow-2xl relative z-10">
             {/* Review Controls */}
-            <div className="p-3 bg-white/5 rounded-lg border border-white/5 space-y-2 mb-4">
+            <div className="p-4 bg-white/5 backdrop-blur-md rounded-xl border border-white/10 space-y-3 mb-4 shadow-inner">
               <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2">Review</h3>
               <Button
                 onClick={() => handleSaveAnnotations('reviewed')}

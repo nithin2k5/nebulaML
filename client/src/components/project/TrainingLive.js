@@ -22,40 +22,85 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
     // Keep blob URL alive for gc cleanup
     const blobUrlRef = useRef(null);
 
-    // Poll job status
+    // SSE Live Training Stream
     useEffect(() => {
-        const poll = async () => {
+        let active = true;
+        let reader = null;
+
+        const connectStream = async () => {
             try {
-                // Job status
-                const statusRes = await fetch(API_ENDPOINTS.TRAINING.JOB(jobId), {
+                // Initial fetch for post-training data if it's already done before mounting
+                const initialRes = await fetch(API_ENDPOINTS.TRAINING.JOB(jobId), {
                     headers: { "Authorization": `Bearer ${token}` }
                 });
-                if (statusRes.ok) {
-                    const data = await statusRes.json();
+                if (initialRes.ok) {
+                    const data = await initialRes.json();
                     setJob(data);
-
+                    if (data.metrics?.metrics?.length > 0) setMetrics(data.metrics.metrics);
                     if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
-                        clearInterval(pollRef.current);
                         if (data.status === "completed" || data.status === "cancelled") {
                             fetchPostTraining();
                         }
+                        return; // Done, no need to stream
                     }
                 }
 
-                // Metrics (live curves)
-                const metricsRes = await fetch(API_ENDPOINTS.TRAINING.JOB_METRICS(jobId), {
+                // Connect to SSE stream
+                const res = await fetch(`${API_BASE_URL}/api/training/job/${jobId}/stream`, {
                     headers: { "Authorization": `Bearer ${token}` }
                 });
-                if (metricsRes.ok) {
-                    const data = await metricsRes.json();
-                    if (data.metrics?.length > 0) setMetrics(data.metrics);
+
+                if (!res.ok || !res.body) throw new Error("Stream failed");
+                reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (active) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop(); // keep the last incomplete chunk
+
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                setJob(data);
+                                // The backend structure might store metrics in data.metrics.metrics or data.metrics array
+                                // Let's handle both dynamically:
+                                if (data.metrics) {
+                                    if (Array.isArray(data.metrics)) setMetrics(data.metrics);
+                                    else if (Array.isArray(data.metrics.metrics)) setMetrics(data.metrics.metrics);
+                                }
+
+                                if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
+                                    if (data.status === "completed" || data.status === "cancelled") {
+                                        fetchPostTraining();
+                                    }
+                                    active = false;
+                                }
+                            } catch (e) {
+                                console.error("Parse SSE error", e);
+                            }
+                        }
+                    }
                 }
-            } catch(e) { console.error("Poll error:", e); }
+            } catch (e) {
+                if (active) {
+                    console.error("Stream error, retrying in 3s...", e);
+                    setTimeout(connectStream, 3000); // Reconnect if dropped
+                }
+            }
         };
 
-        poll(); // initial
-        pollRef.current = setInterval(poll, 3000);
-        return () => clearInterval(pollRef.current);
+        connectStream();
+
+        return () => {
+            active = false;
+            if (reader) reader.cancel().catch(() => {});
+        };
     }, [jobId, token]);
 
     // Cleanup blob URL on unmount

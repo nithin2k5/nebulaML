@@ -291,7 +291,8 @@ class AnnotationService:
     @staticmethod
     def save_annotation(annotation_id: str, dataset_id: str, image_id: str,
                        image_name: str, width: int, height: int, boxes: List[Dict],
-                       split: Optional[str] = None, status: str = "annotated") -> bool:
+                       split: Optional[str] = None, status: str = "annotated",
+                       annotation_type: str = "detection") -> bool:
         """Save annotation to database"""
         connection = get_db_connection()
         if not connection:
@@ -941,6 +942,108 @@ class AutoRetrainConfigService:
             return True
         except Error as e:
             print(f"Error resetting annotation count: {e}")
+            if connection:
+                connection.close()
+            return False
+
+class ApiKeyService:
+    """Service for managing permanent API keys"""
+
+    @staticmethod
+    def create_api_key(key_id: str, user_id: int, name: str, key_hash: str) -> bool:
+        connection = get_db_connection()
+        if not connection:
+            return False
+        
+        try:
+            cursor = connection.cursor()
+            cursor.execute("""
+                INSERT INTO api_keys (id, user_id, name, key_hash)
+                VALUES (%s, %s, %s, %s)
+            """, (key_id, user_id, name, key_hash))
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return True
+        except Exception as e:
+            print(f"Error creating API key: {e}")
+            if connection:
+                connection.close()
+            return False
+
+    @staticmethod
+    def get_user_api_keys(user_id: int) -> list:
+        connection = get_db_connection()
+        if not connection:
+            return []
+            
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT id, name, created_at, last_used_at 
+                FROM api_keys 
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+            """, (user_id,))
+            keys = cursor.fetchall()
+            cursor.close()
+            connection.close()
+            return keys
+        except Exception as e:
+            print(f"Error getting API keys: {e}")
+            if connection:
+                connection.close()
+            return []
+
+    @staticmethod
+    def get_api_key_by_hash(key_hash: str) -> dict:
+        connection = get_db_connection()
+        if not connection:
+            return None
+            
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT id, user_id, name, key_hash, created_at, last_used_at 
+                FROM api_keys 
+                WHERE key_hash = %s
+            """, (key_hash,))
+            key = cursor.fetchone()
+            
+            if key:
+                # Update last_used_at
+                cursor.execute("""
+                    UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s
+                """, (key['id'],))
+                connection.commit()
+                
+            cursor.close()
+            connection.close()
+            return key
+        except Exception as e:
+            print(f"Error fetching API key by hash: {e}")
+            if connection:
+                connection.close()
+            return None
+
+    @staticmethod
+    def delete_api_key(key_id: str, user_id: int) -> bool:
+        connection = get_db_connection()
+        if not connection:
+            return False
+            
+        try:
+            cursor = connection.cursor()
+            cursor.execute("""
+                DELETE FROM api_keys WHERE id = %s AND user_id = %s
+            """, (key_id, user_id))
+            affected = cursor.rowcount
+            connection.commit()
+            cursor.close()
+            connection.close()
+            return affected > 0
+        except Exception as e:
+            print(f"Error deleting API key: {e}")
             if connection:
                 connection.close()
             return False

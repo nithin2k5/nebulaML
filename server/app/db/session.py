@@ -123,6 +123,33 @@ def create_tables():
         """)
         logger.info("✓ Table 'pending_registrations' ready")
         
+        # Auto retrain configs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auto_retrain_configs (
+                dataset_id VARCHAR(36) PRIMARY KEY,
+                enabled BOOLEAN DEFAULT FALSE,
+                threshold_type ENUM('annotation_count', 'percentage_increase') DEFAULT 'annotation_count',
+                threshold_value INT NOT NULL,
+                current_count INT DEFAULT 0,
+                base_model VARCHAR(255) DEFAULT 'yolov8n.pt',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # API Keys table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id INT NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                key_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+
         # Datasets table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS datasets (
@@ -130,6 +157,7 @@ def create_tables():
                 user_id INT,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
+                type VARCHAR(50) DEFAULT 'detection',
                 classes JSON NOT NULL,
                 total_images INT DEFAULT 0,
                 annotated_images INT DEFAULT 0,
@@ -170,6 +198,7 @@ def create_tables():
                 image_name VARCHAR(255) NOT NULL,
                 width INT NOT NULL,
                 height INT NOT NULL,
+                annotation_type VARCHAR(50) DEFAULT 'detection',
                 boxes JSON NOT NULL,
                 split ENUM('train', 'val', 'test') NULL,
                 status ENUM('unlabeled', 'predicted', 'annotated', 'reviewed') DEFAULT 'annotated',
