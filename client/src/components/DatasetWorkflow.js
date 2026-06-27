@@ -15,7 +15,14 @@ import {
   Box,
   Layers,
   Loader2,
+  Loader2,
   AlertCircle,
+  Settings2,
+  ChevronDown,
+  ChevronRight,
+  ShieldAlert,
+  ShieldCheck,
+  Wrench,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -39,8 +46,29 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
     batch_size: 16,
     img_size: 640,
     model_name: "yolov8n.pt",
-    learning_rate: 0.01
+    preset: "",
+    learning_rate: 0.01,
+    patience: 50,
   });
+
+  const [preflightData, setPreflightData] = useState(null);
+  const [loadingPreflight, setLoadingPreflight] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => {
+    if (showTrainDialog && dataset?.id && token) {
+      setLoadingPreflight(true);
+      fetch(API_ENDPOINTS.TRAINING.PREFLIGHT(dataset.id), {
+        headers: { "Authorization": `Bearer ${token}` }
+      })
+      .then(r => r.json())
+      .then(d => setPreflightData(d))
+      .catch(e => console.error(e))
+      .finally(() => setLoadingPreflight(false));
+    } else {
+      setPreflightData(null);
+    }
+  }, [showTrainDialog, dataset?.id, token]);
 
   const fetchDatasetStats = async () => {
     try {
@@ -321,14 +349,67 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             <DialogTitle>Train Configuration</DialogTitle>
             <DialogDescription>Setup your training parameters</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto custom-scrollbar px-1">
+            
+            {/* Preflight Checks */}
+            {loadingPreflight ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
+                <Loader2 className="w-4 h-4 animate-spin" /> Running pre-flight data checks...
+              </div>
+            ) : preflightData && (preflightData.warnings?.length > 0 || preflightData.blockers?.length > 0) ? (
+              <div className="flex flex-col gap-2 p-3 bg-card border rounded-lg shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Dataset Health Check</p>
+                {preflightData.blockers?.map((b, i) => (
+                  <div key={i} className="flex gap-2 text-sm text-red-500 bg-red-500/10 p-2 rounded border border-red-500/20">
+                    <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div><span className="font-medium">{b.message}</span> <p className="text-xs text-red-400 mt-1">{b.suggestion}</p></div>
+                  </div>
+                ))}
+                {preflightData.warnings?.map((w, i) => (
+                  <div key={i} className="flex gap-2 text-sm text-amber-500 bg-amber-500/10 p-2 rounded border border-amber-500/20">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div><span className="font-medium">{w.message}</span> <p className="text-xs text-amber-500/80 mt-1">{w.suggestion}</p></div>
+                  </div>
+                ))}
+              </div>
+            ) : preflightData && (
+              <div className="flex items-center gap-2 text-sm text-green-500 bg-green-500/10 p-3 rounded-lg border border-green-500/20">
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span className="font-medium">Dataset is perfectly healthy and ready for training.</span>
+              </div>
+            )}
+
+            {/* Presets */}
+            <div className="space-y-2 mt-2">
+              <Label className="flex items-center gap-2"><Settings2 className="w-4 h-4"/> Training Strategy (Preset)</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {[{id:"fast", name:"Fast (Draft)", desc:"~5 mins"}, {id:"balanced", name:"Balanced", desc:"~30 mins"}, {id:"accurate", name:"Accurate", desc:"~2 hours"}].map(p => (
+                  <Button
+                    key={p.id}
+                    variant="outline"
+                    className={cn("h-auto flex flex-col py-3 px-2 border-2 text-left", trainingConfig.preset === p.id ? "border-primary bg-primary/10" : "border-border")}
+                    onClick={() => {
+                      let updates = { preset: p.id };
+                      if (p.id === "fast") updates = { ...updates, epochs: 10, batch_size: 16, patience: 5 };
+                      if (p.id === "balanced") updates = { ...updates, epochs: 100, batch_size: 16, patience: 50 };
+                      if (p.id === "accurate") updates = { ...updates, epochs: 300, batch_size: 8, patience: 100 };
+                      setTrainingConfig({ ...trainingConfig, ...updates });
+                    }}
+                  >
+                    <span className="font-semibold text-sm">{p.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{p.desc}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-2">
               <div className="space-y-2">
                 <Label>Epochs</Label>
                 <Input
                   type="number"
                   value={trainingConfig.epochs}
-                  onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) setTrainingConfig({ ...trainingConfig, epochs: v }); }}
+                  onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) setTrainingConfig({ ...trainingConfig, epochs: v, preset: "" }); }}
                 />
               </div>
               <div className="space-y-2">
@@ -336,30 +417,63 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
                 <Input
                   type="number"
                   value={trainingConfig.batch_size}
-                  onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) setTrainingConfig({ ...trainingConfig, batch_size: v }); }}
+                  onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 1) setTrainingConfig({ ...trainingConfig, batch_size: v, preset: "" }); }}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label>Model Size</Label>
+              <Label>Model Architecture</Label>
               <Select
                 value={trainingConfig.model_name}
                 onValueChange={v => setTrainingConfig({ ...trainingConfig, model_name: v })}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="yolov8n.pt">Nano (Fastest)</SelectItem>
-                  <SelectItem value="yolov8s.pt">Small</SelectItem>
-                  <SelectItem value="yolov8m.pt">Medium</SelectItem>
-                  <SelectItem value="yolov8l.pt">Large</SelectItem>
+                  <SelectItem value="yolov8n.pt">YOLOv8 Nano (Fastest)</SelectItem>
+                  <SelectItem value="yolov8s.pt">YOLOv8 Small</SelectItem>
+                  <SelectItem value="yolov8m.pt">YOLOv8 Medium</SelectItem>
+                  <SelectItem value="yolov8l.pt">YOLOv8 Large (Most Accurate)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Advanced Settings */}
+            <div className="mt-2 border rounded-lg overflow-hidden">
+              <button 
+                className="w-full flex items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 transition-colors text-sm font-medium"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+              >
+                <span className="flex items-center gap-2"><Wrench className="w-4 h-4"/> Advanced Hyperparameters</span>
+                {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              </button>
+              {showAdvanced && (
+                <div className="p-3 border-t bg-card grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Learning Rate</Label>
+                    <Input
+                      type="number"
+                      step="0.001"
+                      value={trainingConfig.learning_rate}
+                      onChange={e => setTrainingConfig({ ...trainingConfig, learning_rate: parseFloat(e.target.value) || 0.01 })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Patience (Early Stopping)</Label>
+                    <Input
+                      type="number"
+                      value={trainingConfig.patience}
+                      onChange={e => setTrainingConfig({ ...trainingConfig, patience: parseInt(e.target.value) || 50 })}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           <Button
-            className="w-full bg-green-600 hover:bg-green-700 text-white"
+            className="w-full bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-500/20"
+            disabled={preflightData?.blockers?.length > 0}
             onClick={async () => {
               try {
                 const res = await fetch(API_ENDPOINTS.TRAINING.EXPORT_AND_TRAIN, {
