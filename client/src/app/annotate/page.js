@@ -16,7 +16,7 @@ import { API_ENDPOINTS } from "@/lib/config";
 import {
   Save, Trash2, Upload, ChevronLeft, ChevronRight, Home,
   Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu,
-  MousePointer2, Square, Hexagon, GitCommit, Wand2
+  MousePointer2, Square, Hexagon, GitCommit, Wand2, Eraser
 } from "lucide-react";
 
 // --- Real-time annotation validation ---
@@ -753,6 +753,37 @@ function AnnotationToolContent() {
     e.preventDefault();
     if (!canvasRef.current || !dataset) return;
     const { x, y } = getCanvasCoordinates(e);
+
+    if (activeTool === 'eraser') {
+      let clickedIndex = -1;
+      for (let i = boxesRef.current.length - 1; i >= 0; i--) {
+        const box = boxesRef.current[i];
+        if (!box.type || box.type === 'box') {
+          if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+            clickedIndex = i;
+            break;
+          }
+        } else if (box.type === 'joint') {
+          if (Math.abs(x - box.x) < 10 && Math.abs(y - box.y) < 10) {
+            clickedIndex = i;
+            break;
+          }
+        } else if (box.type === 'polygon' || box.type === 'line') {
+          if (box.points && box.points.length > 0) {
+            if (isPointNearPolygon(x, y, box.points)) {
+              clickedIndex = i;
+              break;
+            }
+          }
+        }
+      }
+      if (clickedIndex !== -1) {
+        handleDeleteBox(clickedIndex);
+        showToast('Annotation erased');
+        drawCanvas();
+      }
+      return;
+    }
 
     if (activeTool === 'select') {
       // Find if we clicked on an existing box/point
@@ -2055,8 +2086,16 @@ function AnnotationToolContent() {
                     <span className="text-[10px] font-medium">Joints</span>
                   </button>
                   <button
+                    onClick={() => { setActiveTool('eraser'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); cursorPosRef.current = null; }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all border ${activeTool === 'eraser' ? 'bg-red-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-gray-400 hover:text-gray-200 hover:bg-white/5 border-white/5'}`}
+                    title="Eraser: Click on an annotation to remove it"
+                  >
+                    <Eraser className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Eraser</span>
+                  </button>
+                  <button
                     onClick={() => { setActiveTool('ai'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); setCurrentBox(null); }}
-                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-2 border border-dashed ${activeTool === 'ai' ? 'bg-purple-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-purple-400 hover:text-purple-300 hover:bg-white/5 border-white/5'}`}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-3 border border-dashed ${activeTool === 'ai' ? 'bg-purple-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-purple-400 hover:text-purple-300 hover:bg-white/5 border-white/5'}`}
                     title="AI Mode: Click an object to auto-segment"
                   >
                     <Wand2 className="w-4 h-4 mb-1" />
