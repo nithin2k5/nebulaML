@@ -6,8 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardStats from "@/components/DashboardStats";
 import DatasetsTab from "@/components/DatasetsTab";
-import InferenceTab from "@/components/InferenceTab";
-import TrainingTab from "@/components/TrainingTab";
+import TestTab from "@/components/TestTab";
 import ModelsTab from "@/components/ModelsTab";
 import SettingsTab from "@/components/SettingsTab";
 import ProfileTab from "@/components/ProfileTab";
@@ -33,8 +32,7 @@ export default function DashboardPage() {
     { id: "datasets", label: "Projects", icon: Database },
     { id: "workflow", label: "CV Guide", icon: BookOpen },
     { id: "chat", label: "Assistant", icon: MessageSquare },
-    { id: "inference", label: "Playground", icon: Zap },
-    { id: "training", label: "Training", icon: Cpu },
+    { id: "test", label: "Test", icon: Zap },
     { id: "models", label: "Models", icon: Box },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "profile", label: "Profile", icon: UserCircle },
@@ -172,8 +170,7 @@ export default function DashboardPage() {
                 {activeTab === "datasets" && <DatasetsTab />}
                 {activeTab === "workflow" && <WorkflowGuide />}
                 {activeTab === "chat" && <ChatbotTab />}
-                {activeTab === "inference" && <InferenceTab />}
-                {activeTab === "training" && <TrainingTab />}
+                {activeTab === "test" && <TestTab />}
                 {activeTab === "models" && <ModelsTab />}
                 {activeTab === "settings" && <SettingsTab />}
                 {activeTab === "profile" && <ProfileTab />}
