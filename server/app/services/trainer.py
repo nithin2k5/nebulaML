@@ -15,7 +15,12 @@ class YOLOTrainer:
             model_name: Base model to start training from
         """
         self.model = YOLO(model_name)
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if torch.cuda.is_available():
+            self.device = 'cuda'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = 'mps'
+        else:
+            self.device = 'cpu'
         
     def train(
         self,
@@ -121,9 +126,19 @@ class YOLOTrainer:
                 confusion_matrix_path = str(cm_path)
                 break
         
+        epochs_completed = epochs
+        try:
+            import pandas as pd
+            results_csv = results.save_dir / "results.csv"
+            if results_csv.exists():
+                df = pd.read_csv(results_csv)
+                epochs_completed = len(df)
+        except Exception:
+            pass
+
         return {
             "success": True,
-            "epochs_completed": epochs,
+            "epochs_completed": epochs_completed,
             "model_path": best_model_path,
             "results_dir": str(results.save_dir),
             "metrics": {

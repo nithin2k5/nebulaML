@@ -60,7 +60,7 @@ datasets_dir.mkdir(exist_ok=True)
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(inference.router, prefix="/api/inference", tags=["Inference"])
-app.include_router(training.router, prefix="/api/training", tags=["Analysis"])
+app.include_router(training.router, prefix="/api/training", tags=["Training"])
 app.include_router(model_routes.router, prefix="/api/models", tags=["models"])
 app.include_router(annotations.router, prefix="/api/annotations", tags=["Annotations"])
 app.include_router(annotations_analyze.router, prefix="/api/annotations", tags=["Annotations"])

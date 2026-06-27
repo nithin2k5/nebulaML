@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
 
-export default function InferenceTab() {
+export default function TestTab() {
   const { token } = useAuth();
   const [mode, setMode] = useState("upload"); // 'upload' or 'webcam'
   const [image, setImage] = useState(null);
@@ -28,8 +28,12 @@ export default function InferenceTab() {
   const [webcamRunning, setWebcamRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [inferenceTime, setInferenceTime] = useState(null);
-  const [model, setModel] = useState("yolov8n");
   const [confidence, setConfidence] = useState(0.25);
+  
+  const [datasets, setDatasets] = useState([]);
+  const [trainingJobs, setTrainingJobs] = useState([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState("");
+  const [selectedJobId, setSelectedJobId] = useState("");
 
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -37,13 +41,29 @@ export default function InferenceTab() {
   const imageObjRef = useRef(null);
   const intervalRef = useRef(null);
 
-  const models = [
-    { id: "yolov8n", name: "YOLOv8 Nano", desc: "Fastest · 3.2M params", badge: "Speed" },
-    { id: "yolov8s", name: "YOLOv8 Small", desc: "Balanced · 11.2M params", badge: null },
-    { id: "yolov8m", name: "YOLOv8 Medium", desc: "High accuracy · 25.9M params", badge: null },
-    { id: "yolov8l", name: "YOLOv8 Large", desc: "Very accurate · 43.7M params", badge: "Accuracy" },
-    { id: "yolov8x", name: "YOLOv8 XLarge", desc: "Max precision · 68.2M params", badge: null },
-  ];
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [dsRes, jobsRes] = await Promise.all([
+          fetch(API_ENDPOINTS.DATASETS.LIST, { headers: { "Authorization": `Bearer ${token}` } }),
+          fetch(API_ENDPOINTS.TRAINING.JOBS, { headers: { "Authorization": `Bearer ${token}` } })
+        ]);
+        if (dsRes.ok) {
+          const dsData = await dsRes.json();
+          setDatasets(dsData.datasets || dsData || []);
+        }
+        if (jobsRes.ok) {
+          const jobsData = await jobsRes.json();
+          setTrainingJobs((jobsData.jobs || []).filter(j => j.status === 'success' || j.status === 'completed'));
+        }
+      } catch (err) {
+        console.error("Failed to fetch test data", err);
+      }
+    };
+    if (token) fetchData();
+  }, [token]);
+
+  const availableModels = trainingJobs.filter(j => j.dataset_id === selectedDatasetId);
 
   const classColors = [
     '#6366f1', '#f43f5e', '#10b981', '#f59e0b', '#8b5cf6',
@@ -137,12 +157,16 @@ export default function InferenceTab() {
 
   const runInference = async () => {
     if (!image) return;
+    if (!selectedJobId) {
+      toast.error("Please select a model version to test");
+      return;
+    }
     setRunning(true);
     const startTime = Date.now();
 
     const formData = new FormData();
     formData.append("file", image);
-    formData.append("model", model);
+    formData.append("job_id", selectedJobId);
     formData.append("confidence", confidence);
 
     try {
@@ -213,7 +237,7 @@ export default function InferenceTab() {
     const startTime = Date.now();
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("model", model);
+    if (selectedJobId) formData.append("job_id", selectedJobId);
     formData.append("confidence", confidence);
 
     try {
@@ -295,23 +319,35 @@ export default function InferenceTab() {
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-2">
-                <Label className="text-sm">Model</Label>
-                <Select value={model} onValueChange={setModel}>
+                <Label className="text-sm">Dataset</Label>
+                <Select value={selectedDatasetId} onValueChange={(val) => { setSelectedDatasetId(val); setSelectedJobId(""); }}>
                   <SelectTrigger className="bg-black/30 border-white/10">
-                    <SelectValue />
+                    <SelectValue placeholder="Select a dataset" />
                   </SelectTrigger>
                   <SelectContent>
-                    {models.map(m => (
-                      <SelectItem key={m.id} value={m.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{m.name}</span>
-                          {m.badge && <Badge variant="outline" className="text-[10px] h-4">{m.badge}</Badge>}
-                        </div>
+                    {datasets.map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">{models.find(m => m.id === model)?.desc}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Model Version</Label>
+                <Select value={selectedJobId} onValueChange={setSelectedJobId} disabled={!selectedDatasetId || availableModels.length === 0}>
+                  <SelectTrigger className="bg-black/30 border-white/10">
+                    <SelectValue placeholder={!selectedDatasetId ? "Select a dataset first" : availableModels.length === 0 ? "No models found" : "Select a model version"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableModels.map(m => (
+                      <SelectItem key={m.job_id} value={m.job_id}>
+                        {m.config?.model_name || 'Model'} ({new Date(m.created_at).toLocaleDateString()})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -333,7 +369,7 @@ export default function InferenceTab() {
               {mode === "upload" ? (
                 <Button
                   onClick={runInference}
-                  disabled={!image || running}
+                  disabled={!image || running || !selectedJobId}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white"
                 >
                   {running ? <Loader className="animate-spin mr-2" /> : <Play className="mr-2" />}
@@ -342,6 +378,7 @@ export default function InferenceTab() {
               ) : (
                 <Button
                   onClick={webcamRunning ? stopWebcamInference : startWebcamInference}
+                  disabled={!selectedJobId}
                   variant={webcamRunning ? "destructive" : "default"}
                   className={cn(
                     "w-full",

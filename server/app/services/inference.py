@@ -16,7 +16,12 @@ class YOLOInference:
             model_path: Path to YOLO model weights
         """
         self.model = YOLO(model_path)
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if torch.cuda.is_available():
+            self.device = 'cuda'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = 'mps'
+        else:
+            self.device = 'cpu'
         
     def predict(
         self, 

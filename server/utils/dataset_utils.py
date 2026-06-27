@@ -82,61 +82,7 @@ def create_filtered_dataset(
         dst_images_dir.mkdir(parents=True, exist_ok=True)
         dst_labels_dir.mkdir(parents=True, exist_ok=True)
         
-        # 4. Process files
-        for label_file in src_labels_dir.glob("*.txt"):
-            # Read label to see if it contains any of the selected classes
-            with open(label_file, 'r') as f:
-                lines = f.readlines()
-                
-            new_lines = []
-            has_selected_class = False
-            
-            for line in lines:
-                parts = line.strip().split()
-                if not parts:
-                    continue
-                    
-                class_id = int(parts[0])
-                
-                if class_id in new_class_mapping:
-                    has_selected_class = True
-                    new_class_id = new_class_mapping[class_id]
-                    # Reconstruct line with new class ID
-                    new_line = f"{new_class_id} {' '.join(parts[1:])}\n"
-                    new_lines.append(new_line)
-            
-            # If image has relevant objects, copy image and write new label
-            # Option: strict (only images with objects) or loose (keep empty images?)
-            # Usually for training we want background images too, but if we are filtering 
-            # for specific objects, maybe we only want those?
-            # Let's keep images that had annotations. If an image had annotations but none 
-            # of the selected ones, it becomes a background image (empty label file).
-            # If it was already a background image, we keep it.
-            
-            # Logic: Always copy image. Write filtered label file.
-            
-            # Copy Image
-            image_name = label_file.stem
-            # Try to find extension
-            # This is tricky because we don't know the extension from the label file
-            # We'll search for the file in images dir
-            found_image = False
-            for ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
-                src_img = src_images_dir / f"{image_name}{ext}"
-                if src_img.exists():
-                    shutil.copy2(src_img, dst_images_dir / f"{image_name}{ext}")
-                    found_image = True
-                    break
-            
-            if found_image:
-                # Write new label file
-                with open(dst_labels_dir / label_file.name, 'w') as f:
-                    f.writelines(new_lines)
-                    
-        # Also copy background images (no label file)?
-        # For now we iterate based on labels. If there are images without labels (background), 
-        # they are skipped in this loop.
-        # To better support background images, we should iterate images instead.
+        # 4. Process files — iterate all images (handles both labeled and background images)
         
         # IMPROVED LOOP: Iterate images
         for image_file in src_images_dir.iterdir():
