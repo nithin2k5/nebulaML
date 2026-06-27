@@ -989,6 +989,61 @@ async def download_dataset(
         media_type="application/zip"
     )
 
+@router.delete("/datasets/{dataset_id}/images/{image_id}")
+async def delete_image(
+    dataset_id: str,
+    image_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Delete an image from a dataset
+    """
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+        
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
+    
+    # Find image
+    images = db_dataset.get("images", [])
+    img_to_delete = next((img for img in images if img["id"] == image_id), None)
+    
+    if not img_to_delete:
+        raise HTTPException(status_code=404, detail="Image not found")
+        
+    # Delete from database
+    success = DatasetService.delete_image(dataset_id, image_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete image from database")
+        
+    # Delete file from disk
+    image_path = Path(img_to_delete.get("path", f"datasets/{dataset_id}/images/{img_to_delete.get('filename', '')}"))
+    if image_path.exists():
+        try:
+            image_path.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete image file {image_path}: {e}")
+            
+    # Delete associated label file if exists
+    if img_to_delete.get('filename'):
+        label_path = Path(f"datasets/{dataset_id}/labels/{Path(img_to_delete.get('filename')).stem}.txt")
+        if label_path.exists():
+            try:
+                label_path.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to delete label file {label_path}: {e}")
+            
+    # Remove from memory dict
+    if dataset_id in datasets_db:
+        datasets_db[dataset_id]["images"] = [img for img in datasets_db[dataset_id].get("images", []) if img["id"] != image_id]
+        datasets_db[dataset_id]["updated_at"] = datetime.now().isoformat()
+        
+    annotation_id = f"{dataset_id}_{image_id}"
+    if annotation_id in annotations_db:
+        del annotations_db[annotation_id]
+        
+    return {"success": True, "message": "Image deleted"}
+
 @router.delete("/datasets/{dataset_id}")
 async def delete_dataset(
     dataset_id: str,

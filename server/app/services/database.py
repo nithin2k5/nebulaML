@@ -196,6 +196,49 @@ class DatasetService:
             return False
     
     @staticmethod
+    def delete_image(dataset_id: str, image_id: str) -> bool:
+        """Delete image from dataset database"""
+        connection = get_db_connection()
+        if not connection:
+            return False
+        
+        try:
+            cursor = connection.cursor(dictionary=True)
+            
+            # Check if image was annotated
+            cursor.execute("SELECT annotated FROM dataset_images WHERE id = %s AND dataset_id = %s", (image_id, dataset_id))
+            img_record = cursor.fetchone()
+            was_annotated = img_record and img_record.get('annotated', False)
+            
+            # Delete from dataset_images
+            cursor.execute("DELETE FROM dataset_images WHERE id = %s AND dataset_id = %s", (image_id, dataset_id))
+            
+            # Delete from annotations
+            annotation_id = f"{dataset_id}_{image_id}"
+            cursor.execute("DELETE FROM annotations WHERE id = %s", (annotation_id,))
+            
+            connection.commit()
+            
+            # Update counts
+            cursor.execute("""
+                UPDATE datasets 
+                SET total_images = (SELECT COUNT(*) FROM dataset_images WHERE dataset_id = %s),
+                    annotated_images = (SELECT COUNT(*) FROM dataset_images WHERE dataset_id = %s AND annotated = TRUE),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (dataset_id, dataset_id, dataset_id))
+            connection.commit()
+            
+            cursor.close()
+            connection.close()
+            return True
+        except Error as e:
+            print(f"Error deleting image: {e}")
+            if connection:
+                connection.close()
+            return False
+
+    @staticmethod
     def get_dataset_images(dataset_id: str) -> List[Dict]:
         """Get all images for a dataset"""
         connection = get_db_connection()

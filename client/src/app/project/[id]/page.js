@@ -14,6 +14,7 @@ import { useAuth } from "@/context/AuthContext";
 import WizardBanner from "@/components/WizardBanner";
 import ProjectOverview from "@/components/project/ProjectOverview";
 import ProjectUpload from "@/components/project/ProjectUpload";
+import ProjectImages from "@/components/project/ProjectImages";
 import ProjectAnnotate from "@/components/project/ProjectAnnotate";
 import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
@@ -173,6 +174,13 @@ export default function ProjectPage() {
             icon: Upload,
             status: (stats?.total_images > 0) ? 'complete' : 'pending',
             meta: `${stats?.total_images || 0} Images`
+        },
+        {
+            id: 'images',
+            label: 'Images',
+            icon: Grid,
+            status: (stats?.total_images > 0) ? 'complete' : 'pending',
+            meta: 'Manage Data'
         },
         {
             id: 'annotate',
@@ -360,6 +368,10 @@ export default function ProjectPage() {
 
                         <TabsContent value="upload" className="mt-0 h-full">
                             <ProjectUpload dataset={dataset} onUploadComplete={() => fetchStats(dataset.id)} onNavigate={handleTabChange} />
+                        </TabsContent>
+
+                        <TabsContent value="images" className="mt-0 h-full overflow-y-auto">
+                            <ProjectImages dataset={dataset} onRefresh={() => { fetchDataset(dataset.id); fetchStats(dataset.id); }} />
                         </TabsContent>
 
                         <TabsContent value="annotate" className="mt-0 h-full">
