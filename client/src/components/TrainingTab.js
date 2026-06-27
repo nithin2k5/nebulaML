@@ -173,6 +173,111 @@ function JobDetails({ jobId, status }) {
   );
 }
 
+// ── Live Job Tracker (SSE) ───────────────────────────────────────────────────
+function LiveJobTracker({ initialJob, onStop }) {
+  const { token } = useAuth();
+  const [job, setJob] = useState(initialJob);
+
+  useEffect(() => {
+    if (!token) return;
+    if (job.status !== "running" && job.status !== "pending") return;
+
+    const controller = new AbortController();
+    
+    const streamData = async () => {
+      try {
+        const response = await fetch(API_ENDPOINTS.TRAINING.STREAM(job.job_id), {
+          headers: { "Authorization": `Bearer ${token}` },
+          signal: controller.signal
+        });
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop(); // keep the last incomplete chunk in buffer
+          
+          for (const part of parts) {
+            if (part.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(part.slice(6));
+                setJob(data);
+              } catch(e) {}
+            }
+          }
+        }
+      } catch(e) {
+        if (e.name !== 'AbortError') console.error("Stream error:", e);
+      }
+    };
+    
+    streamData();
+    return () => controller.abort();
+  }, [job.job_id, token, job.status]);
+
+  return (
+    <div className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.06)]">
+      {/* Job header */}
+      <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
+        <div className="flex items-center gap-3">
+          <StatusBadge status={job.status} />
+          <div>
+            <p className="text-sm font-semibold">{job.config?.model_name || "yolov8n"}</p>
+            <p className="text-xs text-muted-foreground font-mono">
+              {job.config?.epochs} epochs · batch {job.config?.batch_size}
+              {job.current_epoch != null && ` · epoch ${job.current_epoch}/${job.config?.epochs}`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-2xl font-black font-mono text-blue-400 tabular-nums">
+            {Math.round(job.progress || 0)}%
+          </span>
+          <Button onClick={() => onStop(job.job_id)} variant="ghost" size="sm"
+            className="text-red-400 hover:bg-red-400/10 h-8 px-2">
+            <Square className="w-3.5 h-3.5 mr-1" /> Stop
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-3">
+        {/* Progress bar */}
+        <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
+          <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
+            style={{ width: `${Math.max(2, job.progress || 0)}%` }} />
+        </div>
+
+        {/* Live metrics */}
+        {job.metrics && Object.keys(job.metrics).length > 0 && (
+          <div className="grid grid-cols-4 gap-2">
+            {(job.metrics.map50 ?? job.metrics.mAP50) != null && (
+              <Pill label="mAP@50" value={Number(job.metrics.map50 ?? job.metrics.mAP50).toFixed(3)} color="text-emerald-400" />
+            )}
+            {(job.metrics["map50-95"] ?? job.metrics.mAP50_95) != null && (
+              <Pill label="mAP@50-95" value={Number(job.metrics["map50-95"] ?? job.metrics.mAP50_95).toFixed(3)} color="text-cyan-400" />
+            )}
+            {(job.metrics.precision) != null && (
+              <Pill label="Precision" value={Number(job.metrics.precision).toFixed(3)} color="text-amber-400" />
+            )}
+            {(job.metrics.recall) != null && (
+              <Pill label="Recall" value={Number(job.metrics.recall).toFixed(3)} color="text-blue-400" />
+            )}
+          </div>
+        )}
+
+        <JobChart jobId={job.job_id} status={job.status} />
+        <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function TrainingTab() {
   const { token } = useAuth();
@@ -405,60 +510,7 @@ export default function TrainingTab() {
                 No active runs. Start a training run to see live progress here.
               </div>
             ) : activeJobs.map(job => (
-              <div key={job.job_id}
-                className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.06)]">
-                {/* Job header */}
-                <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
-                  <div className="flex items-center gap-3">
-                    <StatusBadge status={job.status} />
-                    <div>
-                      <p className="text-sm font-semibold">{job.config?.model_name || "yolov8n"}</p>
-                      <p className="text-xs text-muted-foreground font-mono">
-                        {job.config?.epochs} epochs · batch {job.config?.batch_size}
-                        {job.current_epoch != null && ` · epoch ${job.current_epoch}/${job.config?.epochs}`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl font-black font-mono text-blue-400 tabular-nums">
-                      {Math.round(job.progress || 0)}%
-                    </span>
-                    <Button onClick={() => handleStop(job.job_id)} variant="ghost" size="sm"
-                      className="text-red-400 hover:bg-red-400/10 h-8 px-2">
-                      <Square className="w-3.5 h-3.5 mr-1" /> Stop
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="p-4 space-y-3">
-                  {/* Progress bar */}
-                  <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
-                    <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
-                      style={{ width: `${Math.max(2, job.progress || 0)}%` }} />
-                  </div>
-
-                  {/* Live metrics */}
-                  {job.metrics && Object.keys(job.metrics).length > 0 && (
-                    <div className="grid grid-cols-4 gap-2">
-                      {(job.metrics.map50 ?? job.metrics.mAP50) != null && (
-                        <Pill label="mAP@50" value={Number(job.metrics.map50 ?? job.metrics.mAP50).toFixed(3)} color="text-emerald-400" />
-                      )}
-                      {(job.metrics["map50-95"] ?? job.metrics.mAP50_95) != null && (
-                        <Pill label="mAP@50-95" value={Number(job.metrics["map50-95"] ?? job.metrics.mAP50_95).toFixed(3)} color="text-cyan-400" />
-                      )}
-                      {(job.metrics.precision) != null && (
-                        <Pill label="Precision" value={Number(job.metrics.precision).toFixed(3)} color="text-amber-400" />
-                      )}
-                      {(job.metrics.recall) != null && (
-                        <Pill label="Recall" value={Number(job.metrics.recall).toFixed(3)} color="text-blue-400" />
-                      )}
-                    </div>
-                  )}
-
-                  <JobChart jobId={job.job_id} status={job.status} />
-                  <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
-                </div>
-              </div>
+              <LiveJobTracker key={job.job_id} initialJob={job} onStop={handleStop} />
             ))}
           </section>
 

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Layers, RefreshCw, Eye, Download, ShieldCheck, AlertTriangle, XCircle, CheckCircle2 } from "lucide-react";
+import { Layers, RefreshCw, Eye, Download, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { toast } from 'sonner';
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
@@ -44,6 +44,44 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
         } catch(e) { /* non-critical */ }
         finally { setQualityLoading(false); }
     };
+
+    useEffect(() => {
+        if (!dataset?.id || !token) return;
+        const activeAugs = Object.values(augmentations).some(v => v);
+        if (!activeAugs) {
+            setPreviewData(null);
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            setPreviewLoading(true);
+            try {
+                const res = await fetch(API_ENDPOINTS.TRAINING.PREVIEW_AUGMENTATION, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        dataset_id: dataset.id,
+                        augmentations: augmentations
+                    })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success) {
+                        setPreviewData(data);
+                    }
+                }
+            } catch (e) {
+                console.error("Preview error:", e);
+            } finally {
+                setPreviewLoading(false);
+            }
+        }, 500);
+        
+        return () => clearTimeout(timer);
+    }, [augmentations, dataset?.id, token]);
 
     const handleSplit = async () => {
         const total = splitRatios.train + splitRatios.val + splitRatios.test;
@@ -400,42 +438,49 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
             </div>
 
             {/* Augmentation Preview */}
-            {previewData && (
+            {(previewData || previewLoading) && (
                 <Card>
                     <CardHeader>
-                        <CardTitle>Augmentation Preview</CardTitle>
-                        <CardDescription>Random sample: {previewData.original?.filename}</CardDescription>
+                        <CardTitle className="flex justify-between items-center">
+                            Augmentation Preview
+                            {previewLoading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+                        </CardTitle>
+                        <CardDescription>
+                            {previewData ? `Random sample: ${previewData.original?.filename}` : "Generating preview..."}
+                        </CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <p className="text-sm font-medium mb-2 text-center">Original</p>
-                                <div className="rounded-lg overflow-hidden border border-border bg-muted">
-                                    <img
-                                        src={`data:image/jpeg;base64,${previewData.original.base64}`}
-                                        alt="Original"
-                                        className="w-full h-auto"
-                                    />
+                    {previewData && (
+                        <CardContent>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-sm font-medium mb-2 text-center">Original</p>
+                                    <div className="rounded-lg overflow-hidden border border-border bg-muted">
+                                        <img
+                                            src={`data:image/jpeg;base64,${previewData.original.base64}`}
+                                            alt="Original"
+                                            className="w-full h-auto"
+                                        />
+                                    </div>
+                                    <p className="text-xs text-muted-foreground text-center mt-1">
+                                        {previewData.original.width}×{previewData.original.height}
+                                    </p>
                                 </div>
-                                <p className="text-xs text-muted-foreground text-center mt-1">
-                                    {previewData.original.width}×{previewData.original.height}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-sm font-medium mb-2 text-center">Augmented</p>
-                                <div className="rounded-lg overflow-hidden border border-primary/50 bg-muted">
-                                    <img
-                                        src={`data:image/jpeg;base64,${previewData.augmented.base64}`}
-                                        alt="Augmented"
-                                        className="w-full h-auto"
-                                    />
+                                <div>
+                                    <p className="text-sm font-medium mb-2 text-center">Augmented</p>
+                                    <div className="rounded-lg overflow-hidden border border-primary/50 bg-muted">
+                                        <img
+                                            src={`data:image/jpeg;base64,${previewData.augmented.base64}`}
+                                            alt="Augmented"
+                                            className="w-full h-auto"
+                                        />
+                                    </div>
+                                    <p className="text-xs text-muted-foreground text-center mt-1">
+                                        {previewData.augmented.width}×{previewData.augmented.height}
+                                    </p>
                                 </div>
-                                <p className="text-xs text-muted-foreground text-center mt-1">
-                                    {previewData.augmented.width}×{previewData.augmented.height}
-                                </p>
                             </div>
-                        </div>
-                    </CardContent>
+                        </CardContent>
+                    )}
                 </Card>
             )}
 
