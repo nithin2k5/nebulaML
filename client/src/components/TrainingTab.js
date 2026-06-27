@@ -43,7 +43,7 @@ function JobChart({ jobId, status }) {
       const t = setInterval(fetch_, 3000);
       return () => clearInterval(t);
     }
-  }, [jobId, status]);
+  }, [jobId, status, fetch_]);
 
   if (metrics.length === 0) return null;
   return (
@@ -95,6 +95,82 @@ function fmtBytes(b) {
   if (!b) return "—";
   const i = Math.floor(Math.log(b) / Math.log(1024));
   return (b / Math.pow(1024, i)).toFixed(1) + " " + ["B","KB","MB","GB"][i];
+}
+
+// ── Job Details (Confusion Matrix & Per-Class Metrics) ────────────────────────
+function JobDetails({ jobId, status }) {
+  const { token } = useAuth();
+  const [perClass, setPerClass] = useState([]);
+  const [cmUrl, setCmUrl] = useState(null);
+
+  useEffect(() => {
+    if (status !== "completed" && status !== "success") return;
+    
+    // Fetch per-class metrics
+    fetch(API_ENDPOINTS.TRAINING.PER_CLASS_METRICS(jobId), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.per_class_metrics) {
+          setPerClass(d.per_class_metrics);
+        }
+      })
+      .catch(() => {});
+      
+    // Fetch confusion matrix image blob
+    fetch(API_ENDPOINTS.TRAINING.CONFUSION_MATRIX(jobId), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.ok ? r.blob() : null)
+      .then(blob => {
+        if (blob) setCmUrl(URL.createObjectURL(blob));
+      })
+      .catch(() => {});
+  }, [jobId, status, token]);
+
+  if (status !== "completed" && status !== "success") return null;
+  if (!perClass.length && !cmUrl) return null;
+
+  return (
+    <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4 px-4 pb-4">
+      {cmUrl && (
+        <div className="border border-white/5 bg-black/20 rounded-xl p-3">
+          <p className="text-xs font-semibold text-gray-400 mb-2 uppercase">Confusion Matrix</p>
+          <img src={cmUrl} alt="Confusion Matrix" className="w-full h-auto rounded-lg" />
+        </div>
+      )}
+      {perClass.length > 0 && (
+        <div className="border border-white/5 bg-black/20 rounded-xl p-3 overflow-hidden flex flex-col">
+          <p className="text-xs font-semibold text-gray-400 mb-2 uppercase">Per-Class Metrics</p>
+          <div className="overflow-auto custom-scrollbar flex-1 max-h-[300px]">
+            <table className="w-full text-xs text-left">
+              <thead className="text-gray-500 bg-white/[0.02] sticky top-0">
+                <tr>
+                  <th className="px-2 py-1.5 rounded-tl-md">Class</th>
+                  <th className="px-2 py-1.5">mAP@50</th>
+                  <th className="px-2 py-1.5">mAP@50-95</th>
+                  <th className="px-2 py-1.5">Precision</th>
+                  <th className="px-2 py-1.5 rounded-tr-md">Recall</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {perClass.map((c, i) => (
+                  <tr key={i} className="hover:bg-white/[0.02]">
+                    <td className="px-2 py-1.5 font-medium text-gray-300">{c.class_name}</td>
+                    <td className="px-2 py-1.5 font-mono text-emerald-400">{Number(c.mAP50).toFixed(3)}</td>
+                    <td className="px-2 py-1.5 font-mono text-cyan-400">{Number(c.mAP50_95).toFixed(3)}</td>
+                    <td className="px-2 py-1.5 font-mono text-amber-400">{Number(c.precision).toFixed(3)}</td>
+                    <td className="px-2 py-1.5 font-mono text-blue-400">{Number(c.recall).toFixed(3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -363,15 +439,18 @@ export default function TrainingTab() {
 
                   {/* Live metrics */}
                   {job.metrics && Object.keys(job.metrics).length > 0 && (
-                    <div className="grid grid-cols-3 gap-2">
-                      {job.metrics.loss != null && (
-                        <Pill label="Box Loss" value={Number(job.metrics.loss).toFixed(4)} color="text-amber-400" />
+                    <div className="grid grid-cols-4 gap-2">
+                      {(job.metrics.map50 ?? job.metrics.mAP50) != null && (
+                        <Pill label="mAP@50" value={Number(job.metrics.map50 ?? job.metrics.mAP50).toFixed(3)} color="text-emerald-400" />
                       )}
-                      {(job.metrics.mAP50 ?? job.metrics.map50) != null && (
-                        <Pill label="mAP@50" value={Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)} color="text-emerald-400" />
+                      {(job.metrics["map50-95"] ?? job.metrics.mAP50_95) != null && (
+                        <Pill label="mAP@50-95" value={Number(job.metrics["map50-95"] ?? job.metrics.mAP50_95).toFixed(3)} color="text-cyan-400" />
                       )}
-                      {job.metrics.epoch != null && (
-                        <Pill label="Epoch" value={formatMetricValue(job.metrics.epoch)} color="text-blue-400" />
+                      {(job.metrics.precision) != null && (
+                        <Pill label="Precision" value={Number(job.metrics.precision).toFixed(3)} color="text-amber-400" />
+                      )}
+                      {(job.metrics.recall) != null && (
+                        <Pill label="Recall" value={Number(job.metrics.recall).toFixed(3)} color="text-blue-400" />
                       )}
                     </div>
                   )}
@@ -398,8 +477,8 @@ export default function TrainingTab() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {models.map((model, i) => (
-                  <div key={i}
+                {models.map((model) => (
+                  <div key={model.name}
                     className="group rounded-2xl bg-card/40 border border-white/5 hover:border-emerald-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden">
                     <div className="p-5 flex-1">
                       <div className="flex items-start justify-between mb-4">
@@ -449,10 +528,10 @@ export default function TrainingTab() {
             <section className="space-y-3">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Run History</p>
               <div className="space-y-2">
-                {finishedJobs.map((job, i) => {
+                {finishedJobs.map((job) => {
                   const open = expandedLogs[job.job_id];
                   return (
-                    <div key={job.job_id || i}
+                    <div key={job.job_id}
                       className="rounded-xl border border-white/5 bg-card/30 overflow-hidden">
                       <button className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors"
                         onClick={() => setExpandedLogs(p => ({ ...p, [job.job_id]: !p[job.job_id] }))}>
@@ -475,14 +554,18 @@ export default function TrainingTab() {
                       {open && (
                         <div className="border-t border-white/5">
                           {job.metrics && (
-                            <div className="grid grid-cols-3 gap-2 p-4">
-                              {job.metrics.loss != null && <Pill label="Loss" value={Number(job.metrics.loss).toFixed(4)} color="text-amber-400" />}
-                              {(job.metrics.mAP50 ?? job.metrics.map50) != null && <Pill label="mAP@50" value={Number(job.metrics.mAP50 ?? job.metrics.map50).toFixed(3)} color="text-emerald-400" />}
-                              {job.metrics.epoch != null && <Pill label="Epoch" value={formatMetricValue(job.metrics.epoch)} color="text-blue-400" />}
+                            <div className="grid grid-cols-4 gap-2 p-4">
+                              {(job.metrics.map50 ?? job.metrics.mAP50) != null && <Pill label="mAP@50" value={Number(job.metrics.map50 ?? job.metrics.mAP50).toFixed(3)} color="text-emerald-400" />}
+                              {(job.metrics["map50-95"] ?? job.metrics.mAP50_95) != null && <Pill label="mAP@50-95" value={Number(job.metrics["map50-95"] ?? job.metrics.mAP50_95).toFixed(3)} color="text-cyan-400" />}
+                              {(job.metrics.precision) != null && <Pill label="Precision" value={Number(job.metrics.precision).toFixed(3)} color="text-amber-400" />}
+                              {(job.metrics.recall) != null && <Pill label="Recall" value={Number(job.metrics.recall).toFixed(3)} color="text-blue-400" />}
                             </div>
                           )}
                           <JobChart jobId={job.job_id} status={job.status} />
-                          <GamifiedTerminal output={job.output} isRunning={false} />
+                          <JobDetails jobId={job.job_id} status={job.status} />
+                          <div className="px-4 pb-4">
+                            <GamifiedTerminal output={job.output} isRunning={false} />
+                          </div>
                         </div>
                       )}
                     </div>

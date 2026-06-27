@@ -201,7 +201,8 @@ class VersioningEngine:
             'train': 'train/images',
             'val': 'val/images' if val_has_images else 'train/images',
             'test': 'test/images' if test_has_images else '',
-            'names': {i: name for i, name in enumerate(classes)}
+            'names': {i: name for i, name in enumerate(classes)},
+            'nc': len(classes)
         }
         
         with open(yaml_path, 'w') as f:
@@ -214,8 +215,8 @@ class VersioningEngine:
             cur = conn.cursor()
             cur.execute("UPDATE dataset_versions SET yaml_path = %s WHERE id = %s", (str(yaml_path), version_id))
             conn.commit()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to update yaml_path in DB for version {version_id}: {e}")
         finally:
             if conn: conn.close()
 

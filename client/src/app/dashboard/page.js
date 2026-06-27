@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardStats from "@/components/DashboardStats";
 import DatasetsTab from "@/components/DatasetsTab";
+import TrainingTab from "@/components/TrainingTab";
 import TestTab from "@/components/TestTab";
 import ModelsTab from "@/components/ModelsTab";
 import SettingsTab from "@/components/SettingsTab";
@@ -31,6 +32,7 @@ export default function DashboardPage() {
     { id: "dashboard", label: "Overview", icon: Activity },
     { id: "datasets", label: "Projects", icon: Database },
     { id: "workflow", label: "CV Guide", icon: BookOpen },
+    { id: "training", label: "Training", icon: Cpu },
     { id: "chat", label: "Assistant", icon: MessageSquare },
     { id: "test", label: "Test", icon: Zap },
     { id: "models", label: "Models", icon: Box },
@@ -169,6 +171,7 @@ export default function DashboardPage() {
                 {activeTab === "dashboard" && <DashboardStats onNavigate={setActiveTab} />}
                 {activeTab === "datasets" && <DatasetsTab />}
                 {activeTab === "workflow" && <WorkflowGuide />}
+                {activeTab === "training" && <TrainingTab />}
                 {activeTab === "chat" && <ChatbotTab />}
                 {activeTab === "test" && <TestTab />}
                 {activeTab === "models" && <ModelsTab />}

@@ -366,6 +366,7 @@ class YOLOTrainer:
                         pass
                 
                 callback = TrainingCallback(job, stop_event, pause_event)
+                model.add_callback('on_train_epoch_end', callback.on_train_epoch_end)
                 
                 # Start training
                 self.logger.info(f"Starting training for job {job_id}")

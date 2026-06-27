@@ -118,8 +118,10 @@ class TrainingConfig(BaseModel):
         }
         if self.preset and self.preset in presets:
             p = presets[self.preset]
+            set_fields = getattr(self, "__fields_set__", set())
             for k, v in p.items():
-                setattr(self, k, v)
+                if k not in set_fields:
+                    setattr(self, k, v)
         return self
     
     @validator('epochs')
@@ -433,7 +435,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         train_params["on_train_epoch_end"] = epoch_end_callback
         
         logger.info(f"Training parameters: {train_params}")
-        results = trainer.train(**train_params)
+        results = await asyncio.to_thread(trainer.train, **train_params)
 
         if training_jobs[job_id].get("cancel_requested"):
             upd = {
@@ -533,7 +535,11 @@ async def stream_job_details(job_id: str, current_user: dict = Depends(get_curre
             epoch = current_job.get("current_epoch")
             
             # Yield if something changed (status or epoch) or periodically to keep-alive
-            payload = json.dumps(current_job, default=str)
+            # Omit full output to prevent massive payloads
+            payload_dict = current_job.copy()
+            if "output" in payload_dict and len(payload_dict["output"]) > 1000:
+                payload_dict["output"] = payload_dict["output"][-1000:]
+            payload = json.dumps(payload_dict, default=str)
             yield f"data: {payload}\n\n"
             
             if status in ("completed", "failed", "cancelled", "success"):
@@ -586,10 +592,12 @@ async def list_training_jobs(current_user: dict = Depends(get_current_user)):
     List all training jobs
     """
     _ensure_jobs_loaded()
+    uid = current_user.get("id")
     return {
         "jobs": [
             {"job_id": job_id, **job_data}
             for job_id, job_data in training_jobs.items()
+            if job_data.get("user_id") is None or job_data.get("user_id") == uid
         ]
     }
 
@@ -644,7 +652,7 @@ async def get_training_metrics(job_id: str, current_user: dict = Depends(get_cur
 
 
 @router.get("/preflight/{dataset_id}")
-async def preflight_check(dataset_id: str):
+async def preflight_check(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
     Run pre-flight validation before training.
     Returns warnings (informational) and blockers (prevent training).
@@ -742,7 +750,7 @@ async def preflight_check(dataset_id: str):
 
 
 @router.get("/job/{job_id}/confusion-matrix")
-async def get_confusion_matrix(job_id: str):
+async def get_confusion_matrix(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Return the confusion matrix image for a completed training job.
     """
@@ -762,7 +770,7 @@ async def get_confusion_matrix(job_id: str):
 
 
 @router.get("/job/{job_id}/per-class-metrics")
-async def get_per_class_metrics(job_id: str):
+async def get_per_class_metrics(job_id: str, current_user: dict = Depends(get_current_user)):
     """
     Return per-class precision, recall, mAP50 from the results.
     """
@@ -792,7 +800,7 @@ async def get_per_class_metrics(job_id: str):
 
 
 @router.post("/auto-retrain-config")
-async def set_auto_retrain_config(config: AutoRetrainConfig):
+async def set_auto_retrain_config(config: AutoRetrainConfig, current_user: dict = Depends(get_current_user)):
     """
     Configure auto-retrain triggers for a dataset. Persisted to MySQL.
     """
@@ -806,7 +814,7 @@ async def set_auto_retrain_config(config: AutoRetrainConfig):
 
 
 @router.get("/auto-retrain-config/{dataset_id}")
-async def get_auto_retrain_config(dataset_id: str):
+async def get_auto_retrain_config(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
     Get auto-retrain configuration for a dataset.
     """
@@ -1065,7 +1073,7 @@ class PreviewAugmentationRequest(BaseModel):
 
 
 @router.post("/preview-augmentation")
-async def preview_augmentation(request: PreviewAugmentationRequest):
+async def preview_augmentation(request: PreviewAugmentationRequest, current_user: dict = Depends(get_current_user)):
     """
     Preview augmentation on a random image from the dataset.
     Returns original and augmented images as base64.
