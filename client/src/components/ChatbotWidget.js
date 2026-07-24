@@ -6,9 +6,13 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePathname } from "next/navigation";
 
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
+
 export default function ChatbotWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
+  const { token } = useAuth();
   
   const [messages, setMessages] = useState([
     {
@@ -35,26 +39,35 @@ export default function ChatbotWidget() {
     return null;
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userMessage = { role: "user", content: input.trim() };
-    setMessages((prev) => [...prev, userMessage]);
+    const currentMessages = [...messages, userMessage];
+    setMessages(currentMessages);
     setInput("");
     setIsLoading(true);
 
-    // Mock response delay
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "I'm a placeholder for the future LLM response. Currently, I just echo that I've received your message!",
+    try {
+      const response = await fetch(API_ENDPOINTS.CHAT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
         },
-      ]);
+        body: JSON.stringify({ messages: currentMessages })
+      });
+
+      if (!response.ok) throw new Error("Failed to get response");
+      
+      const data = await response.json();
+      setMessages(prev => [...prev, data]);
+    } catch (error) {
+      console.error("Chat error:", error);
+    } finally {
       setIsLoading(false);
-    }, 1200);
+    }
   };
 
   const handleKeyDown = (e) => {

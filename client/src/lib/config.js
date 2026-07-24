@@ -72,8 +72,11 @@ export const API_ENDPOINTS = {
         ME: `${API_BASE_URL}/api/auth/me`,
         UPDATE_PROFILE: `${API_BASE_URL}/api/auth/me`,
         STATS: `${API_BASE_URL}/api/auth/me/stats`,
+        API_KEYS: `${API_BASE_URL}/api/auth/api-keys`,
+        API_KEYS_REVOKE: (id) => `${API_BASE_URL}/api/auth/api-keys/${id}`,
     },
     HEALTH: `${API_BASE_URL}/health`,
+    CHAT: `${API_BASE_URL}/api/chat`,
     VIDEO: {
         EXTRACT_FRAMES: `${API_BASE_URL}/api/video/extract-frames`,
     },

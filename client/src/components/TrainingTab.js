@@ -12,8 +12,9 @@ import {
   Upload, Play, Square, RefreshCw, CheckCircle, XCircle,
   Clock, Cpu, Activity, Loader2, Download, Trash2,
   Box, HardDrive, TrendingUp, ChevronDown, ChevronUp,
-  Zap, Terminal
+  Zap, Terminal, Plus
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import GamifiedTerminal from "./GamifiedTerminal";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
@@ -281,18 +282,9 @@ function LiveJobTracker({ initialJob, onStop }) {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function TrainingTab() {
   const { token } = useAuth();
-  const [config, setConfig] = useState({
-    model_name: "yolov8n.pt",
-    epochs: 50,
-    batch_size: 16,
-    img_size: 640,
-    dataset_yaml: null,
-    dataset_yaml_name: "",
-  });
   const [jobs, setJobs] = useState([]);
-  const [models, setModels] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState({});
+  const router = useRouter();
 
   // ── Fetch jobs ──────────────────────────────────────────────────────────────
   const fetchJobs = useCallback(async () => {
@@ -308,50 +300,11 @@ export default function TrainingTab() {
     } catch (_) {}
   }, [token]);
 
-  // ── Fetch models ────────────────────────────────────────────────────────────
-  const fetchModels = useCallback(async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(API_ENDPOINTS.MODELS.LIST, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const d = await res.json();
-        setModels(d.models || []);
-      }
-    } catch (_) {}
-  }, [token]);
-
   useEffect(() => {
     fetchJobs();
-    fetchModels();
     const jt = setInterval(fetchJobs, 5000);
-    const mt = setInterval(fetchModels, 10000);
-    return () => { clearInterval(jt); clearInterval(mt); };
-  }, [token]);
-
-  // ── Start training ──────────────────────────────────────────────────────────
-  const handleStart = async () => {
-    if (!config.dataset_yaml) { toast.error("Upload a dataset YAML first"); return; }
-    setSubmitting(true);
-    const fd = new FormData();
-    fd.append("dataset_yaml", config.dataset_yaml);
-    fd.append("model_name", config.model_name);
-    fd.append("epochs", config.epochs);
-    fd.append("batch_size", config.batch_size);
-    fd.append("img_size", config.img_size);
-    try {
-      const res = await fetch(API_ENDPOINTS.TRAINING.START, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      const d = await res.json();
-      if (res.ok) { toast.success(`Training started — Job ${d.job_id}`); fetchJobs(); }
-      else toast.error(d.detail || "Failed to start");
-    } catch (e) { toast.error(e.message); }
-    finally { setSubmitting(false); }
-  };
+    return () => { clearInterval(jt); };
+  }, [fetchJobs]);
 
   // ── Stop job ────────────────────────────────────────────────────────────────
   const handleStop = async (jobId) => {
@@ -366,25 +319,131 @@ export default function TrainingTab() {
     } catch (e) { toast.error(e.message); }
   };
 
-  // ── Download model ──────────────────────────────────────────────────────────
-  const handleDownload = async (name) => {
-    try {
-      const res = await fetch(API_ENDPOINTS.MODELS.DOWNLOAD(name), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `${name}_best.pt`;
-      document.body.appendChild(a); a.click();
-      URL.revokeObjectURL(url); a.remove();
-      toast.success(`Downloading ${name}…`);
-    } catch (e) { toast.error("Download failed"); }
-  };
+  const toggleLogs = (jid) => setExpandedLogs((prev) => ({ ...prev, [jid]: !prev[jid] }));
 
-  // ── Delete model ────────────────────────────────────────────────────────────
-  const handleDeleteModel = async (name) => {
-    if (!confirm(`Delete model "${name}"?`)) return;
+  return (
+    <div className="space-y-8 animate-fade-in text-gray-100">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Training Hub</h2>
+          <p className="text-muted-foreground mt-1">Monitor and manage training jobs across all your projects.</p>
+        </div>
+        <Button 
+          onClick={() => router.push("/dashboard")} 
+          className="bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-500/20"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          New Training (Go to Projects)
+        </Button>
+      </div>
+
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-semibold flex items-center gap-2">
+            <Activity className="w-5 h-5 text-blue-400" /> Training Queue
+          </h3>
+          <Button variant="outline" size="sm" onClick={fetchJobs} className="h-8 bg-white/5 border-white/10 hover:bg-white/10">
+            <RefreshCw className="w-3.5 h-3.5 mr-2" /> Refresh
+          </Button>
+        </div>
+
+        <div className="space-y-4">
+          {jobs.length === 0 ? (
+            <div className="p-12 border border-white/5 bg-white/[0.02] rounded-2xl flex flex-col items-center justify-center text-center">
+              <Cpu className="w-12 h-12 text-gray-600 mb-4" />
+              <p className="text-gray-400 font-medium">No training jobs found.</p>
+              <p className="text-sm text-gray-500 mt-1">Configure and start a job from within a project.</p>
+            </div>
+          ) : (
+            jobs.map(job => (
+              <div key={job.job_id} className="rounded-2xl border border-white/10 bg-black/40 overflow-hidden shadow-xl backdrop-blur-md">
+                {/* Job Header */}
+                <div className="p-5 border-b border-white/5 flex flex-wrap items-center justify-between gap-4 bg-white/[0.02]">
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
+                      job.status === "running" ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
+                      job.status === "completed" || job.status === "success" ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
+                      job.status === "cancelled" ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
+                      "bg-red-500/20 border-red-500/30 text-red-400"
+                    )}>
+                      <Cpu className={cn("w-5 h-5", job.status === "running" && "animate-pulse")} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <h4 className="font-semibold text-gray-100">{job.config?.model_name || "YOLOv8 Model"}</h4>
+                        <StatusBadge status={job.status} />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1 font-mono">{job.job_id}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    {job.status === "running" && (
+                      <Button variant="destructive" size="sm" onClick={() => handleStop(job.job_id)} className="h-8 shadow-lg shadow-red-500/20">
+                        <Square className="w-3.5 h-3.5 mr-2" /> Stop
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => toggleLogs(job.job_id)}
+                      className="h-8 bg-white/5 border-white/10 hover:bg-white/10 text-gray-300"
+                    >
+                      <Terminal className="w-3.5 h-3.5 mr-2" />
+                      {expandedLogs[job.job_id] ? "Hide Details" : "Details"}
+                      {expandedLogs[job.job_id] ? <ChevronUp className="w-3.5 h-3.5 ml-2" /> : <ChevronDown className="w-3.5 h-3.5 ml-2" />}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Job Info Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/5">
+                  <Pill label="Epochs" value={`${job.current_epoch || 0} / ${job.config?.epochs || 0}`} />
+                  <Pill label="Batch Size" value={job.config?.batch_size || "—"} />
+                  <Pill label="Img Size" value={job.config?.img_size || "—"} />
+                  <Pill label="mAP@50" value={formatMetricValue(job.results?.map50)} color="text-emerald-400" />
+                  <Pill label="Duration" value={`${job.duration_seconds ? Math.floor(job.duration_seconds/60) + "m" : "—"}`} />
+                </div>
+
+                {/* Expanded Content: Chart + Logs + Details */}
+                {expandedLogs[job.job_id] && (
+                  <div className="p-4 border-t border-white/5 bg-[#0a0a0a]">
+                    {job.status === "running" ? (
+                      <LiveJobTracker initialJob={job} onStop={handleStop} />
+                    ) : (
+                      <>
+                        <div className="mb-4">
+                          <JobChart jobId={job.job_id} status={job.status} />
+                        </div>
+                        
+                        {(job.status === "completed" || job.status === "success") && (
+                          <div className="mb-4 border-t border-white/5 pt-4">
+                              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-400"/> Detailed Evaluation</h4>
+                              <JobDetails jobId={job.job_id} status={job.status} />
+                          </div>
+                        )}
+                        
+                        <div className="mt-4">
+                          <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 flex items-center gap-2">
+                            <Terminal className="w-3.5 h-3.5" /> Output Stream
+                          </h4>
+                          <div className="rounded-xl overflow-hidden border border-white/10 shadow-2xl">
+                              <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
     try {
       const res = await fetch(API_ENDPOINTS.MODELS.DELETE(name), {
         method: "DELETE", headers: { Authorization: `Bearer ${token}` },
