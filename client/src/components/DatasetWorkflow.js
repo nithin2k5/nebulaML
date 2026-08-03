@@ -15,7 +15,6 @@ import {
   Box,
   Layers,
   Loader2,
-  Loader2,
   AlertCircle,
   Settings2,
   ChevronDown,

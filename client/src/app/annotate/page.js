@@ -119,6 +119,7 @@ function AnnotationToolContent() {
   // Propagate-to-all feature
   const [showPropagateModal, setShowPropagateModal] = useState(false);
   const [propagateMode, setPropagateMode] = useState('skip_annotated'); // 'overwrite' | 'skip_annotated'
+  const [smartDetect, setSmartDetect] = useState(true);
   const [isPropagating, setIsPropagating] = useState(false);
 
   const [activeTool, setActiveTool] = useState('box'); // 'select', 'box', 'polygon', 'joint', 'ai'
@@ -1624,7 +1625,7 @@ function AnnotationToolContent() {
     }
 
     setIsPropagating(true);
-    const toastId = toast.loading('Applying annotations to all images...');
+    const toastId = toast.loading(smartDetect ? 'Detecting and marking matching objects across all images...' : 'Applying annotations to all images...');
     try {
       const response = await fetch(API_ENDPOINTS.ANNOTATIONS.PROPAGATE_TO_ALL, {
         method: 'POST',
@@ -1640,6 +1641,7 @@ function AnnotationToolContent() {
           boxes: currentBoxes,
           mode: propagateMode,
           annotation_type: annotationType,
+          smart_detect: smartDetect,
         }),
       });
 
@@ -1663,7 +1665,7 @@ function AnnotationToolContent() {
     } finally {
       setIsPropagating(false);
     }
-  }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, annotationType, fetchDataset, fetchStats]);
+  }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, smartDetect, annotationType, fetchDataset, fetchStats]);
 
   // Auto-save when boxes change (debounced)
   useEffect(() => {
@@ -1711,6 +1713,16 @@ function AnnotationToolContent() {
     } else if (selectedBoxIndex > index) {
       setSelectedBoxIndex(selectedBoxIndex - 1);
     }
+  };
+
+  const handleClearAllBoxes = () => {
+    if (boxesRef.current.length === 0) return;
+    setBoxHistory(prev => [...prev, boxesRef.current]);
+    boxesRef.current = [];
+    setBoxes([]);
+    setSelectedBoxIndex(-1);
+    setHoveredBoxIndex(-1);
+    showToast("Cleared all annotations from current image");
   };
 
   const handleZoom = (delta) => {
@@ -2509,6 +2521,15 @@ function AnnotationToolContent() {
               >
                 <Cpu className="mr-2 w-3.5 h-3.5" /> Train Model
               </Button>
+              {boxes.length > 0 && (
+                <Button
+                  onClick={handleClearAllBoxes}
+                  variant="outline"
+                  className="w-full border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 h-9 text-sm transition-colors"
+                >
+                  <Trash2 className="mr-2 w-3.5 h-3.5 text-red-400" /> Clear Current Image
+                </Button>
+              )}
               {boxHistory.length > 0 && (
                 <Button
                   onClick={() => {
@@ -2599,6 +2620,49 @@ function AnnotationToolContent() {
                   Copy the <span className="text-white font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</span> from
                   this image to every other image in the dataset.
                 </p>
+              </div>
+            </div>
+
+            {/* Strategy selector */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Detection Strategy</p>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  onClick={() => setSmartDetect(true)}
+                  className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                    smartDetect
+                      ? 'border-purple-500/60 bg-purple-500/10'
+                      : 'border-white/10 hover:border-white/20 bg-white/5'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                    smartDetect ? 'border-purple-400 bg-purple-400' : 'border-gray-600'
+                  }`} />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-white">Smart Visual Object Detection</p>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">Recommended</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">Uses computer vision pattern matching to locate and mark the same objects across different positions and scales.</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setSmartDetect(false)}
+                  className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                    !smartDetect
+                      ? 'border-indigo-500/60 bg-indigo-500/10'
+                      : 'border-white/10 hover:border-white/20 bg-white/5'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                    !smartDetect ? 'border-indigo-400 bg-indigo-400' : 'border-gray-600'
+                  }`} />
+                  <div>
+                    <p className="text-sm font-medium text-white">Fixed Coordinate Copy</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Copies bounding boxes to the exact same relative spatial coordinates in every image.</p>
+                  </div>
+                </button>
               </div>
             </div>
 
