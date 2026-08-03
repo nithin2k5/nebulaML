@@ -4,8 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { Send, User, Loader2, Plus, Mic, Sparkles, Image as ImageIcon, Video, Cpu, Code } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
-import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from "sonner";
+import { API_ENDPOINTS } from "@/lib/config";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function ChatbotTab() {
   const { token } = useAuth();
