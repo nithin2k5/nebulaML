@@ -16,7 +16,7 @@ import { API_ENDPOINTS } from "@/lib/config";
 import {
   Save, Trash2, Upload, ChevronLeft, ChevronRight, Home,
   Download, ZoomIn, ZoomOut, RotateCcw, Maximize, Check, Copy, Clipboard, Sparkles, Cpu,
-  MousePointer2, Square, Hexagon, GitCommit, Wand2, Eraser
+  MousePointer2, Square, Hexagon, GitCommit, Wand2, Eraser, CopyPlus, Layers, AlertTriangle
 } from "lucide-react";
 
 // --- Real-time annotation validation ---
@@ -115,6 +115,11 @@ function AnnotationToolContent() {
   const [copiedBoxes, setCopiedBoxes] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'unlabeled', 'predicted', 'annotated', 'reviewed'
   const [annotationType, setAnnotationType] = useState('detection'); // 'detection' or 'classification'
+
+  // Propagate-to-all feature
+  const [showPropagateModal, setShowPropagateModal] = useState(false);
+  const [propagateMode, setPropagateMode] = useState('skip_annotated'); // 'overwrite' | 'skip_annotated'
+  const [isPropagating, setIsPropagating] = useState(false);
 
   const [activeTool, setActiveTool] = useState('box'); // 'select', 'box', 'polygon', 'joint', 'ai'
   const [currentPoints, setCurrentPoints] = useState([]);
@@ -1603,6 +1608,63 @@ function AnnotationToolContent() {
     }
   }, [datasetId, images, currentImageIndex, dataset, token, reviewStatus, selectedSplit, annotationType, fetchStats]);
 
+  // ── Propagate current annotations to all images in the dataset ──────────────
+  const handlePropagateToAll = useCallback(async () => {
+    if (!dataset || !token || !images[currentImageIndex]) return;
+    const naturalWidth = imageRef.current?.naturalWidth || 0;
+    const naturalHeight = imageRef.current?.naturalHeight || 0;
+    if (naturalWidth === 0 || naturalHeight === 0) {
+      toast.error('Image dimensions not available. Please wait for the image to load.');
+      return;
+    }
+    const currentBoxes = boxesRef.current;
+    if (currentBoxes.length === 0) {
+      toast.error('No annotations to propagate. Draw at least one box first.');
+      return;
+    }
+
+    setIsPropagating(true);
+    const toastId = toast.loading('Applying annotations to all images...');
+    try {
+      const response = await fetch(API_ENDPOINTS.ANNOTATIONS.PROPAGATE_TO_ALL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          dataset_id: datasetId,
+          source_image_id: images[currentImageIndex].id,
+          source_width: naturalWidth,
+          source_height: naturalHeight,
+          boxes: currentBoxes,
+          mode: propagateMode,
+          annotation_type: annotationType,
+        }),
+      });
+
+      toast.dismiss(toastId);
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(
+          `✅ Applied to ${data.applied} image${data.applied !== 1 ? 's' : ''}` +
+          (data.skipped > 0 ? ` (${data.skipped} already annotated — skipped)` : '')
+        );
+        setShowPropagateModal(false);
+        await fetchDataset();
+        await fetchStats();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(`Failed: ${err.detail || response.statusText}`);
+      }
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error(`Error: ${e.message}`);
+    } finally {
+      setIsPropagating(false);
+    }
+  }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, annotationType, fetchDataset, fetchStats]);
+
   // Auto-save when boxes change (debounced)
   useEffect(() => {
     if (boxes.length === 0 && reviewStatus === 'unlabeled') return; // Don't save empty if already unlabeled
@@ -2422,6 +2484,14 @@ function AnnotationToolContent() {
               }} className="w-full bg-indigo-600 hover:bg-indigo-500 h-9 text-sm">
                 <Save className="mr-2 w-3.5 h-3.5" /> Save
               </Button>
+              {/* Apply to All Images */}
+              <Button
+                onClick={() => setShowPropagateModal(true)}
+                disabled={boxes.length === 0}
+                className="w-full h-9 text-sm bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-40 disabled:cursor-not-allowed border-0"
+              >
+                <CopyPlus className="mr-2 w-3.5 h-3.5" /> Apply to All Images
+              </Button>
               <Button
                 onClick={() => setShowAutoLabel(true)}
                 className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 h-9 text-sm border-0"
@@ -2507,6 +2577,119 @@ function AnnotationToolContent() {
           loadImage(currentImageIndex); // Reload current image if it was auto-labeled
         }}
       />
+
+      {/* ── Propagate-to-All Confirmation Modal ── */}
+      {showPropagateModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => !isPropagating && setShowPropagateModal(false)}
+          />
+          {/* Panel */}
+          <div className="relative z-10 w-[420px] bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl p-6 flex flex-col gap-5">
+            {/* Header */}
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center flex-shrink-0">
+                <CopyPlus className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-white">Apply Annotations to All Images</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Copy the <span className="text-white font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</span> from
+                  this image to every other image in the dataset.
+                </p>
+              </div>
+            </div>
+
+            {/* Mode selector */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Apply Mode</p>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  onClick={() => setPropagateMode('skip_annotated')}
+                  className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                    propagateMode === 'skip_annotated'
+                      ? 'border-indigo-500/60 bg-indigo-500/10'
+                      : 'border-white/10 hover:border-white/20 bg-white/5'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                    propagateMode === 'skip_annotated' ? 'border-indigo-400 bg-indigo-400' : 'border-gray-600'
+                  }`} />
+                  <div>
+                    <p className="text-sm font-medium text-white">Skip already-annotated images</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Only apply to unlabeled or AI-predicted images. Existing human annotations are preserved.</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setPropagateMode('overwrite')}
+                  className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                    propagateMode === 'overwrite'
+                      ? 'border-red-500/60 bg-red-500/10'
+                      : 'border-white/10 hover:border-white/20 bg-white/5'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                    propagateMode === 'overwrite' ? 'border-red-400 bg-red-400' : 'border-gray-600'
+                  }`} />
+                  <div>
+                    <p className="text-sm font-medium text-white">Overwrite all images</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Replace annotations on every image, including those already labelled. This cannot be undone.</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Warning */}
+            {propagateMode === 'overwrite' && (
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-300">
+                  This will permanently replace existing annotations on <span className="font-semibold">all {images.length - 1}</span> other images.
+                </p>
+              </div>
+            )}
+
+            {/* Scope summary */}
+            <div className="text-xs text-gray-500 bg-white/5 rounded-xl px-4 py-3 border border-white/5">
+              <span className="text-gray-300 font-medium">{images.length - 1}</span> image{images.length - 1 !== 1 ? 's' : ''} will be affected
+              {propagateMode === 'skip_annotated'
+                ? ' (unlabeled / predicted only)'
+                : ' (all images, regardless of status)'
+              }.
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="ghost"
+                className="flex-1 border border-white/10 hover:bg-white/5 text-gray-300"
+                onClick={() => setShowPropagateModal(false)}
+                disabled={isPropagating}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handlePropagateToAll}
+                disabled={isPropagating}
+                className={`flex-1 h-9 text-sm border-0 ${
+                  propagateMode === 'overwrite'
+                    ? 'bg-red-600 hover:bg-red-500'
+                    : 'bg-indigo-600 hover:bg-indigo-500'
+                }`}
+              >
+                {isPropagating ? (
+                  <><div className="w-3.5 h-3.5 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" /> Applying...</>
+                ) : (
+                  <><Layers className="mr-2 w-3.5 h-3.5" /> Apply Now</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

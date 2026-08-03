@@ -1387,3 +1387,228 @@ async def download_format(
 
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {format}. Use: yolo, coco, voc, csv, createml")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Propagate Annotations to All Images
+# ──────────────────────────────────────────────────────────────────────────────
+
+class PropagateAnnotationsRequest(BaseModel):
+    dataset_id: str
+    source_image_id: str
+    source_width: int
+    source_height: int
+    boxes: List[dict]
+    mode: str = "overwrite"          # "overwrite" | "skip_annotated"
+    annotation_type: str = "detection"
+
+
+@router.post("/annotations/propagate-to-all")
+async def propagate_annotations_to_all(
+    request: PropagateAnnotationsRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Copy the bounding boxes from a source image to every image in the dataset.
+
+    Coordinates are normalised relative to the source image dimensions and then
+    re-scaled to each target image's actual dimensions (fetched via PIL), so the
+    propagation is safe even when the dataset contains images of varying sizes.
+
+    Modes
+    -----
+    overwrite        – Replace existing annotations on ALL images.
+    skip_annotated   – Only apply to images that are currently unlabeled/predicted.
+    """
+    dataset_id = request.dataset_id
+    source_image_id = request.source_image_id
+    source_width = request.source_width
+    source_height = request.source_height
+    boxes = request.boxes
+    mode = request.mode
+    annotation_type = request.annotation_type
+
+    if source_width <= 0 or source_height <= 0:
+        raise HTTPException(status_code=400, detail="source_width and source_height must be positive integers")
+
+    # Verify dataset exists and caller has the annotator role or higher
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "annotator")
+
+    images = db_dataset.get("images", [])
+    if not images:
+        raise HTTPException(status_code=400, detail="Dataset has no images")
+
+    num_classes = len(db_dataset.get("classes", []))
+
+    # Validate class_ids in the provided boxes
+    for box in boxes:
+        cid = box.get("class_id", 0)
+        if num_classes > 0 and (cid < 0 or cid >= num_classes):
+            raise HTTPException(
+                status_code=400,
+                detail=f"class_id {cid} is out of range for this dataset ({num_classes} classes)",
+            )
+
+    # Normalise coordinates of each box relative to the source image.
+    # We store them as fractions [0‥1] so we can scale to any target size.
+    def _normalise_box(box: dict, sw: int, sh: int) -> dict:
+        """Return a copy of *box* with pixel coords replaced by normalised ones."""
+        nb = dict(box)
+        box_type = box.get("type", "box")
+        if box_type in ("polygon", "line"):
+            pts = box.get("points", [])
+            nb["points"] = [{"x": p["x"] / sw, "y": p["y"] / sh} for p in pts]
+        elif box_type == "joint":
+            nb["x"] = box["x"] / sw
+            nb["y"] = box["y"] / sh
+        else:
+            nb["x"] = box["x"] / sw
+            nb["y"] = box["y"] / sh
+            nb["width"] = box["width"] / sw
+            nb["height"] = box["height"] / sh
+        return nb
+
+    def _scale_box(norm_box: dict, tw: int, th: int) -> dict:
+        """Scale a normalised box to *target* pixel dimensions."""
+        sb = dict(norm_box)
+        box_type = norm_box.get("type", "box")
+        if box_type in ("polygon", "line"):
+            pts = norm_box.get("points", [])
+            sb["points"] = [{"x": p["x"] * tw, "y": p["y"] * th} for p in pts]
+        elif box_type == "joint":
+            sb["x"] = norm_box["x"] * tw
+            sb["y"] = norm_box["y"] * th
+        else:
+            sb["x"] = norm_box["x"] * tw
+            sb["y"] = norm_box["y"] * th
+            sb["width"] = norm_box["width"] * tw
+            sb["height"] = norm_box["height"] * th
+        return sb
+
+    normalised_boxes = [_normalise_box(b, source_width, source_height) for b in boxes]
+
+    dataset_dir = Path(f"datasets/{dataset_id}")
+    labels_dir = dataset_dir / "labels"
+    labels_dir.mkdir(exist_ok=True, parents=True)
+
+    # Pre-fetch annotation statuses for all images from the DB so that
+    # skip_annotated mode can correctly identify already-labelled images.
+    # The image dict from DatasetService only has 'annotated' (bool), not 'status'.
+    image_status_map: dict = {}  # image_id -> status string
+    if mode == "skip_annotated":
+        try:
+            _conn = get_db_connection()
+            if _conn:
+                _cur = _conn.cursor(dictionary=True)
+                _cur.execute(
+                    "SELECT image_id, status FROM annotations WHERE dataset_id = %s",
+                    (dataset_id,)
+                )
+                for row in _cur.fetchall():
+                    image_status_map[row["image_id"]] = row["status"]
+                _cur.close()
+                _conn.close()
+        except Exception as _e:
+            logger.warning(f"Could not pre-fetch annotation statuses: {_e}")
+            # Fall back: treat every image as unlabeled (i.e. apply to all)
+
+    applied = 0
+    skipped = 0
+
+    for img in images:
+        img_id = img["id"]
+
+        # Skip the source image itself
+        if img_id == source_image_id:
+            continue
+
+        # If mode is skip_annotated, leave images that already have annotations
+        if mode == "skip_annotated":
+            current_status = image_status_map.get(img_id, "unlabeled")
+            if current_status in ("annotated", "reviewed"):
+                skipped += 1
+                continue
+
+
+        # Determine the target image dimensions.
+        # First try the DB record, then fall back to reading via PIL.
+        target_width: int = img.get("width", 0)
+        target_height: int = img.get("height", 0)
+
+        if target_width <= 0 or target_height <= 0:
+            img_path = dataset_dir / "images" / img["filename"]
+            if img_path.exists():
+                try:
+                    with Image.open(img_path) as pil_img:
+                        target_width, target_height = pil_img.size
+                except Exception:
+                    # Can't determine dimensions; use source dimensions as fallback
+                    target_width = source_width
+                    target_height = source_height
+            else:
+                target_width = source_width
+                target_height = source_height
+
+        # Scale boxes to the target image dimensions
+        target_boxes = [_scale_box(nb, target_width, target_height) for nb in normalised_boxes]
+
+        # Persist via AnnotationService (same path as single-image save)
+        annotation_id = f"{dataset_id}_{img_id}"
+        AnnotationService.save_annotation(
+            annotation_id=annotation_id,
+            dataset_id=dataset_id,
+            image_id=img_id,
+            image_name=img["filename"],
+            width=target_width,
+            height=target_height,
+            boxes=target_boxes,
+            split=img.get("split"),
+            status="annotated",
+            annotation_type=annotation_type,
+        )
+
+        # Write YOLO label file
+        label_file = labels_dir / f"{Path(img['filename']).stem}.txt"
+        with open(label_file, "w") as f:
+            if annotation_type == "classification":
+                for box in target_boxes:
+                    f.write(f"{box['class_id']}\n")
+            else:
+                for box in target_boxes:
+                    tw, th = target_width, target_height
+                    if tw <= 0 or th <= 0:
+                        continue
+                    box_type = box.get("type", "box")
+                    if box_type in ("polygon", "line"):
+                        pts = box.get("points", [])
+                        if len(pts) < 2:
+                            continue
+                        coords = []
+                        for p in pts:
+                            coords.extend([
+                                f"{max(0.0, min(1.0, p['x'] / tw)):.6f}",
+                                f"{max(0.0, min(1.0, p['y'] / th)):.6f}",
+                            ])
+                        f.write(f"{box['class_id']} {' '.join(coords)}\n")
+                    elif box_type == "joint":
+                        cx = max(0.0, min(1.0, box["x"] / tw))
+                        cy = max(0.0, min(1.0, box["y"] / th))
+                        f.write(f"{box['class_id']} {cx:.6f} {cy:.6f} 0.02 0.02\n")
+                    else:
+                        cx = max(0.0, min(1.0, (box["x"] + box["width"] / 2) / tw))
+                        cy = max(0.0, min(1.0, (box["y"] + box["height"] / 2) / th))
+                        nw = max(0.0, min(1.0, box["width"] / tw))
+                        nh = max(0.0, min(1.0, box["height"] / th))
+                        f.write(f"{box['class_id']} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}\n")
+
+        applied += 1
+
+    return JSONResponse(content={
+        "success": True,
+        "applied": applied,
+        "skipped": skipped,
+        "total_images": len(images) - 1,  # excluding source
+    })

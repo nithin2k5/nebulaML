@@ -25,12 +25,14 @@ export const API_ENDPOINTS = {
         GET_IMAGE: (datasetId, filename, token) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}${token ? `?token=${token}` : ''}`,
         GET_ANNOTATION: (datasetId, imageId) => `${API_BASE_URL}/api/annotations/annotations/${datasetId}/${imageId}`,
         SAVE: `${API_BASE_URL}/api/annotations/save`,
+        PROPAGATE_TO_ALL: `${API_BASE_URL}/api/annotations/annotations/propagate-to-all`,
         AUTO_LABEL: `${API_BASE_URL}/api/annotations/auto-label`,
         AUTO_LABEL_STATUS: (datasetId, jobId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/auto-label-status/${jobId}`,
         UNCERTAINTY: (datasetId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/uncertainty`,
         EXPORT_STATUS: (datasetId, jobId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/export-status/${jobId}`,
         DOWNLOAD: (datasetId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/download`,
     },
+
     TRAINING: {
         START: `${API_BASE_URL}/api/training/start`,
         START_FROM_DATASET: `${API_BASE_URL}/api/training/start-from-dataset`,
@@ -72,8 +74,11 @@ export const API_ENDPOINTS = {
         ME: `${API_BASE_URL}/api/auth/me`,
         UPDATE_PROFILE: `${API_BASE_URL}/api/auth/me`,
         STATS: `${API_BASE_URL}/api/auth/me/stats`,
+        API_KEYS: `${API_BASE_URL}/api/auth/api-keys`,
+        API_KEYS_REVOKE: (id) => `${API_BASE_URL}/api/auth/api-keys/${id}`,
     },
     HEALTH: `${API_BASE_URL}/health`,
+    CHAT: `${API_BASE_URL}/api/chat`,
     VIDEO: {
         EXTRACT_FRAMES: `${API_BASE_URL}/api/video/extract-frames`,
     },

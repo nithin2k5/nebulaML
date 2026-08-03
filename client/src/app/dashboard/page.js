@@ -12,13 +12,13 @@ import ModelsTab from "@/components/ModelsTab";
 import SettingsTab from "@/components/SettingsTab";
 import ProfileTab from "@/components/ProfileTab";
 import ChatbotTab from "@/components/ChatbotTab";
+import HelpContactTab from "@/components/HelpContactTab";
 import OnboardingTour from "@/components/OnboardingTour";
-import WorkflowGuide from "@/components/WorkflowGuide";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Activity, Database, Zap, Cpu, Box,
-  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle, MessageSquare, BookOpen
+  Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle, MessageSquare, LifeBuoy
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -31,13 +31,13 @@ export default function DashboardPage() {
   const tabs = [
     { id: "dashboard", label: "Overview", icon: Activity },
     { id: "datasets", label: "Projects", icon: Database },
-    { id: "workflow", label: "CV Guide", icon: BookOpen },
     { id: "training", label: "Training", icon: Cpu },
     { id: "chat", label: "Assistant", icon: MessageSquare },
     { id: "test", label: "Test", icon: Zap },
     { id: "models", label: "Models", icon: Box },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "profile", label: "Profile", icon: UserCircle },
+    { id: "help", label: "Help & Contact", icon: LifeBuoy },
   ];
 
   return (
@@ -170,13 +170,13 @@ export default function DashboardPage() {
               <div className="max-w-7xl mx-auto animate-fade-in space-y-8 p-6 md:p-8">
                 {activeTab === "dashboard" && <DashboardStats onNavigate={setActiveTab} />}
                 {activeTab === "datasets" && <DatasetsTab />}
-                {activeTab === "workflow" && <WorkflowGuide />}
                 {activeTab === "training" && <TrainingTab />}
                 {activeTab === "chat" && <ChatbotTab />}
                 {activeTab === "test" && <TestTab />}
                 {activeTab === "models" && <ModelsTab />}
                 {activeTab === "settings" && <SettingsTab />}
                 {activeTab === "profile" && <ProfileTab />}
+                {activeTab === "help" && <HelpContactTab onNavigate={setActiveTab} />}
               </div>
             </div>
           </main>

@@ -3,9 +3,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, User, Loader2, Plus, Mic, Sparkles, Image as ImageIcon, Video, Cpu, Code } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/context/AuthContext";
+import { API_ENDPOINTS } from "@/lib/config";
+import { toast } from "sonner";
 
 export default function ChatbotTab() {
+  const { token } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -19,26 +22,37 @@ export default function ChatbotTab() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e, customInput = null) => {
+  const handleSubmit = async (e, customInput = null) => {
     if (e) e.preventDefault();
     const finalInput = customInput || input;
     if (!finalInput.trim() || isLoading) return;
 
     const userMessage = { role: "user", content: finalInput.trim() };
-    setMessages((prev) => [...prev, userMessage]);
+    const currentMessages = [...messages, userMessage];
+    setMessages(currentMessages);
     setInput("");
     setIsLoading(true);
 
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "I've received your request! Our servers are processing the task and will get back to you shortly.",
+    try {
+      const response = await fetch(API_ENDPOINTS.CHAT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
         },
-      ]);
+        body: JSON.stringify({ messages: currentMessages })
+      });
+
+      if (!response.ok) throw new Error("Failed to get response");
+      
+      const data = await response.json();
+      setMessages(prev => [...prev, data]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      toast.error("Failed to communicate with assistant");
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const handleKeyDown = (e) => {

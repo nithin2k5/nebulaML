@@ -56,7 +56,7 @@ export default function ProjectDeploy({ dataset }) {
     const fetchApiKeys = useCallback(async () => {
         if (!token) return;
         try {
-            const res = await fetch(`${API_ENDPOINTS.AUTH.BASE || (API_ENDPOINTS.BASE_URL + "/auth")}/api-keys`, {
+            const res = await fetch(API_ENDPOINTS.AUTH.API_KEYS, {
                 headers: { "Authorization": `Bearer ${token}` }
             });
             if (res.ok) {
@@ -72,7 +72,7 @@ export default function ProjectDeploy({ dataset }) {
         if (!newKeyName.trim()) { toast.error("Key name required"); return; }
         setGeneratingKey(true);
         try {
-            const res = await fetch(`${API_ENDPOINTS.AUTH.BASE || (API_ENDPOINTS.BASE_URL + "/auth")}/api-keys`, {
+            const res = await fetch(API_ENDPOINTS.AUTH.API_KEYS, {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
                 body: JSON.stringify({ name: newKeyName.trim() })
@@ -96,7 +96,7 @@ export default function ProjectDeploy({ dataset }) {
     const handleDeleteKey = async (keyId) => {
         if (!window.confirm("Revoke this API Key? Any scripts using it will break.")) return;
         try {
-            const res = await fetch(`${API_ENDPOINTS.AUTH.BASE || (API_ENDPOINTS.BASE_URL + "/auth")}/api-keys/${keyId}`, {
+            const res = await fetch(API_ENDPOINTS.AUTH.API_KEYS_REVOKE(keyId), {
                 method: "DELETE",
                 headers: { "Authorization": `Bearer ${token}` }
             });

@@ -26,7 +26,7 @@ const TOUR_STEPS = [
     position: "right"
   },
   {
-    targetId: "tour-inference",
+    targetId: "tour-test",
     title: "3. Playground & Inference",
     content: "Test your freshly trained models on live data here before finally deploying them as scalable API endpoints.",
     position: "right"

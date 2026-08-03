@@ -12,7 +12,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration
+from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration, chat
 from app.db.session import initialize_database
 from app.core.config import settings
 from app.core.logging import logger
@@ -69,6 +69,7 @@ app.include_router(video.router, prefix="/api/video", tags=["Video"])
 app.include_router(active_learning.router, prefix="/api/active-learning", tags=["Active Learning"])
 app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoring"])
 app.include_router(collaboration.router, prefix="/api/datasets", tags=["Collaboration"])
+app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 
 @app.get("/")
 async def root():
