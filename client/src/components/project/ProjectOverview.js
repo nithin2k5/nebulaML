@@ -25,7 +25,7 @@ function StatCard({ icon: Icon, label, value, color }) {
     );
 }
 
-export default function ProjectOverview({ dataset, stats, trainingJobs, onRefresh }) {
+export default function ProjectOverview({ dataset, stats, trainingJobs, onRefresh, onNavigate }) {
     // Determine quality score color
     const score = stats?.completion_percentage || 0;
     const qualityColor = score >= 90 ? "text-emerald-400" : score >= 50 ? "text-amber-400" : "text-red-400";
@@ -44,6 +44,17 @@ export default function ProjectOverview({ dataset, stats, trainingJobs, onRefres
 
     return (
         <div className="h-full space-y-6 max-w-6xl mx-auto animate-fade-in pb-10">
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-white">Project Overview</h2>
+                {onNavigate && (
+                    <button 
+                        onClick={() => onNavigate('images')}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                        Show the images
+                    </button>
+                )}
+            </div>
             
             {/* ── Hero / Stats ── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
