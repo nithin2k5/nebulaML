@@ -383,13 +383,16 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         trainer = YOLOTrainer(config.model_name)
         
         # Training parameters with strict configuration
+        _SERVER_ROOT = Path(__file__).resolve().parents[4]
+        _RUNS_BASE = _SERVER_ROOT / "runs" / "detect"
+        
         train_params = {
             "data_yaml": data_yaml,
             "epochs": config.epochs,
             "imgsz": config.img_size,
             "batch": config.batch_size,
             "name": f"job_{job_id}",
-            "project": "runs/detect",
+            "project": str(_RUNS_BASE),
             "exist_ok": True,
             "strict_epochs": config.strict_epochs,  # Pass strict mode to trainer
         }

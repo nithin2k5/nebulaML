@@ -7,9 +7,12 @@ from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
 
+_SERVER_ROOT = Path(__file__).resolve().parents[4]
+_RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
+
 def get_safe_model_dir(model_name: str) -> Path:
     """Securely resolve the model directory, preventing path traversal."""
-    base_dir = Path("runs/detect").resolve()
+    base_dir = _RUNS_BASE
     model_dir = (base_dir / model_name).resolve()
     
     try:
@@ -28,7 +31,7 @@ async def list_models(current_user: dict = Depends(get_current_user)):
     """
     List all available trained models
     """
-    models_dir = Path("runs/detect")
+    models_dir = _RUNS_BASE
     
     if not models_dir.exists():
         return {"models": []}
