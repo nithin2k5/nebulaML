@@ -86,7 +86,7 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
                         <Button
                             variant="secondary"
                             className="w-full"
-                            onClick={() => router.push(`/annotate?dataset=${dataset.id}`)}
+                            onClick={() => router.push(`/annotate?dataset=${dataset.id}&filter=unlabeled`)}
                             disabled={unannotated === 0}
                         >
                             {unannotated > 0 ? "Start Labeling" : "All Done"}
@@ -109,7 +109,7 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
                         <Button
                             variant="outline"
                             className="w-full"
-                            onClick={() => router.push(`/annotate?dataset=${dataset.id}`)}
+                            onClick={() => router.push(`/annotate?dataset=${dataset.id}&filter=annotated`)}
                             disabled={annotated === 0}
                         >
                             Review Annotations

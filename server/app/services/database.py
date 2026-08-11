@@ -248,10 +248,12 @@ class DatasetService:
         try:
             cursor = connection.cursor(dictionary=True)
             cursor.execute("""
-                SELECT id, filename, original_name, path, annotated, split, uploaded_at
-                FROM dataset_images
-                WHERE dataset_id = %s
-                ORDER BY uploaded_at ASC
+                SELECT di.id, di.filename, di.original_name, di.path, di.annotated, di.split, di.uploaded_at,
+                       COALESCE(a.status, CASE WHEN di.annotated = TRUE THEN 'annotated' ELSE 'unlabeled' END) AS status
+                FROM dataset_images di
+                LEFT JOIN annotations a ON di.dataset_id = a.dataset_id AND di.id = a.image_id
+                WHERE di.dataset_id = %s
+                ORDER BY di.uploaded_at ASC
             """, (dataset_id,))
             images = cursor.fetchall()
             cursor.close()
@@ -259,6 +261,34 @@ class DatasetService:
             return images
         except Error as e:
             print(f"Error getting images: {e}")
+            if connection:
+                connection.close()
+            return []
+    
+    @staticmethod
+    def get_unannotated_images(dataset_id: str) -> List[Dict]:
+        """Get all unannotated images for a dataset"""
+        connection = get_db_connection()
+        if not connection:
+            return []
+        
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT di.id, di.filename, di.original_name, di.path, di.annotated, di.split, di.uploaded_at,
+                       COALESCE(a.status, 'unlabeled') AS status
+                FROM dataset_images di
+                LEFT JOIN annotations a ON di.dataset_id = a.dataset_id AND di.id = a.image_id
+                WHERE di.dataset_id = %s 
+                  AND (di.annotated = FALSE OR di.annotated IS NULL OR di.annotated = 0 OR a.status = 'unlabeled')
+                ORDER BY di.uploaded_at ASC
+            """, (dataset_id,))
+            images = cursor.fetchall()
+            cursor.close()
+            connection.close()
+            return images
+        except Error as e:
+            print(f"Error getting unannotated images: {e}")
             if connection:
                 connection.close()
             return []

@@ -30,23 +30,31 @@ def get_inference_model(model_path: str) -> YOLOInference:
     return YOLOInference(model_path)
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 def _resolve_job_weights(job_id: str) -> str:
     """Return the absolute path to the best weights for a training job.
 
     Raises HTTPException 400 if job_id looks malicious, 404 if weights are missing.
     """
+    logger.error(f"DEBUG_RESOLVE: job_id received: {job_id}")
+    
     # Reject obvious path-traversal attempts
     if ".." in job_id or "/" in job_id or "\\" in job_id:
         raise HTTPException(status_code=400, detail="Invalid job_id")
 
     weights_dir = (_RUNS_BASE / f"job_{job_id}" / "weights").resolve()
-
+    
     # Verify the resolved path is still inside the expected subtree
     if not str(weights_dir).startswith(str(_RUNS_BASE)):
         raise HTTPException(status_code=400, detail="Invalid job_id")
 
     onnx_path = weights_dir / "best.onnx"
     pt_path = weights_dir / "best.pt"
+    
+    with open("/tmp/inference_debug.log", "a") as f:
+        f.write(f"RESOLVE: job_id={job_id}, weights_dir={weights_dir}, pt={pt_path.exists()}, onnx={onnx_path.exists()}\n")
 
     if onnx_path.exists():
         return str(onnx_path)
@@ -113,9 +121,13 @@ async def predict_image(
             "num_detections": len(detections)
         })
         
-    except HTTPException:
+    except HTTPException as e:
+        with open("/tmp/inference_debug.log", "a") as f:
+            f.write(f"HTTP Exception in predict: {e.status_code} {e.detail}\n")
         raise
     except Exception as e:
+        with open("/tmp/inference_debug.log", "a") as f:
+            f.write(f"Generic Exception in predict: {str(e)}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 

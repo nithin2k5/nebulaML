@@ -6,6 +6,7 @@ export const API_ENDPOINTS = {
         SUMMARY: `${API_BASE_URL}/api/annotations/datasets/summary`,
         CREATE: `${API_BASE_URL}/api/annotations/datasets/create`,
         GET: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
+        GET_UNANNOTATED_IMAGES: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/unannotated-images`,
         DELETE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
         DELETE_IMAGE: (datasetId, imageId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/images/${imageId}`,
         STATS: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/stats`,
