@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { API_ENDPOINTS, API_BASE_URL } from "@/lib/config";
-import { Trash2, Image as ImageIcon, CheckSquare } from "lucide-react";
+import { Trash2, Image as ImageIcon, CheckSquare, Download } from "lucide-react";
+import JSZip from "jszip";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 
@@ -14,6 +15,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
     const [selectedImages, setSelectedImages] = useState(new Set());
     const [filterStatus, setFilterStatus] = useState("all"); // 'all', 'annotated', 'unannotated'
     const [filterSplit, setFilterSplit] = useState("all"); // 'all', 'train', 'val', 'test'
+    const [isExporting, setIsExporting] = useState(false);
 
     const images = dataset?.images || [];
     const filteredImages = images.filter((img) => {
@@ -113,6 +115,59 @@ export default function ProjectImages({ dataset, onRefresh }) {
         if (onRefresh) onRefresh();
     };
 
+    const handleExportFiltered = async () => {
+        if (filteredImages.length === 0) {
+            toast.error("No images to export with current filters.");
+            return;
+        }
+
+        setIsExporting(true);
+        try {
+            const zip = new JSZip();
+            const imgFolder = zip.folder("images");
+            
+            // Limit to max 500 images to prevent browser crash, or just export all filtered
+            const imagesToExport = filteredImages;
+            
+            let loaded = 0;
+            toast.info(`Exporting ${imagesToExport.length} images... Please wait.`);
+            
+            for (const img of imagesToExport) {
+                try {
+                    const res = await fetch(`${API_BASE_URL}/api/annotations/image/${dataset.id}/${img.filename}?token=${token}`);
+                    if (res.ok) {
+                        const blob = await res.blob();
+                        imgFolder.file(img.filename, blob);
+                        loaded++;
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch image", img.filename);
+                }
+            }
+            
+            const content = await zip.generateAsync({ type: "blob" });
+            const url = URL.createObjectURL(content);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `export_${dataset.name || "dataset"}_images.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            if (loaded > 0) {
+                toast.success(`Successfully exported ${loaded} images!`);
+            } else {
+                toast.error("Failed to export any images.");
+            }
+        } catch (error) {
+            console.error("Export error:", error);
+            toast.error("Failed to export images.");
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     if (images.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center p-12 text-center border rounded-xl bg-card text-card-foreground">
@@ -156,10 +211,16 @@ export default function ProjectImages({ dataset, onRefresh }) {
                         Total: {filteredImages.length}
                     </div>
                     {filteredImages.length > 0 && (
-                        <Button variant="outline" size="sm" onClick={toggleSelectAll}>
-                            <CheckSquare className="w-4 h-4 mr-2" />
-                            {selectedImages.size === filteredImages.length ? "Deselect All" : "Select All"}
-                        </Button>
+                        <>
+                            <Button variant="outline" size="sm" onClick={handleExportFiltered} disabled={isExporting}>
+                                <Download className="w-4 h-4 mr-2" />
+                                {isExporting ? "Exporting..." : "Export Filtered"}
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={toggleSelectAll}>
+                                <CheckSquare className="w-4 h-4 mr-2" />
+                                {selectedImages.size === filteredImages.length ? "Deselect All" : "Select All"}
+                            </Button>
+                        </>
                     )}
                     {selectedImages.size > 0 && (
                         <Button 
