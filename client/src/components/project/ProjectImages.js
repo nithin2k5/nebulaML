@@ -12,8 +12,23 @@ export default function ProjectImages({ dataset, onRefresh }) {
     const [deletingId, setDeletingId] = useState(null);
     const [isDeletingBulk, setIsDeletingBulk] = useState(false);
     const [selectedImages, setSelectedImages] = useState(new Set());
+    const [filterStatus, setFilterStatus] = useState("all"); // 'all', 'annotated', 'unannotated'
+    const [filterSplit, setFilterSplit] = useState("all"); // 'all', 'train', 'val', 'test'
 
     const images = dataset?.images || [];
+    const filteredImages = images.filter((img) => {
+        const matchesStatus = 
+            filterStatus === "all" || 
+            (filterStatus === "annotated" && img.annotated) || 
+            (filterStatus === "unannotated" && !img.annotated);
+            
+        const matchesSplit = 
+            filterSplit === "all" || 
+            (img.split === filterSplit) || 
+            (filterSplit === "val" && img.split === "valid"); // In case 'valid' is used instead of 'val'
+            
+        return matchesStatus && matchesSplit;
+    });
 
     const toggleSelection = (imageId) => {
         const newSelection = new Set(selectedImages);
@@ -26,10 +41,10 @@ export default function ProjectImages({ dataset, onRefresh }) {
     };
 
     const toggleSelectAll = () => {
-        if (selectedImages.size === images.length) {
+        if (selectedImages.size === filteredImages.length) {
             setSelectedImages(new Set());
         } else {
-            setSelectedImages(new Set(images.map(img => img.id)));
+            setSelectedImages(new Set(filteredImages.map(img => img.id)));
         }
     };
 
@@ -110,19 +125,40 @@ export default function ProjectImages({ dataset, onRefresh }) {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                     <h2 className="text-xl font-semibold">Dataset Images</h2>
                     <p className="text-sm text-muted-foreground">Manage and remove images from your dataset.</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                    <select 
+                        value={filterStatus}
+                        onChange={(e) => setFilterStatus(e.target.value)}
+                        className="text-sm bg-background border border-input rounded-md px-2 py-1"
+                    >
+                        <option value="all">All Status</option>
+                        <option value="annotated">Annotated</option>
+                        <option value="unannotated">Unannotated</option>
+                    </select>
+
+                    <select 
+                        value={filterSplit}
+                        onChange={(e) => setFilterSplit(e.target.value)}
+                        className="text-sm bg-background border border-input rounded-md px-2 py-1"
+                    >
+                        <option value="all">All Splits</option>
+                        <option value="train">Train</option>
+                        <option value="val">Valid</option>
+                        <option value="test">Test</option>
+                    </select>
+
                     <div className="text-sm font-medium mr-2">
-                        Total: {images.length}
+                        Total: {filteredImages.length}
                     </div>
-                    {images.length > 0 && (
+                    {filteredImages.length > 0 && (
                         <Button variant="outline" size="sm" onClick={toggleSelectAll}>
                             <CheckSquare className="w-4 h-4 mr-2" />
-                            {selectedImages.size === images.length ? "Deselect All" : "Select All"}
+                            {selectedImages.size === filteredImages.length ? "Deselect All" : "Select All"}
                         </Button>
                     )}
                     {selectedImages.size > 0 && (
@@ -139,8 +175,8 @@ export default function ProjectImages({ dataset, onRefresh }) {
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {images.map((img) => {
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-6">
+                {filteredImages.map((img) => {
                     const isSelected = selectedImages.has(img.id);
                     return (
                         <div 
