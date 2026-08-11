@@ -50,19 +50,43 @@ async def list_models(current_user: dict = Depends(get_current_user)):
     return {"models": models}
 
 @router.get("/download/{model_name}")
-async def download_model(model_name: str, current_user: dict = Depends(get_current_user)):
+async def download_model(model_name: str, format: str = "pt", current_user: dict = Depends(get_current_user)):
     """
     Download a trained model
     """
     model_dir = get_safe_model_dir(model_name)
-    model_path = model_dir / "weights" / "best.pt"
+    weights_dir = model_dir / "weights"
     
-    if not model_path.exists():
-        raise HTTPException(status_code=404, detail="Model not found")
+    if format == "pt":
+        target_path = weights_dir / "best.pt"
+    elif format == "onnx":
+        target_path = weights_dir / "best.onnx"
+    elif format == "engine":
+        target_path = weights_dir / "best.engine"
+    elif format == "coreml":
+        target_path = weights_dir / "best.mlpackage"
+    elif format == "tflite":
+        target_path = weights_dir / "best_saved_model"
+    else:
+        target_path = weights_dir / f"best.{format}"
+        
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail=f"Model format '{format}' not found. Export it first.")
+        
+    if target_path.is_dir():
+        import shutil
+        zip_path = weights_dir / f"best_{format}.zip"
+        if not zip_path.exists():
+            shutil.make_archive(str(zip_path).replace('.zip', ''), 'zip', str(target_path))
+        return FileResponse(
+            path=str(zip_path),
+            filename=f"{model_name}_{format}.zip",
+            media_type="application/zip"
+        )
     
     return FileResponse(
-        path=str(model_path),
-        filename=f"{model_name}_best.pt",
+        path=str(target_path),
+        filename=f"{model_name}_{target_path.name}",
         media_type="application/octet-stream"
     )
 

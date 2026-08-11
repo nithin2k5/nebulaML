@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Upload, CheckCircle, Loader, Terminal, X } from "lucide-react";
+import { Upload, CheckCircle, Loader, Terminal, X, Download } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -27,6 +27,7 @@ export default function ProjectDeploy({ dataset }) {
     const [generatingKey, setGeneratingKey] = useState(false);
     const [newKeyName, setNewKeyName] = useState("");
     const [newKeyToken, setNewKeyToken] = useState(null);
+    const [exportingFormat, setExportingFormat] = useState(null);
 
     const canvasRef = useRef(null);
     // Keep a stable ref to the current preview URL so the draw effect always has fresh data
@@ -182,6 +183,54 @@ export default function ProjectDeploy({ dataset }) {
         if (!canvas) return;
         drawDetections(results.detections, previewUrlRef.current);
     }, [results]);
+
+    const handleExportModel = async (format) => {
+        if (!selectedJob) {
+            toast.error("Please select a model first");
+            return;
+        }
+        setExportingFormat(format);
+        const job = jobs.find(j => j.job_id === selectedJob);
+        const modelName = `job_${selectedJob}`;
+        try {
+            // Trigger export on backend
+            const res = await fetch(API_ENDPOINTS.MODELS.EXPORT(modelName, format), {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || "Export failed");
+            }
+            
+            // Download the exported file
+            const downloadUrl = `${API_ENDPOINTS.MODELS.DOWNLOAD(modelName)}?format=${format}`;
+            const downloadRes = await fetch(downloadUrl, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            
+            if (!downloadRes.ok) {
+                const err = await downloadRes.json().catch(() => ({}));
+                throw new Error(err.detail || "Download failed");
+            }
+            
+            const blob = await downloadRes.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${modelName}_${format}${format === 'coreml' || format === 'tflite' ? '.zip' : `.${format}`}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            toast.success(`Exported ${format} successfully`);
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
+            setExportingFormat(null);
+        }
+    };
 
     const handleInference = async () => {
         if (!selectedFile) { toast.error("Please upload an image first."); return; }
@@ -484,11 +533,27 @@ print(response.json())`}
                         ].map((target) => (
                             <div
                                 key={target.platform}
-                                className="p-4 rounded-lg border border-border hover:border-primary/50 transition-all"
+                                className="p-4 rounded-lg border border-border flex flex-col justify-between hover:border-primary/50 transition-all h-full"
                             >
-                                <p className="font-medium text-sm">{target.platform}</p>
-                                <p className="text-xs text-muted-foreground mb-3">{target.desc}</p>
-                                <Badge variant="outline" className="text-[10px]">{target.format.toUpperCase()}</Badge>
+                                <div>
+                                    <p className="font-medium text-sm">{target.platform}</p>
+                                    <p className="text-xs text-muted-foreground mb-3">{target.desc}</p>
+                                    <Badge variant="outline" className="text-[10px]">{target.format.toUpperCase()}</Badge>
+                                </div>
+                                <Button 
+                                    variant="secondary" 
+                                    size="sm" 
+                                    className="w-full mt-4" 
+                                    disabled={!selectedJob || exportingFormat === target.format}
+                                    onClick={() => handleExportModel(target.format)}
+                                >
+                                    {exportingFormat === target.format ? (
+                                        <Loader className="w-3.5 h-3.5 mr-2 animate-spin" />
+                                    ) : (
+                                        <Download className="w-3.5 h-3.5 mr-2" />
+                                    )}
+                                    {exportingFormat === target.format ? "Exporting..." : "Export"}
+                                </Button>
                             </div>
                         ))}
                     </div>
