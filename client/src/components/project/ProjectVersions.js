@@ -340,10 +340,13 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                 const data = await res.json();
                 const datasetJobs = (data.jobs || []).filter(j => j.dataset_id === dataset?.id);
                 setJobs(datasetJobs);
-                if (selectedJob) {
-                    const updated = datasetJobs.find(j => j.job_id === selectedJob.job_id);
-                    if (updated) setSelectedJob(updated);
-                }
+                setSelectedJob(prevSelected => {
+                    if (prevSelected) {
+                        const updated = datasetJobs.find(j => j.job_id === prevSelected.job_id);
+                        return updated || prevSelected;
+                    }
+                    return prevSelected;
+                });
             } else {
                 toast.error("Failed to load training jobs");
             }
@@ -368,7 +371,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
     useEffect(() => {
         fetchJobs();
         fetchVersions();
-        const interval = setInterval(fetchJobs, 12000);
+        const interval = setInterval(fetchJobs, 3000);
         return () => clearInterval(interval);
     }, [token, dataset?.id]);
 

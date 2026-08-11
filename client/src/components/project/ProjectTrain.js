@@ -82,7 +82,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
         runPreflight();
         fetchQueueStatus();
         fetchActiveJobs();
-        const interval = setInterval(fetchActiveJobs, 5000);
+        const interval = setInterval(fetchActiveJobs, 3000);
         return () => clearInterval(interval);
     }, [dataset?.id]);
 
