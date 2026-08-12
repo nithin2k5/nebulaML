@@ -691,7 +691,7 @@ class TrainingJobService:
                 data.get("dataset_id"),
                 config.get("model_name", ""),
                 data.get("status", "pending"),
-                int(data.get("progress", 0)),
+                int(float(data.get("progress", 0))),
                 config.get("epochs", 0),
                 config.get("batch_size", 16),
                 json.dumps(config),
