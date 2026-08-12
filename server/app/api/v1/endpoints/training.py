@@ -88,7 +88,7 @@ class TrainingConfig(BaseModel):
     batch_size: int = Field(default=16, ge=1, le=128, description="Batch size (1-128)")
     img_size: int = Field(default=640, ge=320, le=1280, description="Image size (320-1280)")
     model_name: str = Field(default="yolov8n.pt", description="Base model name (yolov8, yolov9, yolov10, yolo11)")
-    learning_rate: Optional[float] = Field(default=None, ge=0.0001, le=1.0, description="Learning rate")
+    learning_rate: Optional[float] = Field(default=None, ge=0.00001, le=1.0, description="Learning rate")
     patience: Optional[int] = Field(default=50, ge=1, le=200, description="Early stopping patience")
     device: Optional[str] = Field(default=None, description="Device (cpu, cuda, mps, or None for auto)")
     strict_epochs: bool = Field(default=False, description="If True, enforce exact epoch count (disable early stopping)")
