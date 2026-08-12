@@ -9,6 +9,7 @@ import threading
 
 from app.services.database import DatasetService
 from app.api.v1.endpoints.auth import get_current_user
+from app.services.zero_shot import zero_shot_predict
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -410,3 +411,44 @@ async def segment_object(
             "algo_version": "error_fallback",
             "area": 2500, "confidence": 0.1,
         }
+
+@router.post("/zero-shot")
+async def zero_shot_annotation(
+    dataset_id: str = Form(...),
+    image_id: str = Form(...),
+    text_prompt: str = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Zero-shot text-prompt object detection.
+    Pass in a text prompt like 'cars' or 'person in red shirt' and it returns bounding boxes.
+    """
+    try:
+        images = DatasetService.get_dataset_images(dataset_id)
+        img_data = next((i for i in images if str(i["id"]) == str(image_id)), None)
+        if not img_data:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        img_path = Path(img_data["path"])
+        if not img_path.exists():
+            raise HTTPException(status_code=404, detail="Image file missing")
+
+        # Run zero-shot detection using Florence-2
+        logger.info(f"Running zero-shot detection on {image_id} for prompt '{text_prompt}'")
+        detections = zero_shot_predict(str(img_path), text_prompt)
+        
+        return {
+            "success": True,
+            "detections": detections,
+            "prompt": text_prompt
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Zero-shot annotation failed: {e}")
+        return {
+            "success": False,
+            "detail": str(e),
+            "detections": []
+        }
+

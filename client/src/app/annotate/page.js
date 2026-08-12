@@ -112,6 +112,8 @@ function AnnotationToolContent() {
   const [reviewStatus, setReviewStatus] = useState('annotated'); // 'unlabeled' | 'predicted' | 'annotated' | 'reviewed'
   const [toastMessage, setToastMessage] = useState(null);
   const [showAutoLabel, setShowAutoLabel] = useState(false);
+  const [isZeroShotLoading, setIsZeroShotLoading] = useState(false);
+  const [zeroShotPrompt, setZeroShotPrompt] = useState("");
   const [copiedBoxes, setCopiedBoxes] = useState(null);
   const initialFilterParam = searchParams.get('filter') || searchParams.get('tab') || 'all';
   const initialFilter = initialFilterParam === 'unannotated' ? 'unlabeled' : initialFilterParam;
@@ -783,8 +785,62 @@ function AnnotationToolContent() {
     setAiViewMode('mask');
     setAiStateVersion(v => v + 1);
     drawCanvas();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleZeroShot = async () => {
+    if (!zeroShotPrompt.trim()) {
+      toast.warning("Please enter a text prompt first.");
+      return;
+    }
+    if (!images[currentImageIndex] || !dataset) return;
+
+    setIsZeroShotLoading(true);
+    try {
+      const img = images[currentImageIndex];
+      const form = new FormData();
+      form.append('dataset_id', datasetId);
+      form.append('image_id', String(img.id));
+      form.append('text_prompt', zeroShotPrompt);
+
+      const res = await fetch(API_ENDPOINTS.SMART.ZERO_SHOT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+
+      if (!res.ok) throw new Error("Zero-shot annotation failed");
+      const data = await res.json();
+
+      if (data.success && data.detections) {
+        const newBoxes = data.detections.map(det => {
+          let className = dataset?.classes?.[selectedClass] || "object";
+          return {
+            x: det.bbox[0],
+            y: det.bbox[1],
+            width: det.box_width,
+            height: det.box_height,
+            class_name: className,
+            type: 'box',
+            algo_version: 'florence-2'
+          };
+        });
+
+        if (newBoxes.length > 0) {
+          boxesRef.current = [...boxesRef.current, ...newBoxes];
+          setBoxes(boxesRef.current);
+          drawCanvas();
+          toast.success(`Found ${newBoxes.length} objects for "${zeroShotPrompt}"`);
+        } else {
+          toast.info(`No objects found for "${zeroShotPrompt}"`);
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Zero-shot failed');
+    } finally {
+      setIsZeroShotLoading(false);
+    }
+  };
+
 
   const handleAiUndo = useCallback(() => {
     const hist = aiHistoryRef.current;
@@ -2259,8 +2315,42 @@ function AnnotationToolContent() {
                     <Wand2 className="w-4 h-4 mb-1" />
                     <span className="text-[10px] font-medium">AI Smart Mode</span>
                   </button>
+                  <button
+                    onClick={() => { setActiveTool('zeroshot'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); setCurrentBox(null); }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-3 border border-dashed ${activeTool === 'zeroshot' ? 'bg-fuchsia-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-fuchsia-400 hover:text-fuchsia-300 hover:bg-white/5 border-white/5'}`}
+                    title="Zero-Shot Magic: Find objects using text prompts"
+                  >
+                    <Sparkles className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Text to Box (Zero-Shot)</span>
+                  </button>
                 </div>
               </div>
+
+              {activeTool === 'zeroshot' && (
+                <div className="mt-4 p-3 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-lg">
+                  <h3 className="font-medium text-[11px] text-fuchsia-300 uppercase tracking-wider mb-2">Zero-Shot Annotator</h3>
+                  <p className="text-[10px] text-fuchsia-200/70 mb-3 leading-tight">
+                    Powered by Vision-Language Models. Type what you want to find (e.g. "cars", "red shirt").
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      value={zeroShotPrompt}
+                      onChange={e => setZeroShotPrompt(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleZeroShot()}
+                      placeholder="Find all..."
+                      className="bg-black/40 border-fuchsia-500/30 text-xs h-8 text-white focus-visible:ring-fuchsia-500"
+                    />
+                    <Button 
+                      onClick={handleZeroShot}
+                      disabled={isZeroShotLoading}
+                      className="h-8 px-3 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs"
+                    >
+                      {isZeroShotLoading ? <span className="animate-spin mr-1">⚪</span> : <Sparkles className="w-3 h-3 mr-1" />}
+                      Find
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Annotation Mode Toggle */}
               <div>

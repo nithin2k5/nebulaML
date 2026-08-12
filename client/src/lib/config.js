@@ -59,6 +59,7 @@ export const API_ENDPOINTS = {
     },
     SMART: {
         SEGMENT: `${API_BASE_URL}/api/smart/segment`,
+        ZERO_SHOT: `${API_BASE_URL}/api/smart/zero-shot`,
     },
     MODELS: {
         LIST: `${API_BASE_URL}/api/models/list`,
