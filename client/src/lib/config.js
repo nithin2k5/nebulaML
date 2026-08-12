@@ -6,6 +6,7 @@ export const API_ENDPOINTS = {
         SUMMARY: `${API_BASE_URL}/api/annotations/datasets/summary`,
         CREATE: `${API_BASE_URL}/api/annotations/datasets/create`,
         GET: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
+        GET_UNANNOTATED_IMAGES: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/unannotated-images`,
         DELETE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}`,
         DELETE_IMAGE: (datasetId, imageId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/images/${imageId}`,
         STATS: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/stats`,
@@ -54,9 +55,11 @@ export const API_ENDPOINTS = {
         PRESETS: `${API_BASE_URL}/api/training/presets`,
         AUTO_RETRAIN_CONFIG: `${API_BASE_URL}/api/training/auto-retrain-config`,
         AUTO_RETRAIN_CONFIG_GET: (datasetId) => `${API_BASE_URL}/api/training/auto-retrain-config/${datasetId}`,
+        MODEL_REGISTRY: `${API_BASE_URL}/api/training/model-registry`,
     },
     SMART: {
         SEGMENT: `${API_BASE_URL}/api/smart/segment`,
+        ZERO_SHOT: `${API_BASE_URL}/api/smart/zero-shot`,
     },
     MODELS: {
         LIST: `${API_BASE_URL}/api/models/list`,

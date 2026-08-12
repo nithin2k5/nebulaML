@@ -25,33 +25,53 @@ _MAX_INFERENCE_SIZE = 10 * 1024 * 1024
 
 
 @lru_cache(maxsize=3)
-def get_inference_model(model_path: str) -> YOLOInference:
+def get_inference_model(model_path: str, model_type: str = "yolo"):
     """Load and cache up to 3 models in memory for fast swapping"""
-    return YOLOInference(model_path)
+    from app.services.trainer_factory import create_inference
+    return create_inference(model_path, model_type)
 
+
+import logging
+logger = logging.getLogger(__name__)
+
+def _get_job_model_type(job_id: str) -> str:
+    """Get the model backend type for a training job."""
+    from app.api.v1.endpoints.training import training_jobs, _ensure_jobs_loaded
+    _ensure_jobs_loaded()
+    job = training_jobs.get(job_id, {})
+    model_type = job.get("model_type", "yolo")
+    return model_type
 
 def _resolve_job_weights(job_id: str) -> str:
     """Return the absolute path to the best weights for a training job.
 
     Raises HTTPException 400 if job_id looks malicious, 404 if weights are missing.
     """
+    logger.error(f"DEBUG_RESOLVE: job_id received: {job_id}")
+    
     # Reject obvious path-traversal attempts
     if ".." in job_id or "/" in job_id or "\\" in job_id:
         raise HTTPException(status_code=400, detail="Invalid job_id")
 
     weights_dir = (_RUNS_BASE / f"job_{job_id}" / "weights").resolve()
-
+    
     # Verify the resolved path is still inside the expected subtree
     if not str(weights_dir).startswith(str(_RUNS_BASE)):
         raise HTTPException(status_code=400, detail="Invalid job_id")
 
     onnx_path = weights_dir / "best.onnx"
     pt_path = weights_dir / "best.pt"
+    meta_path = weights_dir.parent / "model_meta.json"
+    
+    with open("/tmp/inference_debug.log", "a") as f:
+        f.write(f"RESOLVE: job_id={job_id}, weights_dir={weights_dir}, pt={pt_path.exists()}, onnx={onnx_path.exists()}, meta={meta_path.exists()}\n")
 
     if onnx_path.exists():
         return str(onnx_path)
     if pt_path.exists():
         return str(pt_path)
+    if meta_path.exists():
+        return str(meta_path)
 
     raise HTTPException(
         status_code=404,
@@ -78,11 +98,17 @@ async def predict_image(
     Otherwise uses pretrained model_name.
     """
     try:
-        # Determine model path
-        model_path = _resolve_job_weights(job_id) if job_id else (model_name or "yolov8n.pt")
+        # Determine model path and type
+        if job_id:
+            model_path = _resolve_job_weights(job_id)
+            model_type = _get_job_model_type(job_id)
+        else:
+            from app.services.model_registry import get_backend
+            model_path = model_name or "yolov8n.pt"
+            model_type = get_backend(model_path)
 
         # Get cached model
-        inference_model = get_inference_model(model_path)
+        inference_model = get_inference_model(model_path, model_type)
 
         # Enforce file size limit
         content = await file.read()
@@ -113,9 +139,13 @@ async def predict_image(
             "num_detections": len(detections)
         })
         
-    except HTTPException:
+    except HTTPException as e:
+        with open("/tmp/inference_debug.log", "a") as f:
+            f.write(f"HTTP Exception in predict: {e.status_code} {e.detail}\n")
         raise
     except Exception as e:
+        with open("/tmp/inference_debug.log", "a") as f:
+            f.write(f"Generic Exception in predict: {str(e)}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -137,9 +167,16 @@ async def predict_batch(
         raise HTTPException(status_code=400, detail="Batch inference is limited to 20 images at a time")
 
     try:
-        # Resolve model path (same logic as /predict)
-        model_path = _resolve_job_weights(job_id) if job_id else (model_name or "yolov8n.pt")
-        inference_model = get_inference_model(model_path)
+        # Resolve model path and type (same logic as /predict)
+        if job_id:
+            model_path = _resolve_job_weights(job_id)
+            model_type = _get_job_model_type(job_id)
+        else:
+            from app.services.model_registry import get_backend
+            model_path = model_name or "yolov8n.pt"
+            model_type = get_backend(model_path)
+            
+        inference_model = get_inference_model(model_path, model_type)
         
         all_results = []
         images = []
@@ -185,26 +222,8 @@ async def predict_batch(
 @router.get("/models")
 async def list_available_models(current_user: dict = Depends(get_current_user)):
     """
-    List available YOLO models
+    List available models from the registry
     """
-    return {
-        "models": [
-            {"name": "yolov8n.pt", "size": "Nano", "description": "Fastest, lowest accuracy"},
-            {"name": "yolov8s.pt", "size": "Small", "description": "Balanced speed and accuracy"},
-            {"name": "yolov8m.pt", "size": "Medium", "description": "Good accuracy"},
-            {"name": "yolov8l.pt", "size": "Large", "description": "High accuracy"},
-            {"name": "yolov8x.pt", "size": "Extra Large", "description": "Highest accuracy, slowest"},
-            {"name": "yolov9t.pt", "size": "Tiny", "description": "YOLOv9 Tiny - fast and accurate"},
-            {"name": "yolov9s.pt", "size": "Small", "description": "YOLOv9 Small - balanced"},
-            {"name": "yolov9c.pt", "size": "Compact", "description": "YOLOv9 Compact"},
-            {"name": "yolov9e.pt", "size": "Extra Large", "description": "YOLOv9 Extended"},
-            {"name": "yolov10n.pt", "size": "Nano", "description": "YOLOv10 Nano"},
-            {"name": "yolov10s.pt", "size": "Small", "description": "YOLOv10 Small"},
-            {"name": "yolov10x.pt", "size": "Extra Large", "description": "YOLOv10 Extra Large"},
-            {"name": "yolo11n.pt", "size": "Nano", "description": "YOLO11 Nano - latest SOTA"},
-            {"name": "yolo11s.pt", "size": "Small", "description": "YOLO11 Small"},
-            {"name": "yolo11m.pt", "size": "Medium", "description": "YOLO11 Medium"},
-            {"name": "yolo11x.pt", "size": "Extra Large", "description": "YOLO11 Extra Large SOTA"},
-        ]
-    }
+    from app.services.model_registry import get_registry_for_api
+    return {"models": get_registry_for_api()}
 

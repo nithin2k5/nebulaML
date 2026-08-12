@@ -17,7 +17,8 @@ import sys
 import shutil
 
 # Import trainer
-from app.services.trainer import YOLOTrainer
+from app.services.trainer_factory import create_trainer
+from app.services.model_registry import get_allowed_model_keys, get_backend, get_model_info, get_registry_for_api
 from app.services.dataset_analyzer import DatasetAnalyzer
 from app.services.database import DatasetService, DatasetVersionService, TrainingJobService, AutoRetrainConfigService
 from app.services.versioning import VersioningEngine
@@ -80,16 +81,7 @@ def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
         return True
     return uid == current_user.get("id")
 
-ALLOWED_MODELS = {
-    # YOLOv8
-    "yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt",
-    # YOLOv9
-    "yolov9t.pt", "yolov9s.pt", "yolov9c.pt", "yolov9e.pt",
-    # YOLOv10
-    "yolov10n.pt", "yolov10s.pt", "yolov10m.pt", "yolov10l.pt", "yolov10x.pt",
-    # YOLO11
-    "yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt",
-}
+ALLOWED_MODELS = get_allowed_model_keys()
 
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
@@ -115,6 +107,24 @@ class TrainingConfig(BaseModel):
             "fast": {"epochs": 25, "batch_size": 32, "img_size": 416, "model_name": "yolov8n.pt", "patience": 10, "learning_rate": 0.01},
             "balanced": {"epochs": 100, "batch_size": 16, "img_size": 640, "model_name": "yolov8s.pt", "patience": 50, "learning_rate": 0.01},
             "accurate": {"epochs": 300, "batch_size": 8, "img_size": 1024, "model_name": "yolov8m.pt", "patience": 80, "learning_rate": 0.001},
+            "rtdetr_balanced": {
+                "model_name": "rtdetr-r50",
+                "epochs": 50,
+                "batch_size": 4,
+                "img_size": 640,
+                "learning_rate": 0.00005,
+                "patience": 20,
+                "description": "RT-DETR balanced (Apache 2.0)"
+            },
+            "torchvision_fast": {
+                "model_name": "fasterrcnn-mobilenet",
+                "epochs": 30,
+                "batch_size": 8,
+                "img_size": 800,
+                "learning_rate": 0.005,
+                "patience": 15,
+                "description": "Faster R-CNN MobileNet — fast (BSD)"
+            },
         }
         if self.preset and self.preset in presets:
             p = presets[self.preset]
@@ -273,6 +283,7 @@ async def start_training(
             "created_at": datetime.now().isoformat(),
             "user_id": current_user["id"],
             "cancel_requested": False,
+            "model_type": get_backend(config.model_name),
         }
         _persist_job(job_id)
 
@@ -341,6 +352,7 @@ async def start_micro_training(
             "created_at": datetime.now().isoformat(),
             "user_id": current_user["id"],
             "cancel_requested": False,
+            "model_type": get_backend(config.model_name),
         }
         _persist_job(job_id)
 
@@ -380,7 +392,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             raise FileNotFoundError(f"Dataset YAML not found: {data_yaml}")
         
         # Initialize trainer
-        trainer = YOLOTrainer(config.model_name)
+        trainer = create_trainer(config.model_name)
         
         # Training parameters with strict configuration
         _SERVER_ROOT = Path(__file__).resolve().parents[4]
@@ -800,6 +812,11 @@ async def get_per_class_metrics(job_id: str, current_user: dict = Depends(get_cu
         "per_class_metrics": per_class,
         "overall_metrics": job.get("metrics", {})
     }
+
+@router.get("/model-registry")
+async def get_model_registry():
+    """Return the full model registry for client-side model selection."""
+    return {"models": get_registry_for_api()}
 
 
 @router.post("/auto-retrain-config")

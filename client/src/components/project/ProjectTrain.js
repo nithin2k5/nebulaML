@@ -18,6 +18,8 @@ const PRESET_META = {
     fast: { icon: Zap, color: "text-amber-500", label: "Fast", desc: "~5 min • Quick iteration, lower accuracy", epochs: 25, batch_size: 32, img_size: 416, model_name: "yolov8n.pt", learning_rate: 0.01, patience: 10 },
     balanced: { icon: Scale, color: "text-blue-500", label: "Balanced", desc: "~30 min • Good speed/accuracy tradeoff", epochs: 100, batch_size: 16, img_size: 640, model_name: "yolov8s.pt", learning_rate: 0.01, patience: 50 },
     accurate: { icon: Target, color: "text-emerald-500", label: "Accurate", desc: "~2 hrs • Maximum accuracy for production", epochs: 300, batch_size: 8, img_size: 1024, model_name: "yolov8m.pt", learning_rate: 0.001, patience: 80 },
+    rtdetr: { icon: ShieldCheck, color: "text-teal-500", label: "RT-DETR", desc: "Apache 2.0 • Transformer detector, great accuracy", epochs: 50, batch_size: 4, img_size: 640, model_name: "rtdetr-r50", learning_rate: 0.00005, patience: 20 },
+    opensource: { icon: ShieldCheck, color: "text-violet-500", label: "Open Source", desc: "BSD License • Faster R-CNN, fully open", epochs: 50, batch_size: 4, img_size: 800, model_name: "fasterrcnn-resnet50", learning_rate: 0.005, patience: 15 },
 };
 
 export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, versionRefreshKey = 0 }) {
@@ -38,6 +40,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
     const [preflightLoading, setPreflightLoading] = useState(false);
     const [queueStatus, setQueueStatus] = useState(null);
     const [activeJobs, setActiveJobs] = useState([]);
+    const [modelRegistry, setModelRegistry] = useState([]);
 
     // Initialize with all classes selected
     useEffect(() => {
@@ -45,6 +48,16 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
             setSelectedClasses([...dataset.classes]);
         }
     }, [dataset]);
+
+    // Fetch model registry
+    useEffect(() => {
+        fetch(API_ENDPOINTS.TRAINING.MODEL_REGISTRY, {
+            headers: { Authorization: `Bearer ${token}` }
+        })
+        .then(r => r.json())
+        .then(data => setModelRegistry(data.models || []))
+        .catch(() => {});
+    }, [token]);
 
     // Apply preset on change
     useEffect(() => {
@@ -442,22 +455,50 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                     <Label>Model Architecture</Label>
                                     <Select
                                         value={config.model_name}
-                                        onValueChange={v => { setConfig({ ...config, model_name: v }); setActivePreset(null); }}
+                                        onValueChange={v => {
+                                            const model = modelRegistry.find(m => m.key === v);
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                model_name: v,
+                                                img_size: model?.default_imgsz || prev.img_size
+                                            }));
+                                            setActivePreset(null);
+                                        }}
                                     >
                                         <SelectTrigger>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="yolov8n.pt">YOLOv8 Nano (3.2M params, fastest)</SelectItem>
-                                            <SelectItem value="yolov8s.pt">YOLOv8 Small (11.2M params)</SelectItem>
-                                            <SelectItem value="yolov8m.pt">YOLOv8 Medium (25.9M params)</SelectItem>
-                                            <SelectItem value="yolov8l.pt">YOLOv8 Large (43.7M params, most accurate)</SelectItem>
-                                            <SelectItem value="yolov9c.pt">YOLOv9 Compact</SelectItem>
-                                            <SelectItem value="yolov9e.pt">YOLOv9 Extended</SelectItem>
-                                            <SelectItem value="yolov10n.pt">YOLOv10 Nano</SelectItem>
-                                            <SelectItem value="yolov10s.pt">YOLOv10 Small</SelectItem>
-                                            <SelectItem value="yolo11n.pt">YOLO11 Nano</SelectItem>
-                                            <SelectItem value="yolo11s.pt">YOLO11 Small</SelectItem>
+                                            {modelRegistry.length > 0 ? (
+                                                Object.entries(
+                                                    modelRegistry.reduce((acc, m) => {
+                                                        const family = m.family || m.backend;
+                                                        if (!acc[family]) acc[family] = [];
+                                                        acc[family].push(m);
+                                                        return acc;
+                                                    }, {})
+                                                ).map(([family, models]) => (
+                                                    <div key={family}>
+                                                        <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground flex items-center gap-2">
+                                                            {family}
+                                                            <span className="text-[10px] opacity-60">{models[0]?.license}</span>
+                                                        </div>
+                                                        {models.map(m => (
+                                                            <SelectItem key={m.key} value={m.key}>
+                                                                {m.display_name} — {m.params}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <>
+                                                    <SelectItem value="yolov8n.pt">YOLOv8 Nano (3.2M params)</SelectItem>
+                                                    <SelectItem value="yolov8s.pt">YOLOv8 Small (11.2M params)</SelectItem>
+                                                    <SelectItem value="yolov8m.pt">YOLOv8 Medium (25.9M params)</SelectItem>
+                                                    <SelectItem value="rtdetr-r50">RT-DETR ResNet-50 (Apache 2.0)</SelectItem>
+                                                    <SelectItem value="fasterrcnn-resnet50">Faster R-CNN ResNet-50 (BSD)</SelectItem>
+                                                </>
+                                            )}
                                         </SelectContent>
                                     </Select>
                                 </div>

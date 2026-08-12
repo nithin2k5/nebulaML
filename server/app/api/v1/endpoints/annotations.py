@@ -17,9 +17,6 @@ import logging
 from dataclasses import asdict
 from PIL import Image, ImageOps, ImageFilter
 import random
-import copy
-import cv2
-import numpy as np
 
 
 # Add parent directory to path for imports
@@ -240,6 +237,25 @@ async def get_dataset(
     datasets_db[dataset_id] = db_dataset
 
     return db_dataset
+
+
+@router.get("/datasets/{dataset_id}/unannotated-images")
+async def get_unannotated_images(
+    dataset_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Fetch unannotated images separately for a dataset
+    """
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
+
+    unannotated_images = DatasetService.get_unannotated_images(dataset_id)
+    return {"images": unannotated_images, "count": len(unannotated_images)}
+
 
 @router.post("/datasets/{dataset_id}/upload")
 async def upload_images_to_dataset(
@@ -1403,217 +1419,6 @@ class PropagateAnnotationsRequest(BaseModel):
     boxes: List[dict]
     mode: str = "overwrite"          # "overwrite" | "skip_annotated"
     annotation_type: str = "detection"
-    smart_detect: bool = True        # If True, detect actual object position/scale using computer vision
-
-
-def _load_image_bgr_safe(img_record: dict, ds_dir: Path) -> Optional[np.ndarray]:
-    paths = []
-    if "path" in img_record and img_record["path"]:
-        paths.append(Path(img_record["path"]))
-    if "filename" in img_record and img_record["filename"]:
-        paths.append(ds_dir / "images" / img_record["filename"])
-        paths.append(ds_dir / img_record["filename"])
-    for p in paths:
-        if p.exists():
-            try:
-                bgr = cv2.imread(str(p))
-                if bgr is not None:
-                    return bgr
-            except Exception:
-                pass
-    return None
-
-
-def _compute_iou(box1, box2):
-    x1, y1, w1, h1 = box1
-    x2, y2, w2, h2 = box2
-    xi1 = max(x1, x2)
-    yi1 = max(y1, y2)
-    xi2 = min(x1 + w1, x2 + w2)
-    yi2 = min(y1 + h1, y2 + h2)
-    inter_area = max(0.0, xi2 - xi1) * max(0.0, yi2 - yi1)
-    if inter_area <= 0:
-        return 0.0
-    union_area = (w1 * h1) + (w2 * h2) - inter_area
-    return inter_area / union_area if union_area > 0 else 0.0
-
-
-def _nms_candidates(candidates: list, iou_thresh: float = 0.35) -> list:
-    if not candidates:
-        return []
-    candidates = sorted(candidates, key=lambda x: x["score"], reverse=True)
-    keep = []
-    for cand in candidates:
-        overlap = False
-        for k in keep:
-            if _compute_iou(cand["box"], k["box"]) > iou_thresh:
-                overlap = True
-                break
-        if not overlap:
-            keep.append(cand)
-    return keep
-
-
-def _extract_object_template(box: dict, bgr_img: np.ndarray):
-    if bgr_img is None:
-        return None, 0, 0, 0, 0, box
-    img_h, img_w = bgr_img.shape[:2]
-    box_type = box.get("type", "box")
-    if box_type in ("polygon", "line"):
-        pts = box.get("points", [])
-        if not pts:
-            return None, 0, 0, 0, 0, box
-        x_coords = [p["x"] for p in pts]
-        y_coords = [p["y"] for p in pts]
-        x_min = max(0, int(min(x_coords)))
-        x_max = min(img_w, int(max(x_coords)))
-        y_min = max(0, int(min(y_coords)))
-        y_max = min(img_h, int(max(y_coords)))
-    elif box_type == "joint":
-        cx, cy = int(box["x"]), int(box["y"])
-        x_min = max(0, cx - 25)
-        x_max = min(img_w, cx + 25)
-        y_min = max(0, cy - 25)
-        y_max = min(img_h, cy + 25)
-    else:
-        x_min = max(0, int(box.get("x", 0)))
-        y_min = max(0, int(box.get("y", 0)))
-        w = max(1, int(box.get("width", 1)))
-        h = max(1, int(box.get("height", 1)))
-        x_max = min(img_w, x_min + w)
-        y_max = min(img_h, y_min + h)
-
-    bw = x_max - x_min
-    bh = y_max - y_min
-    if bw < 4 or bh < 4:
-        return None, x_min, y_min, bw, bh, box
-    crop = bgr_img[y_min:y_max, x_min:x_max]
-    return crop, x_min, y_min, bw, bh, box
-
-
-def _match_objects_in_target_multi(target_bgr: np.ndarray, source_templates: list, fallback_boxes: list, tw: int, th: int, scale_fn) -> list:
-    if target_bgr is None or tw <= 0 or th <= 0:
-        return [scale_fn(nb, tw, th) for nb in fallback_boxes]
-
-    try:
-        target_gray = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2GRAY)
-        target_edges = cv2.Canny(target_gray, 50, 150)
-    except Exception:
-        return [scale_fn(nb, tw, th) for nb in fallback_boxes]
-
-    all_candidates = []
-    
-    for idx, item in enumerate(source_templates):
-        crop, sx, sy, sw, sh, orig_box = item
-        if crop is None or crop.shape[0] < 4 or crop.shape[1] < 4:
-            fb = scale_fn(fallback_boxes[idx], tw, th)
-            all_candidates.append({
-                "box": (float(fb.get("x", 0)), float(fb.get("y", 0)), float(fb.get("width", sw)), float(fb.get("height", sh))),
-                "score": 1.0,
-                "orig_box": orig_box,
-                "src_dims": (sx, sy, sw, sh),
-                "is_fallback": True
-            })
-            continue
-
-        try:
-            crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-            crop_edges = cv2.Canny(crop_gray, 50, 150)
-            ch, cw = crop_gray.shape[:2]
-
-            best_score = -1.0
-            best_cand = None
-
-            scales = np.linspace(0.45, 1.85, 27)
-            for s in scales:
-                cur_w = int(cw * s)
-                cur_h = int(ch * s)
-                if cur_w >= tw - 2 or cur_h >= th - 2 or cur_w < 6 or cur_h < 6:
-                    continue
-
-                resized_gray = cv2.resize(crop_gray, (cur_w, cur_h), interpolation=cv2.INTER_LINEAR)
-                res_gray = cv2.matchTemplate(target_gray, resized_gray, cv2.TM_CCOEFF_NORMED)
-
-                resized_edges = cv2.resize(crop_edges, (cur_w, cur_h), interpolation=cv2.INTER_LINEAR)
-                res_edges = cv2.matchTemplate(target_edges, resized_edges, cv2.TM_CCOEFF_NORMED)
-
-                # Robust hybrid correlation score combining grayscale texture and edge boundaries
-                res = np.maximum(res_gray, 0.65 * res_gray + 0.35 * res_edges)
-
-                # Find all occurrences exceeding high confidence threshold for multi-instance matching
-                y_locs, x_locs = np.where(res >= 0.52)
-                for x_c, y_c in zip(x_locs, y_locs):
-                    all_candidates.append({
-                        "box": (float(x_c), float(y_c), float(cur_w), float(cur_h)),
-                        "score": float(res[y_c, x_c]),
-                        "orig_box": orig_box,
-                        "src_dims": (sx, sy, sw, sh),
-                        "is_fallback": False
-                    })
-
-                # Also record peak overall match across all scales for this template
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                if max_val > best_score:
-                    best_score = float(max_val)
-                    best_cand = {
-                        "box": (float(max_loc[0]), float(max_loc[1]), float(cur_w), float(cur_h)),
-                        "score": best_score,
-                        "orig_box": orig_box,
-                        "src_dims": (sx, sy, sw, sh),
-                        "is_fallback": False
-                    }
-
-            if best_cand is not None:
-                all_candidates.append(best_cand)
-        except Exception as e:
-            logger.warning(f"Error matching template {idx}: {e}")
-            fb = scale_fn(fallback_boxes[idx], tw, th)
-            all_candidates.append({
-                "box": (float(fb.get("x", 0)), float(fb.get("y", 0)), float(fb.get("width", sw)), float(fb.get("height", sh))),
-                "score": 0.5,
-                "orig_box": orig_box,
-                "src_dims": (sx, sy, sw, sh),
-                "is_fallback": True
-            })
-
-    survivors = _nms_candidates(all_candidates, iou_thresh=0.35)
-
-    final_target_boxes = []
-    for surv in survivors:
-        bx, by, bw, bh = surv["box"]
-        orig_b = surv["orig_box"]
-        sx, sy, sw, sh = surv["src_dims"]
-        
-        new_box = copy.deepcopy(orig_b)
-        box_type = orig_b.get("type", "box")
-        if box_type in ("polygon", "line"):
-            pts = orig_b.get("points", [])
-            new_pts = []
-            for p in pts:
-                rel_x = (p["x"] - sx) / sw if sw > 0 else 0.5
-                rel_y = (p["y"] - sy) / sh if sh > 0 else 0.5
-                new_pts.append({
-                    "x": max(0.0, min(float(tw), bx + rel_x * bw)),
-                    "y": max(0.0, min(float(th), by + rel_y * bh))
-                })
-            new_box["points"] = new_pts
-        elif box_type == "joint":
-            rel_x = (orig_b.get("x", 0) - sx) / sw if sw > 0 else 0.5
-            rel_y = (orig_b.get("y", 0) - sy) / sh if sh > 0 else 0.5
-            new_box["x"] = max(0.0, min(float(tw), bx + rel_x * bw))
-            new_box["y"] = max(0.0, min(float(th), by + rel_y * bh))
-        else:
-            new_box["x"] = float(bx)
-            new_box["y"] = float(by)
-            new_box["width"] = float(bw)
-            new_box["height"] = float(bh)
-        
-        final_target_boxes.append(new_box)
-
-    if not final_target_boxes and fallback_boxes:
-        return [scale_fn(nb, tw, th) for nb in fallback_boxes]
-
-    return final_target_boxes
 
 
 @router.post("/annotations/propagate-to-all")
@@ -1707,18 +1512,6 @@ async def propagate_annotations_to_all(
     labels_dir = dataset_dir / "labels"
     labels_dir.mkdir(exist_ok=True, parents=True)
 
-    # Pre-load source image for smart object detection (if enabled)
-    source_bgr = None
-    source_templates = []
-    if request.smart_detect:
-        source_img_obj = next((i for i in images if str(i.get("id")) == str(source_image_id)), None)
-        if source_img_obj:
-            source_bgr = _load_image_bgr_safe(source_img_obj, dataset_dir)
-            if source_bgr is not None:
-                for box in boxes:
-                    source_templates.append(_extract_object_template(box, source_bgr))
-            else:
-                logger.warning("Could not open source image file for smart detection")
 
     # Pre-fetch annotation statuses for all images from the DB so that
     # skip_annotated mode can correctly identify already-labelled images.
@@ -1757,34 +1550,24 @@ async def propagate_annotations_to_all(
                 skipped += 1
                 continue
 
-        # Determine target dimensions & apply smart visual detection if available
+        # Determine target dimensions
         target_width: int = img.get("width", 0)
         target_height: int = img.get("height", 0)
-        target_bgr = None
-
-        if request.smart_detect and source_bgr is not None and source_templates:
-            target_bgr = _load_image_bgr_safe(img, dataset_dir)
-            if target_bgr is not None:
-                target_height, target_width = target_bgr.shape[:2]
-
-        if target_width <= 0 or target_height <= 0:
-            img_path = dataset_dir / "images" / img.get("filename", "")
-            if not img_path.exists() and img.get("path"):
-                img_path = Path(img["path"])
-            if img_path.exists():
+        
+        img_path = dataset_dir / "images" / img.get("filename", "")
+        if not img_path.exists() and img.get("path"):
+            img_path = Path(img["path"])
+        if img_path.exists():
+            if target_width <= 0 or target_height <= 0:
                 try:
                     with Image.open(img_path) as pil_img:
                         target_width, target_height = pil_img.size
                 except Exception:
                     target_width, target_height = source_width, source_height
-            else:
-                target_width, target_height = source_width, source_height
-
-        # If smart detect loaded target image, locate multiple instances and deduplicated boxes
-        if request.smart_detect and target_bgr is not None and source_templates:
-            target_boxes = _match_objects_in_target_multi(target_bgr, source_templates, normalised_boxes, target_width, target_height, _scale_box)
         else:
-            target_boxes = [_scale_box(nb, target_width, target_height) for nb in normalised_boxes]
+            target_width, target_height = source_width, source_height
+
+        target_boxes = [_scale_box(nb, target_width, target_height) for nb in normalised_boxes]
 
         # Persist via AnnotationService (same path as single-image save)
         annotation_id = f"{dataset_id}_{img_id}"

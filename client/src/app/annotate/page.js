@@ -112,14 +112,17 @@ function AnnotationToolContent() {
   const [reviewStatus, setReviewStatus] = useState('annotated'); // 'unlabeled' | 'predicted' | 'annotated' | 'reviewed'
   const [toastMessage, setToastMessage] = useState(null);
   const [showAutoLabel, setShowAutoLabel] = useState(false);
+  const [isZeroShotLoading, setIsZeroShotLoading] = useState(false);
+  const [zeroShotPrompt, setZeroShotPrompt] = useState("");
   const [copiedBoxes, setCopiedBoxes] = useState(null);
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'unlabeled', 'predicted', 'annotated', 'reviewed'
+  const initialFilterParam = searchParams.get('filter') || searchParams.get('tab') || 'all';
+  const initialFilter = initialFilterParam === 'unannotated' ? 'unlabeled' : initialFilterParam;
+  const [filterStatus, setFilterStatus] = useState(initialFilter); // 'all', 'unlabeled', 'predicted', 'annotated', 'reviewed'
   const [annotationType, setAnnotationType] = useState('detection'); // 'detection' or 'classification'
 
   // Propagate-to-all feature
   const [showPropagateModal, setShowPropagateModal] = useState(false);
   const [propagateMode, setPropagateMode] = useState('skip_annotated'); // 'overwrite' | 'skip_annotated'
-  const [smartDetect, setSmartDetect] = useState(true);
   const [isPropagating, setIsPropagating] = useState(false);
 
   const [activeTool, setActiveTool] = useState('box'); // 'select', 'box', 'polygon', 'joint', 'ai'
@@ -382,6 +385,47 @@ function AnnotationToolContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxes, boxHistory, dataset, images, currentImageIndex, copiedBoxes]);
 
+  const fetchUnannotatedImages = useCallback(async () => {
+    if (!datasetId || !token) return;
+    try {
+      const response = await fetch(API_ENDPOINTS.DATASETS.GET_UNANNOTATED_IMAGES(datasetId), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const unannotatedList = (data.images || []).map(img => ({
+        ...img,
+        status: 'unlabeled',
+        annotated: false
+      }));
+
+      setImages(prevImages => {
+        if (!prevImages || prevImages.length === 0) {
+          return unannotatedList;
+        }
+        const unannotatedIds = new Set(unannotatedList.map(img => img.id));
+        const updated = prevImages.map(img => {
+          if (unannotatedIds.has(img.id)) {
+            return { ...img, status: 'unlabeled', annotated: false };
+          } else if (img.status === 'unlabeled' || (!img.status && !img.annotated)) {
+            return { ...img, status: 'annotated', annotated: true };
+          }
+          return img;
+        });
+
+        const existingIds = new Set(updated.map(img => img.id));
+        for (const uImg of unannotatedList) {
+          if (!existingIds.has(uImg.id)) {
+            updated.push(uImg);
+          }
+        }
+        return updated;
+      });
+    } catch (error) {
+      console.error("Error fetching unannotated images:", error);
+    }
+  }, [datasetId, token]);
+
   const fetchDataset = useCallback(async () => {
     if (!datasetId || !token) return;
     try {
@@ -391,12 +435,39 @@ function AnnotationToolContent() {
       if (!response.ok) throw new Error(`Failed to fetch dataset: ${response.status}`);
       const data = await response.json();
       setDataset(data);
+      
+      if (filterStatus === 'unlabeled' || filterStatus === 'unannotated') {
+        try {
+          const unannotatedRes = await fetch(API_ENDPOINTS.DATASETS.GET_UNANNOTATED_IMAGES(datasetId), {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (unannotatedRes.ok) {
+            const unannotatedData = await unannotatedRes.json();
+            const unannotatedList = (unannotatedData.images || []).map(img => ({
+              ...img,
+              status: 'unlabeled',
+              annotated: false
+            }));
+            const unannotatedIds = new Set(unannotatedList.map(img => img.id));
+            const merged = (data.images || []).map(img => {
+              if (unannotatedIds.has(img.id)) {
+                return { ...img, status: 'unlabeled', annotated: false };
+              }
+              return img.status ? img : { ...img, status: img.annotated ? 'annotated' : 'unlabeled' };
+            });
+            setImages(merged);
+            return;
+          }
+        } catch (e) {
+          console.error("Failed separate fetch of unannotated images:", e);
+        }
+      }
       setImages(data.images || []);
     } catch (error) {
       console.error("Error fetching dataset:", error);
       showToast("Error loading dataset. Make sure backend is running.", 'error');
     }
-  }, [datasetId, token, showToast]);
+  }, [datasetId, token, showToast, filterStatus]);
 
   useEffect(() => {
     if (datasetId) {
@@ -404,6 +475,13 @@ function AnnotationToolContent() {
       fetchStats();
     }
   }, [datasetId, fetchDataset, fetchStats]);
+
+  // Fetch unannotated images separately whenever switching to the unlabeled / unannotated tab
+  useEffect(() => {
+    if ((filterStatus === 'unlabeled' || filterStatus === 'unannotated') && datasetId && token) {
+      fetchUnannotatedImages();
+    }
+  }, [filterStatus, datasetId, token, fetchUnannotatedImages]);
 
   const loadImage = useCallback(async (index) => {
     if (!images[index] || !datasetId || !token) return;
@@ -707,8 +785,62 @@ function AnnotationToolContent() {
     setAiViewMode('mask');
     setAiStateVersion(v => v + 1);
     drawCanvas();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleZeroShot = async () => {
+    if (!zeroShotPrompt.trim()) {
+      toast.warning("Please enter a text prompt first.");
+      return;
+    }
+    if (!images[currentImageIndex] || !dataset) return;
+
+    setIsZeroShotLoading(true);
+    try {
+      const img = images[currentImageIndex];
+      const form = new FormData();
+      form.append('dataset_id', datasetId);
+      form.append('image_id', String(img.id));
+      form.append('text_prompt', zeroShotPrompt);
+
+      const res = await fetch(API_ENDPOINTS.SMART.ZERO_SHOT, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+
+      if (!res.ok) throw new Error("Zero-shot annotation failed");
+      const data = await res.json();
+
+      if (data.success && data.detections) {
+        const newBoxes = data.detections.map(det => {
+          let className = dataset?.classes?.[selectedClass] || "object";
+          return {
+            x: det.bbox[0],
+            y: det.bbox[1],
+            width: det.box_width,
+            height: det.box_height,
+            class_name: className,
+            type: 'box',
+            algo_version: 'florence-2'
+          };
+        });
+
+        if (newBoxes.length > 0) {
+          boxesRef.current = [...boxesRef.current, ...newBoxes];
+          setBoxes(boxesRef.current);
+          drawCanvas();
+          toast.success(`Found ${newBoxes.length} objects for "${zeroShotPrompt}"`);
+        } else {
+          toast.info(`No objects found for "${zeroShotPrompt}"`);
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Zero-shot failed');
+    } finally {
+      setIsZeroShotLoading(false);
+    }
+  };
+
 
   const handleAiUndo = useCallback(() => {
     const hist = aiHistoryRef.current;
@@ -1625,8 +1757,11 @@ function AnnotationToolContent() {
     }
 
     setIsPropagating(true);
-    const toastId = toast.loading(smartDetect ? 'Detecting and marking matching objects across all images...' : 'Applying annotations to all images...');
+    const toastId = toast.loading('Applying annotations to all images...');
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+
       const response = await fetch(API_ENDPOINTS.ANNOTATIONS.PROPAGATE_TO_ALL, {
         method: 'POST',
         headers: {
@@ -1641,10 +1776,11 @@ function AnnotationToolContent() {
           boxes: currentBoxes,
           mode: propagateMode,
           annotation_type: annotationType,
-          smart_detect: smartDetect,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
       toast.dismiss(toastId);
       if (response.ok) {
         const data = await response.json();
@@ -1661,11 +1797,15 @@ function AnnotationToolContent() {
       }
     } catch (e) {
       toast.dismiss(toastId);
-      toast.error(`Error: ${e.message}`);
+      if (e.name === 'AbortError') {
+        toast.error('Request timed out. Please try again.');
+      } else {
+        toast.error(`Error: ${e.message}`);
+      }
     } finally {
       setIsPropagating(false);
     }
-  }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, smartDetect, annotationType, fetchDataset, fetchStats]);
+  }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, annotationType, fetchDataset, fetchStats]);
 
   // Auto-save when boxes change (debounced)
   useEffect(() => {
@@ -1853,7 +1993,7 @@ function AnnotationToolContent() {
                     </SelectItem>
                     <SelectItem value="unlabeled">
                       <div className="flex items-center justify-between w-full min-w-[140px]">
-                        <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-gray-500" /> Unlabeled</span>
+                        <span className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-gray-500" /> Unlabeled / Unannotated</span>
                         <span className="text-xs text-muted-foreground ml-2">{counts.unlabeled}</span>
                       </div>
                     </SelectItem>
@@ -2175,8 +2315,42 @@ function AnnotationToolContent() {
                     <Wand2 className="w-4 h-4 mb-1" />
                     <span className="text-[10px] font-medium">AI Smart Mode</span>
                   </button>
+                  <button
+                    onClick={() => { setActiveTool('zeroshot'); setIsDrawing(false); currentPointsRef.current = []; setCurrentPoints([]); setCurrentBox(null); }}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg transition-all col-span-3 border border-dashed ${activeTool === 'zeroshot' ? 'bg-fuchsia-600 text-white shadow-sm border-transparent' : 'bg-black/40 text-fuchsia-400 hover:text-fuchsia-300 hover:bg-white/5 border-white/5'}`}
+                    title="Zero-Shot Magic: Find objects using text prompts"
+                  >
+                    <Sparkles className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] font-medium">Text to Box (Zero-Shot)</span>
+                  </button>
                 </div>
               </div>
+
+              {activeTool === 'zeroshot' && (
+                <div className="mt-4 p-3 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-lg">
+                  <h3 className="font-medium text-[11px] text-fuchsia-300 uppercase tracking-wider mb-2">Zero-Shot Annotator</h3>
+                  <p className="text-[10px] text-fuchsia-200/70 mb-3 leading-tight">
+                    Powered by Vision-Language Models. Type what you want to find (e.g. "cars", "red shirt").
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      value={zeroShotPrompt}
+                      onChange={e => setZeroShotPrompt(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleZeroShot()}
+                      placeholder="Find all..."
+                      className="bg-black/40 border-fuchsia-500/30 text-xs h-8 text-white focus-visible:ring-fuchsia-500"
+                    />
+                    <Button 
+                      onClick={handleZeroShot}
+                      disabled={isZeroShotLoading}
+                      className="h-8 px-3 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs"
+                    >
+                      {isZeroShotLoading ? <span className="animate-spin mr-1">⚪</span> : <Sparkles className="w-3 h-3 mr-1" />}
+                      Find
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Annotation Mode Toggle */}
               <div>
@@ -2618,51 +2792,8 @@ function AnnotationToolContent() {
                 <h2 className="text-base font-semibold text-white">Apply Annotations to All Images</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
                   Copy the <span className="text-white font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</span> from
-                  this image to every other image in the dataset.
+                  this image to the same relative positions in every other image.
                 </p>
-              </div>
-            </div>
-
-            {/* Strategy selector */}
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Detection Strategy</p>
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  onClick={() => setSmartDetect(true)}
-                  className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
-                    smartDetect
-                      ? 'border-purple-500/60 bg-purple-500/10'
-                      : 'border-white/10 hover:border-white/20 bg-white/5'
-                  }`}
-                >
-                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
-                    smartDetect ? 'border-purple-400 bg-purple-400' : 'border-gray-600'
-                  }`} />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-white">Smart Visual Object Detection</p>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">Recommended</span>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-0.5">Uses computer vision pattern matching to locate and mark the same objects across different positions and scales.</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSmartDetect(false)}
-                  className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
-                    !smartDetect
-                      ? 'border-indigo-500/60 bg-indigo-500/10'
-                      : 'border-white/10 hover:border-white/20 bg-white/5'
-                  }`}
-                >
-                  <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
-                    !smartDetect ? 'border-indigo-400 bg-indigo-400' : 'border-gray-600'
-                  }`} />
-                  <div>
-                    <p className="text-sm font-medium text-white">Fixed Coordinate Copy</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Copies bounding boxes to the exact same relative spatial coordinates in every image.</p>
-                  </div>
-                </button>
               </div>
             </div>
 
