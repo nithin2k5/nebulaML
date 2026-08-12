@@ -55,6 +55,7 @@ export const API_ENDPOINTS = {
         PRESETS: `${API_BASE_URL}/api/training/presets`,
         AUTO_RETRAIN_CONFIG: `${API_BASE_URL}/api/training/auto-retrain-config`,
         AUTO_RETRAIN_CONFIG_GET: (datasetId) => `${API_BASE_URL}/api/training/auto-retrain-config/${datasetId}`,
+        MODEL_REGISTRY: `${API_BASE_URL}/api/training/model-registry`,
     },
     SMART: {
         SEGMENT: `${API_BASE_URL}/api/smart/segment`,
