@@ -510,6 +510,120 @@ async def update_profile(
         )
 
 
+class EmailChangeVerifyCurrent(BaseModel):
+    otp: str
+    new_email: EmailStr
+
+
+class EmailChangeVerifyNew(BaseModel):
+    otp: str
+
+
+@router.post("/me/change-email/request-current")
+@limiter.limit("3/minute")
+async def request_change_email_current(request: Request, current_user: dict = Depends(get_current_user)):
+    """Send OTP to current email to initiate email change"""
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database connection failed")
+    
+    try:
+        cursor = connection.cursor()
+        otp_code = f"{random.randint(100000, 999999)}"
+        otp_expiry = datetime.now() + timedelta(minutes=10)
+        
+        cursor.execute(
+            "UPDATE users SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
+            (otp_code, otp_expiry, current_user["id"])
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        send_otp_email(current_user["email"], otp_code)
+        return {"message": "OTP sent to current email"}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to send OTP: {str(e)}")
+
+
+@router.post("/me/change-email/verify-current")
+@limiter.limit("5/minute")
+async def verify_change_email_current(request: Request, body: EmailChangeVerifyCurrent, current_user: dict = Depends(get_current_user)):
+    """Verify current email OTP and send OTP to new email"""
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database connection failed")
+        
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT * FROM users WHERE id = %s AND verification_code = %s AND verification_code_expires > NOW()",
+            (current_user["id"], body.otp)
+        )
+        user = cursor.fetchone()
+        
+        if not user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP for current email")
+            
+        cursor.execute("SELECT id FROM users WHERE email = %s UNION SELECT id FROM pending_registrations WHERE email = %s", (body.new_email, body.new_email))
+        if cursor.fetchone():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is already in use")
+            
+        new_otp_code = f"{random.randint(100000, 999999)}"
+        new_otp_expiry = datetime.now() + timedelta(minutes=10)
+        
+        cursor.execute(
+            "UPDATE users SET verification_code = %s, verification_code_expires = %s, pending_email = %s WHERE id = %s",
+            (new_otp_code, new_otp_expiry, body.new_email, current_user["id"])
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        send_otp_email(body.new_email, new_otp_code)
+        return {"message": "OTP sent to new email"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to verify and send OTP: {str(e)}")
+
+
+@router.post("/me/change-email/verify-new")
+@limiter.limit("5/minute")
+async def verify_change_email_new(request: Request, body: EmailChangeVerifyNew, current_user: dict = Depends(get_current_user)):
+    """Verify new email OTP and update email"""
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database connection failed")
+        
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT * FROM users WHERE id = %s AND verification_code = %s AND verification_code_expires > NOW() AND pending_email IS NOT NULL",
+            (current_user["id"], body.otp)
+        )
+        user = cursor.fetchone()
+        
+        if not user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP for new email")
+            
+        new_email = user["pending_email"]
+        
+        cursor.execute(
+            "UPDATE users SET email = %s, verification_code = NULL, verification_code_expires = NULL, pending_email = NULL WHERE id = %s",
+            (new_email, current_user["id"])
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return {"message": "Email updated successfully", "email": new_email}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to verify new email: {str(e)}")
+
+
 @router.get("/me/stats")
 async def get_my_stats(current_user: dict = Depends(get_current_user)):
     """Get activity stats for the current user"""

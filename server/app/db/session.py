@@ -69,6 +69,12 @@ def migrate_users_otp_columns(connection) -> None:
                 "ALTER TABLE users ADD COLUMN verification_code_expires TIMESTAMP NULL"
             )
             logger.info("Migrated: added users.verification_code_expires")
+        cur.execute("SHOW COLUMNS FROM users LIKE 'pending_email'")
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN pending_email VARCHAR(255) NULL"
+            )
+            logger.info("Migrated: added users.pending_email")
         connection.commit()
         cur.close()
     except Error as e:

@@ -60,6 +60,14 @@ export default function ProfileTab() {
     const [editingUsername, setEditing] = useState(false);
     const [newUsername, setNewUsername] = useState("");
     const [saving, setSaving]           = useState(false);
+    
+    // Email change state
+    const [editingEmail, setEditingEmail] = useState(false);
+    const [emailStep, setEmailStep]       = useState(0); // 0=input new email, 1=verify current OTP, 2=verify new OTP
+    const [newEmail, setNewEmail]         = useState("");
+    const [emailOtp, setEmailOtp]         = useState("");
+    const [emailSaving, setEmailSaving]   = useState(false);
+    
     const canvasRef                     = useRef(null);
 
     // Fetch stats
@@ -129,6 +137,89 @@ export default function ProfileTab() {
             toast.error(err.message);
         } finally {
             setSaving(false);
+        }
+    };
+
+    const startEmailEdit = () => {
+        setNewEmail("");
+        setEmailOtp("");
+        setEmailStep(0);
+        setEditingEmail(true);
+    };
+
+    const cancelEmailEdit = () => {
+        setEditingEmail(false);
+        setNewEmail("");
+        setEmailOtp("");
+        setEmailStep(0);
+    };
+
+    const requestCurrentEmailOtp = async () => {
+        if (!newEmail || !newEmail.includes("@")) {
+            return toast.error("Please enter a valid new email address");
+        }
+        if (newEmail === user?.email) {
+            return toast.error("New email must be different from current email");
+        }
+        
+        setEmailSaving(true);
+        try {
+            const res = await fetch(`${API_ENDPOINTS.BASE}/auth/me/change-email/request-current`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Failed to request OTP");
+            toast.success("OTP sent to your current email");
+            setEmailStep(1);
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setEmailSaving(false);
+        }
+    };
+
+    const verifyCurrentEmailOtp = async () => {
+        if (!emailOtp) return toast.error("Please enter the OTP");
+        
+        setEmailSaving(true);
+        try {
+            const res = await fetch(`${API_ENDPOINTS.BASE}/auth/me/change-email/verify-current`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ otp: emailOtp, new_email: newEmail })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Verification failed");
+            toast.success("OTP sent to your new email");
+            setEmailOtp(""); // clear for next step
+            setEmailStep(2);
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setEmailSaving(false);
+        }
+    };
+
+    const verifyNewEmailOtp = async () => {
+        if (!emailOtp) return toast.error("Please enter the OTP");
+        
+        setEmailSaving(true);
+        try {
+            const res = await fetch(`${API_ENDPOINTS.BASE}/auth/me/change-email/verify-new`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ otp: emailOtp })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Verification failed");
+            toast.success("Email updated successfully");
+            cancelEmailEdit();
+            await checkAuth();
+        } catch (err) {
+            toast.error(err.message);
+        } finally {
+            setEmailSaving(false);
         }
     };
 
@@ -258,10 +349,79 @@ export default function ProfileTab() {
 
                         {/* Email row */}
                         <InfoRow icon={Mail} label="Email Address">
-                            <div className="flex items-center justify-between mt-1">
-                                <span className="text-sm text-gray-300 truncate">{user?.email}</span>
-                                <span className="text-[10px] text-gray-600 ml-3 shrink-0">Read-only</span>
-                            </div>
+                            {editingEmail ? (
+                                <div className="mt-2 space-y-3">
+                                    {emailStep === 0 && (
+                                        <div className="flex flex-col gap-2">
+                                            <Input
+                                                value={newEmail}
+                                                onChange={(e) => setNewEmail(e.target.value)}
+                                                placeholder="Enter new email address"
+                                                className="bg-white/5 border-white/10 text-sm h-9 focus:border-indigo-500/60 focus:ring-indigo-500/20"
+                                                autoFocus
+                                            />
+                                            <div className="flex gap-2">
+                                                <Button type="button" onClick={requestCurrentEmailOtp} className="h-8 text-xs bg-indigo-600 hover:bg-indigo-500" disabled={emailSaving}>
+                                                    Verify Current Email
+                                                </Button>
+                                                <Button type="button" variant="ghost" onClick={cancelEmailEdit} className="h-8 text-xs text-gray-400 hover:text-white" disabled={emailSaving}>
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {emailStep === 1 && (
+                                        <div className="flex flex-col gap-2">
+                                            <p className="text-xs text-gray-400">Enter the OTP sent to {user?.email}</p>
+                                            <Input
+                                                value={emailOtp}
+                                                onChange={(e) => setEmailOtp(e.target.value)}
+                                                placeholder="OTP for current email"
+                                                className="bg-white/5 border-white/10 text-sm h-9 focus:border-indigo-500/60 focus:ring-indigo-500/20"
+                                                autoFocus
+                                            />
+                                            <div className="flex gap-2">
+                                                <Button type="button" onClick={verifyCurrentEmailOtp} className="h-8 text-xs bg-indigo-600 hover:bg-indigo-500" disabled={emailSaving}>
+                                                    Verify & Continue
+                                                </Button>
+                                                <Button type="button" variant="ghost" onClick={cancelEmailEdit} className="h-8 text-xs text-gray-400 hover:text-white" disabled={emailSaving}>
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {emailStep === 2 && (
+                                        <div className="flex flex-col gap-2">
+                                            <p className="text-xs text-gray-400">Enter the OTP sent to {newEmail}</p>
+                                            <Input
+                                                value={emailOtp}
+                                                onChange={(e) => setEmailOtp(e.target.value)}
+                                                placeholder="OTP for new email"
+                                                className="bg-white/5 border-white/10 text-sm h-9 focus:border-indigo-500/60 focus:ring-indigo-500/20"
+                                                autoFocus
+                                            />
+                                            <div className="flex gap-2">
+                                                <Button type="button" onClick={verifyNewEmailOtp} className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500" disabled={emailSaving}>
+                                                    Confirm Email Change
+                                                </Button>
+                                                <Button type="button" variant="ghost" onClick={cancelEmailEdit} className="h-8 text-xs text-gray-400 hover:text-white" disabled={emailSaving}>
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-between mt-1">
+                                    <span className="text-sm text-gray-300 truncate">{user?.email}</span>
+                                    <button
+                                        onClick={startEmailEdit}
+                                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors ml-3 shrink-0"
+                                    >
+                                        <Pencil className="w-3 h-3" /> Edit
+                                    </button>
+                                </div>
+                            )}
                         </InfoRow>
 
                         {/* Role row */}
