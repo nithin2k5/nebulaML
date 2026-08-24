@@ -77,6 +77,12 @@ export default function ProfileTab() {
     const startEdit  = () => { setNewUsername(user?.username || ""); setUsernameError(""); setEditing(true); };
     const cancelEdit = () => { setEditing(false); setNewUsername(""); setUsernameError(""); };
 
+    const extractError = (detail) => {
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail)) return detail.map((d) => d.msg).join(", ");
+        return "An error occurred";
+    };
+
     const handleSave = async (e) => {
         e.preventDefault();
         setUsernameError("");
@@ -93,7 +99,7 @@ export default function ProfileTab() {
                 body: JSON.stringify({ username: trimmed }),
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Update failed");
+            if (!res.ok) throw new Error(extractError(data.detail) || "Update failed");
             toast.success("Username updated ✓");
             cancelEdit();
             await checkAuth();
@@ -136,7 +142,7 @@ export default function ProfileTab() {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Failed to request OTP");
+            if (!res.ok) throw new Error(extractError(data.detail) || "Failed to request OTP");
             toast.success("OTP sent to your current email");
             setEmailStep(1);
         } catch (err) {
@@ -158,7 +164,7 @@ export default function ProfileTab() {
                 body: JSON.stringify({ otp: emailOtp, new_email: newEmail })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Verification failed");
+            if (!res.ok) throw new Error(extractError(data.detail) || "Verification failed");
             toast.success("OTP sent to your new email");
             setEmailOtp("");
             setEmailStep(2);
@@ -181,7 +187,7 @@ export default function ProfileTab() {
                 body: JSON.stringify({ otp: emailOtp })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Verification failed");
+            if (!res.ok) throw new Error(extractError(data.detail) || "Verification failed");
             toast.success("Email updated successfully");
             cancelEmailEdit();
             await checkAuth();

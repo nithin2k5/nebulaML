@@ -16,6 +16,12 @@ export function AuthProvider({ children }) {
   const router = useRouter();
   const promptRef = useRef(0);
 
+  const extractError = (detail) => {
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) return detail.map((d) => d.msg).join(", ");
+    return null;
+  };
+
   useEffect(() => {
     checkAuth();
   }, []);
@@ -57,7 +63,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to extend session");
+        throw new Error(extractError(err.detail) || "Failed to extend session");
       }
 
       const data = await response.json();
@@ -154,7 +160,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || "Login failed");
+        throw new Error(extractError(error.detail) || "Login failed");
       }
 
       const data = await response.json();
@@ -198,7 +204,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || "Registration failed");
+        throw new Error(extractError(error.detail) || "Registration failed");
       }
 
       return { success: true, requiresOtp: true };
@@ -219,7 +225,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || "Verification failed");
+        throw new Error(extractError(error.detail) || "Verification failed");
       }
 
       const data = await response.json();
@@ -257,7 +263,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail || "Failed to resend OTP");
+        throw new Error(extractError(error.detail) || "Failed to resend OTP");
       }
 
       return { success: true };
