@@ -137,11 +137,17 @@ export default function ProfileTab() {
         
         setEmailSaving(true);
         try {
-            const res = await fetch(`${API_ENDPOINTS.BASE}/auth/me/change-email/request-current`, {
+            const res = await fetch(`${API_BASE_URL}/api/auth/me/change-email/request-current`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
             });
-            const data = await res.json();
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Failed to parse response (${res.status}): ${text.substring(0, 60)}`);
+            }
             if (!res.ok) throw new Error(extractError(data.detail) || "Failed to request OTP");
             toast.success("OTP sent to your current email");
             setEmailStep(1);
@@ -158,12 +164,18 @@ export default function ProfileTab() {
         
         setEmailSaving(true);
         try {
-            const res = await fetch(`${API_ENDPOINTS.BASE}/auth/me/change-email/verify-current`, {
+            const res = await fetch(`${API_BASE_URL}/api/auth/me/change-email/verify-current`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ otp: emailOtp, new_email: newEmail })
             });
-            const data = await res.json();
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Failed to parse response (${res.status}): ${text.substring(0, 60)}`);
+            }
             if (!res.ok) throw new Error(extractError(data.detail) || "Verification failed");
             toast.success("OTP sent to your new email");
             setEmailOtp("");
@@ -181,7 +193,7 @@ export default function ProfileTab() {
         
         setEmailSaving(true);
         try {
-            const res = await fetch(`${API_ENDPOINTS.BASE}/auth/me/change-email/verify-new`, {
+            const res = await fetch(`${API_BASE_URL}/api/auth/me/change-email/verify-new`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ otp: emailOtp })
