@@ -55,6 +55,7 @@ export default function ProfileTab() {
     const [editingUsername, setEditing] = useState(false);
     const [newUsername, setNewUsername] = useState("");
     const [saving, setSaving]           = useState(false);
+    const [usernameError, setUsernameError] = useState("");
     
     // Email change state
     const [editingEmail, setEditingEmail] = useState(false);
@@ -62,6 +63,7 @@ export default function ProfileTab() {
     const [newEmail, setNewEmail]         = useState("");
     const [emailOtp, setEmailOtp]         = useState("");
     const [emailSaving, setEmailSaving]   = useState(false);
+    const [emailError, setEmailError]     = useState("");
 
     // Fetch stats
     useEffect(() => {
@@ -72,14 +74,15 @@ export default function ProfileTab() {
             .catch(() => {});
     }, [token]);
 
-    const startEdit  = () => { setNewUsername(user?.username || ""); setEditing(true); };
-    const cancelEdit = () => { setEditing(false); setNewUsername(""); };
+    const startEdit  = () => { setNewUsername(user?.username || ""); setUsernameError(""); setEditing(true); };
+    const cancelEdit = () => { setEditing(false); setNewUsername(""); setUsernameError(""); };
 
     const handleSave = async (e) => {
         e.preventDefault();
+        setUsernameError("");
         const trimmed = newUsername.trim();
-        if (!trimmed)                  return toast.error("Username cannot be empty");
-        if (!USERNAME_RE.test(trimmed)) return toast.error("Only lowercase letters, digits, and underscores allowed");
+        if (!trimmed) return setUsernameError("Username cannot be empty");
+        if (!USERNAME_RE.test(trimmed)) return setUsernameError("Only lowercase letters, digits, and underscores allowed");
         if (trimmed === user?.username) { cancelEdit(); return; }
 
         setSaving(true);
@@ -95,7 +98,7 @@ export default function ProfileTab() {
             cancelEdit();
             await checkAuth();
         } catch (err) {
-            toast.error(err.message);
+            setUsernameError(err.message);
         } finally {
             setSaving(false);
         }
@@ -105,6 +108,7 @@ export default function ProfileTab() {
         setNewEmail("");
         setEmailOtp("");
         setEmailStep(0);
+        setEmailError("");
         setEditingEmail(true);
     };
 
@@ -113,14 +117,16 @@ export default function ProfileTab() {
         setNewEmail("");
         setEmailOtp("");
         setEmailStep(0);
+        setEmailError("");
     };
 
     const requestCurrentEmailOtp = async () => {
+        setEmailError("");
         if (!newEmail || !newEmail.includes("@")) {
-            return toast.error("Please enter a valid new email address");
+            return setEmailError("Please enter a valid new email address");
         }
         if (newEmail === user?.email) {
-            return toast.error("New email must be different from current email");
+            return setEmailError("New email must be different from current email");
         }
         
         setEmailSaving(true);
@@ -134,14 +140,15 @@ export default function ProfileTab() {
             toast.success("OTP sent to your current email");
             setEmailStep(1);
         } catch (err) {
-            toast.error(err.message);
+            setEmailError(err.message);
         } finally {
             setEmailSaving(false);
         }
     };
 
     const verifyCurrentEmailOtp = async () => {
-        if (!emailOtp) return toast.error("Please enter the OTP");
+        setEmailError("");
+        if (!emailOtp) return setEmailError("Please enter the OTP");
         
         setEmailSaving(true);
         try {
@@ -156,14 +163,15 @@ export default function ProfileTab() {
             setEmailOtp("");
             setEmailStep(2);
         } catch (err) {
-            toast.error(err.message);
+            setEmailError(err.message);
         } finally {
             setEmailSaving(false);
         }
     };
 
     const verifyNewEmailOtp = async () => {
-        if (!emailOtp) return toast.error("Please enter the OTP");
+        setEmailError("");
+        if (!emailOtp) return setEmailError("Please enter the OTP");
         
         setEmailSaving(true);
         try {
@@ -178,7 +186,7 @@ export default function ProfileTab() {
             cancelEmailEdit();
             await checkAuth();
         } catch (err) {
-            toast.error(err.message);
+            setEmailError(err.message);
         } finally {
             setEmailSaving(false);
         }
@@ -230,20 +238,31 @@ export default function ProfileTab() {
                             {/* Username */}
                             <InfoRow icon={Layers} label="Username">
                                 {editingUsername ? (
-                                    <form onSubmit={handleSave} className="flex gap-2">
-                                        <Input
-                                            value={newUsername}
-                                            onChange={(e) => setNewUsername(e.target.value)}
-                                            placeholder="lowercase_only"
-                                            className="flex-1 bg-zinc-950 border-zinc-700 text-sm h-9 max-w-xs focus:ring-zinc-600 focus:border-zinc-500"
-                                            autoFocus
-                                        />
-                                        <Button type="submit" size="icon" className="h-9 w-9 bg-zinc-100 hover:bg-white text-zinc-900" disabled={saving}>
-                                            <Check className="w-4 h-4" />
-                                        </Button>
-                                        <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-zinc-400 hover:text-white" onClick={cancelEdit} disabled={saving}>
-                                            <X className="w-4 h-4" />
-                                        </Button>
+                                    <form onSubmit={handleSave} className="flex flex-col gap-2">
+                                        <div className="flex gap-2">
+                                            <Input
+                                                value={newUsername}
+                                                onChange={(e) => setNewUsername(e.target.value)}
+                                                placeholder="lowercase_only"
+                                                className={cn(
+                                                    "flex-1 bg-zinc-950 border-zinc-700 text-sm h-9 max-w-xs focus:ring-zinc-600 focus:border-zinc-500",
+                                                    usernameError && "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20"
+                                                )}
+                                                autoFocus
+                                            />
+                                            <Button type="submit" size="icon" className="h-9 w-9 bg-zinc-100 hover:bg-white text-zinc-900" disabled={saving}>
+                                                <Check className="w-4 h-4" />
+                                            </Button>
+                                            <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-zinc-400 hover:text-white" onClick={cancelEdit} disabled={saving}>
+                                                <X className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                        {usernameError && (
+                                            <p className="text-xs text-red-400 mt-1">{usernameError}</p>
+                                        )}
+                                        {!usernameError && (
+                                            <p className="text-[11px] text-zinc-500 mt-1.5">Lowercase letters, digits, underscores only</p>
+                                        )}
                                     </form>
                                 ) : (
                                     <div className="flex items-center justify-between sm:justify-start gap-4">
@@ -255,9 +274,6 @@ export default function ProfileTab() {
                                             <Pencil className="w-3 h-3" /> Edit
                                         </button>
                                     </div>
-                                )}
-                                {editingUsername && (
-                                    <p className="text-[11px] text-zinc-500 mt-1.5">Lowercase letters, digits, underscores only</p>
                                 )}
                             </InfoRow>
 
@@ -271,7 +287,10 @@ export default function ProfileTab() {
                                                     value={newEmail}
                                                     onChange={(e) => setNewEmail(e.target.value)}
                                                     placeholder="Enter new email address"
-                                                    className="bg-zinc-950 border-zinc-700 text-sm h-9 focus:ring-zinc-600 focus:border-zinc-500"
+                                                    className={cn(
+                                                        "bg-zinc-950 border-zinc-700 text-sm h-9 focus:ring-zinc-600 focus:border-zinc-500",
+                                                        emailError && "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20"
+                                                    )}
                                                     autoFocus
                                                 />
                                                 <div className="flex gap-2 pt-1">
@@ -291,7 +310,10 @@ export default function ProfileTab() {
                                                     value={emailOtp}
                                                     onChange={(e) => setEmailOtp(e.target.value)}
                                                     placeholder="OTP for current email"
-                                                    className="bg-zinc-950 border-zinc-700 text-sm h-9 focus:ring-zinc-600 focus:border-zinc-500"
+                                                    className={cn(
+                                                        "bg-zinc-950 border-zinc-700 text-sm h-9 focus:ring-zinc-600 focus:border-zinc-500",
+                                                        emailError && "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20"
+                                                    )}
                                                     autoFocus
                                                 />
                                                 <div className="flex gap-2 pt-1">
@@ -311,7 +333,10 @@ export default function ProfileTab() {
                                                     value={emailOtp}
                                                     onChange={(e) => setEmailOtp(e.target.value)}
                                                     placeholder="OTP for new email"
-                                                    className="bg-zinc-950 border-zinc-700 text-sm h-9 focus:ring-zinc-600 focus:border-zinc-500"
+                                                    className={cn(
+                                                        "bg-zinc-950 border-zinc-700 text-sm h-9 focus:ring-zinc-600 focus:border-zinc-500",
+                                                        emailError && "border-red-500/50 focus:border-red-500/50 focus:ring-red-500/20"
+                                                    )}
                                                     autoFocus
                                                 />
                                                 <div className="flex gap-2 pt-1">
@@ -323,6 +348,9 @@ export default function ProfileTab() {
                                                     </Button>
                                                 </div>
                                             </div>
+                                        )}
+                                        {emailError && (
+                                            <p className="text-xs text-red-400 mt-1">{emailError}</p>
                                         )}
                                     </div>
                                 ) : (
