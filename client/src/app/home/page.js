@@ -255,6 +255,34 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* System Capabilities Section */}
+        <section className="space-y-12 border-t border-white/10 pt-24">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-3xl font-bold uppercase tracking-tight">System.Capabilities</h2>
+              <p className="font-mono text-sm text-gray-500 mt-2">PLATFORM_FEATURE_MATRIX</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[
+              { id: "FEAT_01", title: "Smart Annotation", desc: "AI-assisted bounding box generation. Click once to auto-segment and label objects instantly." },
+              { id: "FEAT_02", title: "Version Control", desc: "Immutable dataset snapshots. Roll back to any previous state of your annotations effortlessly." },
+              { id: "FEAT_03", title: "Active Learning", desc: "Deploy your model to the edge and automatically pipe low-confidence predictions back for review." },
+              { id: "FEAT_04", title: "Synthetic Data", desc: "Generate edge-case training data using integrated diffusion models to fix class imbalances." },
+              { id: "FEAT_05", title: "Hyperparameter Tuning", desc: "Automated genetic algorithms to find the optimal learning rate, batch size, and momentum." },
+              { id: "FEAT_06", title: "Hardware Agnostic", desc: "Train on cloud A100s, deploy to Raspberry Pi. Export to CoreML, TensorRT, TFLite, and ONNX." }
+            ].map((feat) => (
+              <BoundingBox key={feat.id} label={feat.id} score="SYS.ACTIVE" className="p-6 hover:bg-white/[0.02] transition-colors">
+                <h3 className="text-lg font-bold uppercase mt-4 mb-2 text-white">{feat.title}</h3>
+                <p className="font-mono text-xs text-gray-400 leading-relaxed">
+                  {feat.desc}
+                </p>
+              </BoundingBox>
+            ))}
+          </div>
+        </section>
+
         {/* Engine Specs Section */}
         <section className="space-y-12 border-t border-white/10 pt-24">
           <div className="flex items-end justify-between">
@@ -362,6 +390,41 @@ export default function HomePage() {
         </section>
 
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-white/10 bg-black py-12 px-6 md:px-12 relative z-10">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="w-2 h-2 bg-violet-500 rounded-none" />
+              <span className="font-mono text-sm font-bold tracking-widest uppercase">NBLA_ML // KERNEL</span>
+            </div>
+            <p className="font-mono text-xs text-gray-500 max-w-sm leading-relaxed">
+              Precision tooling for computer vision engineers. 
+              Designed for performance, clarity, and total hardware control.
+            </p>
+          </div>
+          
+          <div className="flex gap-12 font-mono text-xs">
+            <div className="space-y-3">
+              <span className="text-white font-bold block uppercase tracking-widest mb-4">Resources</span>
+              <a href="#" className="block text-gray-500 hover:text-violet-400 transition-colors uppercase">Documentation</a>
+              <a href="#" className="block text-gray-500 hover:text-violet-400 transition-colors uppercase">API_Reference</a>
+              <a href="#" className="block text-gray-500 hover:text-violet-400 transition-colors uppercase">GitHub_Repo</a>
+            </div>
+            <div className="space-y-3">
+              <span className="text-white font-bold block uppercase tracking-widest mb-4">System</span>
+              <a href="#" className="block text-gray-500 hover:text-violet-400 transition-colors uppercase">Status_Page</a>
+              <a href="#" className="block text-gray-500 hover:text-violet-400 transition-colors uppercase">Changelog</a>
+              <a href="#" className="block text-gray-500 hover:text-violet-400 transition-colors uppercase">Telemetry</a>
+            </div>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto mt-12 pt-8 border-t border-white/10 flex flex-col sm:flex-row justify-between items-center gap-4 font-mono text-[10px] text-gray-600 uppercase">
+          <span>&copy; {new Date().getFullYear()} NBLA_ML SYSTEMS. ALL_RIGHTS_RESERVED.</span>
+          <span>SYS_VERSION: 2.4.0_STABLE // UPTIME: 99.99%</span>
+        </div>
+      </footer>
 
       <style jsx global>{`
         .border-text {
