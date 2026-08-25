@@ -244,13 +244,13 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
 
             {/* Dataset Quality Gate */}
             {qualityLoading && (
-                <div className="p-3 rounded-lg border border-border bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="p-3 rounded-none border border-border bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
                     <RefreshCw className="w-4 h-4 animate-spin" /> Checking dataset quality...
                 </div>
             )}
             {qualityCheck && !qualityLoading && (
                 <div className="space-y-2">
-                    <div className={`p-3 rounded-lg border flex items-center justify-between ${
+                    <div className={`p-3 rounded-none border flex items-center justify-between ${
                         qualityCheck.quality_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5' :
                         qualityCheck.quality_score >= 40 ? 'border-amber-500/30 bg-amber-500/5' :
                         'border-red-500/30 bg-red-500/5'
@@ -267,7 +267,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                         </Badge>
                     </div>
                     {qualityCheck.blockers?.map((b, i) => (
-                        <div key={i} className="p-3 rounded-lg border border-red-500/40 bg-red-500/10 flex items-start gap-2">
+                        <div key={i} className="p-3 rounded-none border border-red-500/40 bg-red-500/10 flex items-start gap-2">
                             <XCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                             <div className="text-sm">
                                 <span className="font-medium text-red-500">Blocker: </span>{b.message}
@@ -276,7 +276,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                         </div>
                     ))}
                     {qualityCheck.warnings?.map((w, i) => (
-                        <div key={i} className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 flex items-start gap-2">
+                        <div key={i} className="p-3 rounded-none border border-amber-500/30 bg-amber-500/5 flex items-start gap-2">
                             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                             <div className="text-sm">
                                 <span className="font-medium text-amber-500">Warning: </span>{w.message}
@@ -285,7 +285,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                         </div>
                     ))}
                     {qualityCheck.blockers?.length === 0 && qualityCheck.warnings?.length === 0 && (
-                        <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 flex items-center gap-2 text-sm">
+                        <div className="p-3 rounded-none border border-emerald-500/30 bg-emerald-500/5 flex items-center gap-2 text-sm">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                             <span className="text-emerald-600 font-medium">Dataset ready — all quality checks passed.</span>
                         </div>
@@ -308,7 +308,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                                 min="0" max="100" 
                                 value={splitRatios.train}
                                 onChange={(e) => setSplitRatios(s => ({ ...s, train: parseInt(e.target.value) || 0 }))}
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors"
+                                className="flex h-9 w-full rounded-none border border-input bg-transparent px-3 py-1 text-sm shadow-none transition-colors"
                             />
                         </div>
                         <div className="space-y-2">
@@ -318,7 +318,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                                 min="0" max="100" 
                                 value={splitRatios.val}
                                 onChange={(e) => setSplitRatios(s => ({ ...s, val: parseInt(e.target.value) || 0 }))}
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors"
+                                className="flex h-9 w-full rounded-none border border-input bg-transparent px-3 py-1 text-sm shadow-none transition-colors"
                             />
                         </div>
                         <div className="space-y-2">
@@ -328,22 +328,22 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                                 min="0" max="100" 
                                 value={splitRatios.test}
                                 onChange={(e) => setSplitRatios(s => ({ ...s, test: parseInt(e.target.value) || 0 }))}
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors"
+                                className="flex h-9 w-full rounded-none border border-input bg-transparent px-3 py-1 text-sm shadow-none transition-colors"
                             />
                         </div>
                     </div>
 
-                    <div className="flex h-4 w-full rounded-full overflow-hidden bg-muted">
-                        <div className="bg-indigo-500 transition-all" style={{ width: `${splitRatios.train}%` }} title={`Train: ${splitRatios.train}%`} />
+                    <div className="flex h-4 w-full rounded-none overflow-hidden bg-muted">
+                        <div className="bg-violet-400 transition-all" style={{ width: `${splitRatios.train}%` }} title={`Train: ${splitRatios.train}%`} />
                         <div className="bg-violet-500 transition-all" style={{ width: `${splitRatios.val}%` }} title={`Val: ${splitRatios.val}%`} />
                         <div className="bg-purple-500 transition-all" style={{ width: `${splitRatios.test}%` }} title={`Test: ${splitRatios.test}%`} />
                     </div>
                     
                     <div className="flex items-center justify-between text-sm">
                         <div className="flex gap-4">
-                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-indigo-500"/>Train ({stats?.split_counts?.train || 0})</div>
-                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-violet-500"/>Val ({stats?.split_counts?.val || 0})</div>
-                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-purple-500"/>Test ({stats?.split_counts?.test || 0})</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-none bg-violet-400"/>Train ({stats?.split_counts?.train || 0})</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-none bg-violet-500"/>Val ({stats?.split_counts?.val || 0})</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-none bg-purple-500"/>Test ({stats?.split_counts?.test || 0})</div>
                         </div>
                         <div className="font-mono text-muted-foreground">Sum: {splitRatios.train + splitRatios.val + splitRatios.test}%</div>
                     </div>
@@ -366,7 +366,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="flex items-center justify-between">
-                            <Label>Auto-Orient</Label>
+                            <Label>Au</Label>
                             <Badge variant="secondary">Applied</Badge>
                         </div>
                         <div className="flex items-center justify-between">
@@ -454,7 +454,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <p className="text-sm font-medium mb-2 text-center">Original</p>
-                                    <div className="rounded-lg overflow-hidden border border-border bg-muted">
+                                    <div className="rounded-none overflow-hidden border border-border bg-muted">
                                         <img
                                             src={`data:image/jpeg;base64,${previewData.original.base64}`}
                                             alt="Original"
@@ -467,7 +467,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                                 </div>
                                 <div>
                                     <p className="text-sm font-medium mb-2 text-center">Augmented</p>
-                                    <div className="rounded-lg overflow-hidden border border-primary/50 bg-muted">
+                                    <div className="rounded-none overflow-hidden border border-primary/50 bg-muted">
                                         <img
                                             src={`data:image/jpeg;base64,${previewData.augmented.base64}`}
                                             alt="Augmented"
@@ -496,7 +496,7 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                             <button
                                 key={fmt.value}
                                 onClick={() => setExportFormat(fmt.value)}
-                                className={`px-3 py-2 rounded-lg border text-sm transition-all ${exportFormat === fmt.value
+                                className={`px-3 py-2 rounded-none border text-sm transition-all ${exportFormat === fmt.value
                                         ? "border-primary bg-primary/10 text-primary"
                                         : "border-border hover:border-primary/50"
                                     }`}

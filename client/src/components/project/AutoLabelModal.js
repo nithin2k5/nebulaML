@@ -68,7 +68,7 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                 body: formData,
             });
 
-            if (!res.ok) throw new Error("Auto-labeling failed");
+            if (!res.ok) throw new Error("Au failed");
 
             const data = await res.json();
             if (data.job_id) {
@@ -81,7 +81,7 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                             const statusData = await statusRes.json();
                             if (statusData.status === "completed") {
                                 clearInterval(interval);
-                                toast.success(`Successfully auto-labeled ${statusData.labeled_count} images!`, {
+                                toast.success(`Successfully au ${statusData.labeled_count} images!`, {
                                     description: "Review them and approve to finalize.",
                                     icon: <Sparkles className="h-4 w-4 text-amber-500" />,
                                 });
@@ -91,7 +91,7 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                                 onClose();
                             } else if (statusData.status === "failed") {
                                 clearInterval(interval);
-                                toast.error("Auto-label failed", { description: statusData.error });
+                                toast.error("Au failed", { description: statusData.error });
                                 setLoading(false);
                                 setProgress(0);
                             } else {
@@ -103,13 +103,13 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                     }
                 }, 1000);
             } else {
-                toast.success(`Successfully auto-labeled ${data.labeled_count} images!`);
+                toast.success(`Successfully au ${data.labeled_count} images!`);
                 setLoading(false);
                 onComplete?.();
                 onClose();
             }
         } catch (error) {
-            toast.error("Failed to start auto-labeling", {
+            toast.error("Failed to start au", {
                 description: error.message
             });
             setLoading(false);
@@ -121,8 +121,8 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
             <DialogContent className="sm:max-w-[425px] glass-panel border-white/10">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <Sparkles className="h-5 w-5 text-indigo-400" />
-                        AI Auto-Labeling
+                        <Sparkles className="h-5 w-5 text-violet-400" />
+                        AI Au
                     </DialogTitle>
                     <DialogDescription>
                         Use a pre-trained model to automatically generate bounding boxes for your images.
@@ -161,10 +161,10 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                         />
                     </div>
 
-                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-md p-3 text-sm flex gap-2 text-amber-200/90">
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-none p-3 text-sm flex gap-2 text-amber-200/90">
                         <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                         <p>
-                            Auto-labeled boxes will be marked as &quot;Predicted&quot;. You should review and approve them.
+                            Au boxes will be marked as &quot;Predicted&quot;. You should review and approve them.
                         </p>
                     </div>
                 </div>
@@ -176,7 +176,7 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                     <Button
                         onClick={handleAutoLabel}
                         disabled={loading}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 relative overflow-hidden"
+                        className="bg-violet-500 hover:bg-indigo-700 text-white gap-2 relative overflow-hidden"
                     >
                         {loading && (
                             <div
@@ -192,7 +192,7 @@ export default function AutoLabelModal({ isOpen, onClose, datasetId, onComplete 
                         ) : (
                             <>
                                 <Sparkles className="h-4 w-4" />
-                                Start Auto-Labeling
+                                Start Au
                             </>
                         )}
                     </Button>

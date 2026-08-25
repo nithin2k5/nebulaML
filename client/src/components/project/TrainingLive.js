@@ -279,9 +279,9 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                         <span>Epoch {currentEpoch} / {totalEpochs}</span>
                         <span>{progress.toFixed(1)}%</span>
                     </div>
-                    <div className="h-3 bg-muted rounded-full overflow-hidden">
+                    <div className="h-3 bg-muted rounded-none overflow-hidden">
                         <div 
-                            className="h-full bg-primary rounded-full transition-all duration-500"
+                            className="h-full bg-primary rounded-none transition-all duration-500"
                             style={{ width: `${progress}%` }}
                         />
                     </div>
@@ -323,10 +323,10 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                                 ref={canvasRef} 
                                 width={700} 
                                 height={250} 
-                                className="w-full rounded-lg bg-black/20 border border-border"
+                                className="w-full rounded-none bg-black/20 border border-border"
                             />
                             <div className="flex flex-wrap gap-4 mt-3 text-xs">
-                                <span className="flex items-center gap-1"><span className="w-3 h-1 rounded bg-indigo-500 inline-block"/> Box Loss</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-1 rounded bg-violet-400 inline-block"/> Box Loss</span>
                                 <span className="flex items-center gap-1"><span className="w-3 h-1 rounded bg-rose-500 inline-block"/> Cls Loss</span>
                                 <span className="flex items-center gap-1"><span className="w-3 h-1 rounded bg-amber-500 inline-block"/> DFL Loss</span>
                                 <span className="flex items-center gap-1"><span className="w-3 h-1 rounded bg-emerald-500 inline-block"/> mAP50</span>
@@ -361,7 +361,7 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                             <img 
                                 src={confusionMatrixUrl}
                                 alt="Confusion Matrix"
-                                className="w-full max-w-2xl mx-auto rounded-lg border border-border"
+                                className="w-full max-w-2xl mx-auto rounded-none border border-border"
                             />
                         ) : (
                             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
@@ -406,7 +406,7 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                                             <tr key={cls.class_id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                                                 <td className="py-2.5 font-medium pr-4">
                                                     <span className="flex items-center gap-2">
-                                                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${barColor}`} />
+                                                        <span className={`w-2 h-2 rounded-none flex-shrink-0 ${barColor}`} />
                                                         {cls.class_name}
                                                     </span>
                                                 </td>
@@ -422,8 +422,8 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                                                 </td>
                                                 <td className="py-2.5 px-4">
                                                     <div className="flex items-center gap-2">
-                                                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                                                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${map50Pct}%` }} />
+                                                        <div className="flex-1 h-1.5 bg-muted rounded-none overflow-hidden">
+                                                            <div className={`h-full rounded-none transition-all ${barColor}`} style={{ width: `${map50Pct}%` }} />
                                                         </div>
                                                         <span className="text-xs font-mono w-10 text-right">{map50Pct}%</span>
                                                     </div>

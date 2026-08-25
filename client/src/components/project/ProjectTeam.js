@@ -152,7 +152,7 @@ export default function ProjectTeam({ dataset }) {
                         <CardDescription>Manage who has access to this project</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                        <form onSubmit={handleAddMember} className="flex gap-4 items-end bg-muted/30 p-4 rounded-lg border">
+                        <form onSubmit={handleAddMember} className="flex gap-4 items-end bg-muted/30 p-4 rounded-none border">
                             <div className="space-y-2 flex-1">
                                 <Label>Username or Email</Label>
                                 <div className="relative">
@@ -185,11 +185,11 @@ export default function ProjectTeam({ dataset }) {
                             </Button>
                         </form>
 
-                        <div className="rounded-md border divide-y">
+                        <div className="rounded-none border divide-y">
                             {members.map(member => (
                                 <div key={member.id} className="p-4 flex items-center justify-between">
                                     <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                        <div className="w-10 h-10 rounded-none bg-primary/10 flex items-center justify-center">
                                             <Mail className="w-5 h-5 text-primary" />
                                         </div>
                                         <div>
@@ -233,7 +233,7 @@ export default function ProjectTeam({ dataset }) {
                         <div className="space-y-4">
                             {activities.map(log => (
                                 <div key={log.id} className="flex gap-3 items-start">
-                                    <div className="mt-0.5 w-2 h-2 rounded-full bg-primary ring-4 ring-primary/10" />
+                                    <div className="mt-0.5 w-2 h-2 rounded-none bg-primary ring-4 ring-primary/10" />
                                     <div className="flex-1 space-y-1">
                                         <p className="text-sm">
                                             <span className="font-medium text-foreground">{log.username || "System"}: </span>

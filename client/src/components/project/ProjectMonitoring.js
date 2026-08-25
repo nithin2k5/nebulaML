@@ -59,7 +59,7 @@ export default function ProjectMonitoring({ dataset }) {
 
             {/* Drift Alert */}
             {drift?.drift_detected && (
-                <div className="p-4 rounded-lg border border-amber-500/50 bg-amber-500/10 flex items-start gap-3">
+                <div className="p-4 rounded-none border border-amber-500/50 bg-amber-500/10 flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                     <div>
                         <p className="font-semibold text-amber-500">Data Drift Detected ({drift.severity})</p>
@@ -135,9 +135,9 @@ export default function ProjectMonitoring({ dataset }) {
                                                 <span className="font-medium">{className}</span>
                                                 <span className="text-muted-foreground">{count}</span>
                                             </div>
-                                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                            <div className="h-2 bg-muted rounded-none overflow-hidden">
                                                 <div
-                                                    className="h-full bg-primary rounded-full transition-all"
+                                                    className="h-full bg-primary rounded-none transition-all"
                                                     style={{ width: `${pct}%` }}
                                                 />
                                             </div>
@@ -168,7 +168,7 @@ export default function ProjectMonitoring({ dataset }) {
                                         title={`Batch ${idx + 1}: ${(point.avg_confidence * 100).toFixed(1)}%`}
                                     >
                                         <div
-                                            className={`rounded-t transition-all ${isLow ? "bg-amber-500" : "bg-primary"} hover:opacity-80`}
+                                            className={`rounded-none transition-all ${isLow ? "bg-amber-500" : "bg-primary"} hover:opacity-80`}
                                             style={{ height: `${barHeight}%` }}
                                         />
                                     </div>

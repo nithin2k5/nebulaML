@@ -48,7 +48,7 @@ function JobChart({ jobId, status }) {
 
   if (metrics.length === 0) return null;
   return (
-    <div className="h-48 w-full mt-3 bg-black/20 rounded-xl p-3 border border-white/5">
+    <div className="h-48 w-full mt-3 bg-black/20 rounded-none p-3 border border-white/5">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={metrics}>
           <CartesianGrid strokeDasharray="3 3" stroke="#222" />
@@ -84,7 +84,7 @@ function StatusBadge({ status }) {
 // ── Metric pill ───────────────────────────────────────────────────────────────
 function Pill({ label, value, color = "text-white" }) {
   return (
-    <div className="text-center p-2 rounded-lg bg-white/[0.03] border border-white/5">
+    <div className="text-center p-2 rounded-none bg-white/[0.03] border border-white/5">
       <p className="text-[10px] text-gray-500 uppercase mb-0.5">{label}</p>
       <p className={cn("text-sm font-mono font-semibold", color)}>{value}</p>
     </div>
@@ -136,23 +136,23 @@ function JobDetails({ jobId, status }) {
   return (
     <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4 px-4 pb-4">
       {cmUrl && (
-        <div className="border border-white/5 bg-black/20 rounded-xl p-3">
+        <div className="border border-white/5 bg-black/20 rounded-none p-3">
           <p className="text-xs font-semibold text-gray-400 mb-2 uppercase">Confusion Matrix</p>
-          <img src={cmUrl} alt="Confusion Matrix" className="w-full h-auto rounded-lg" />
+          <img src={cmUrl} alt="Confusion Matrix" className="w-full h-auto rounded-none" />
         </div>
       )}
       {perClass.length > 0 && (
-        <div className="border border-white/5 bg-black/20 rounded-xl p-3 overflow-hidden flex flex-col">
+        <div className="border border-white/5 bg-black/20 rounded-none p-3 overflow-hidden flex flex-col">
           <p className="text-xs font-semibold text-gray-400 mb-2 uppercase">Per-Class Metrics</p>
           <div className="overflow-auto custom-scrollbar flex-1 max-h-[300px]">
             <table className="w-full text-xs text-left">
               <thead className="text-gray-500 bg-white/[0.02] sticky top-0">
                 <tr>
-                  <th className="px-2 py-1.5 rounded-tl-md">Class</th>
+                  <th className="px-2 py-1.5 rounded-none">Class</th>
                   <th className="px-2 py-1.5">mAP@50</th>
                   <th className="px-2 py-1.5">mAP@50-95</th>
                   <th className="px-2 py-1.5">Precision</th>
-                  <th className="px-2 py-1.5 rounded-tr-md">Recall</th>
+                  <th className="px-2 py-1.5 rounded-none">Recall</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -223,7 +223,7 @@ function LiveJobTracker({ initialJob, onStop }) {
   }, [job.job_id, token, job.status]);
 
   return (
-    <div className="rounded-2xl border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.06)]">
+    <div className="rounded-none border border-blue-500/30 bg-blue-500/[0.04] overflow-hidden shadow-none_0_20px_rgba(59,130,246,0.06)]">
       {/* Job header */}
       <div className="p-4 flex items-center justify-between border-b border-blue-500/10">
         <div className="flex items-center gap-3">
@@ -249,8 +249,8 @@ function LiveJobTracker({ initialJob, onStop }) {
 
       <div className="p-4 space-y-3">
         {/* Progress bar */}
-        <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
-          <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
+        <div className="h-2.5 rounded-none bg-white/5 overflow-hidden">
+          <div className="h-full rounded-none    transition-all duration-500"
             style={{ width: `${Math.max(2, job.progress || 0)}%` }} />
         </div>
 
@@ -325,12 +325,12 @@ export default function TrainingTab() {
     <div className="space-y-8 animate-fade-in text-gray-100">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Training Hub</h2>
+          <h2 className="text-3xl font-bold tracking-tight    bg-clip-text text-transparent">Training Hub</h2>
           <p className="text-muted-foreground mt-1">Monitor and manage training jobs across all your projects.</p>
         </div>
         <Button 
           onClick={() => router.push("/dashboard")} 
-          className="bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-500/20"
+          className="bg-violet-500 hover:bg-violet-400 shadow-none shadow-none"
         >
           <Plus className="w-4 h-4 mr-2" />
           New Training (Go to Projects)
@@ -349,19 +349,19 @@ export default function TrainingTab() {
 
         <div className="space-y-4">
           {jobs.length === 0 ? (
-            <div className="p-12 border border-white/5 bg-white/[0.02] rounded-2xl flex flex-col items-center justify-center text-center">
+            <div className="p-12 border border-white/5 bg-white/[0.02] rounded-none flex flex-col items-center justify-center text-center">
               <Cpu className="w-12 h-12 text-gray-600 mb-4" />
               <p className="text-gray-400 font-medium">No training jobs found.</p>
               <p className="text-sm text-gray-500 mt-1">Configure and start a job from within a project.</p>
             </div>
           ) : (
             jobs.map(job => (
-              <div key={job.job_id} className="rounded-2xl border border-white/10 bg-black/40 overflow-hidden shadow-xl backdrop-blur-md">
+              <div key={job.job_id} className="rounded-none border border-white/10 bg-black/40 overflow-hidden shadow-none backdrop-blur-md">
                 {/* Job Header */}
                 <div className="p-5 border-b border-white/5 flex flex-wrap items-center justify-between gap-4 bg-white/[0.02]">
                   <div className="flex items-center gap-4">
                     <div className={cn(
-                      "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
+                      "w-10 h-10 rounded-none flex items-center justify-center shrink-0 border",
                       job.status === "running" ? "bg-blue-500/20 border-blue-500/30 text-blue-400" :
                       job.status === "completed" || job.status === "success" ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" :
                       job.status === "cancelled" ? "bg-amber-500/20 border-amber-500/30 text-amber-400" :
@@ -380,7 +380,7 @@ export default function TrainingTab() {
                   
                   <div className="flex items-center gap-3">
                     {job.status === "running" && (
-                      <Button variant="destructive" size="sm" onClick={() => handleStop(job.job_id)} className="h-8 shadow-lg shadow-red-500/20">
+                      <Button variant="destructive" size="sm" onClick={() => handleStop(job.job_id)} className="h-8 shadow-none shadow-none">
                         <Square className="w-3.5 h-3.5 mr-2" /> Stop
                       </Button>
                     )}
@@ -428,7 +428,7 @@ export default function TrainingTab() {
                           <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 flex items-center gap-2">
                             <Terminal className="w-3.5 h-3.5" /> Output Stream
                           </h4>
-                          <div className="rounded-xl overflow-hidden border border-white/10 shadow-2xl">
+                          <div className="rounded-none overflow-hidden border border-white/10 shadow-none">
                               <GamifiedTerminal output={job.output} isRunning={job.status === "running"} />
                           </div>
                         </div>

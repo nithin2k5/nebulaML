@@ -104,15 +104,15 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
         <div className="space-y-5">
 
             {/* ── Hero header card ── */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="rounded-none border border-border bg-card overflow-hidden">
                 {/* top accent line */}
-                <div className="h-0.5 w-full bg-gradient-to-r from-primary/60 via-primary to-primary/20" />
+                <div className="h-0.5 w-full    " />
 
                 <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
                     {/* back + title */}
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                         <Button variant="ghost" size="icon" onClick={onBack}
-                            className="shrink-0 h-8 w-8 rounded-lg hover:bg-muted">
+                            className="shrink-0 h-8 w-8 rounded-none hover:bg-muted">
                             <ArrowLeft className="h-4 w-4" />
                         </Button>
                         <div className="min-w-0">
@@ -178,7 +178,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {finalMetrics.map(([label, val]) => (
                         <div key={label}
-                            className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 px-4 py-3.5 flex flex-col gap-1.5">
+                            className="rounded-none border border-emerald-500/20    px-4 py-3.5 flex flex-col gap-1.5">
                             <span className="text-xs font-medium text-emerald-400/70 uppercase tracking-wide">{label}</span>
                             <span className="text-2xl font-bold font-mono tabular-nums text-emerald-400 leading-none">
                                 {formatMetricValue(val)}
@@ -190,16 +190,16 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
 
             {/* ── Running progress ── */}
             {isRunning && (
-                <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 space-y-3">
+                <div className="rounded-none border border-blue-500/20 bg-blue-500/5 p-4 space-y-3">
                     <div className="flex items-center justify-between text-sm font-medium">
                         <span className="text-muted-foreground">
                             Epoch <span className="text-foreground font-bold">{job.current_epoch || 0}</span> / {job.config?.epochs || "?"}
                         </span>
                         <span className="text-primary font-bold tabular-nums text-base">{Math.round(job.progress || 0)}%</span>
                     </div>
-                    <div className="w-full bg-muted-foreground/20 rounded-full h-2.5 overflow-hidden">
+                    <div className="w-full bg-muted-foreground/20 rounded-none h-2.5 overflow-hidden">
                         <div
-                            className="bg-primary h-2.5 rounded-full transition-all duration-500"
+                            className="bg-primary h-2.5 rounded-none transition-all duration-500"
                             style={{ width: `${Math.max(3, job.progress || 0)}%` }}
                         />
                     </div>
@@ -209,7 +209,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
                                 .filter(([k]) => k.includes("mAP") || k.includes("loss"))
                                 .slice(0, 4)
                                 .map(([k, v]) => (
-                                    <div key={k} className="rounded-lg bg-muted/40 border border-border px-3 py-2 flex flex-col gap-0.5">
+                                    <div key={k} className="rounded-none bg-muted/40 border border-border px-3 py-2 flex flex-col gap-0.5">
                                         <span className="text-[11px] text-muted-foreground truncate">{k.split("/").pop()}</span>
                                         <span className="text-sm font-semibold font-mono tabular-nums">{formatMetricValue(v)}</span>
                                     </div>
@@ -221,7 +221,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
 
             {/* ── Failed error ── */}
             {job.status === "failed" && (
-                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4">
+                <div className="rounded-none border border-red-500/20 bg-red-500/10 p-4">
                     <div className="flex items-center gap-1.5 text-red-400 font-semibold text-sm mb-1.5">
                         <AlertCircle className="h-4 w-4 shrink-0" /> Training Failed
                     </div>
@@ -235,7 +235,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
                 {/* Training config */}
                 <div>
                     <SectionHeader icon={Settings2} title="Training Configuration" />
-                    <div className="rounded-xl border border-border overflow-hidden divide-y divide-border bg-card">
+                    <div className="rounded-none border border-border overflow-hidden divide-y divide-border bg-card">
                         <KVRow label="Base model"    value={job.config?.model_name} />
                         <KVRow label="Epochs"        value={job.config?.epochs} />
                         <KVRow label="Batch size"    value={job.config?.batch_size} />
@@ -262,7 +262,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
                 {modelInfo && (
                     <div>
                         <SectionHeader icon={Box} title="Model File" />
-                        <div className="rounded-xl border border-border overflow-hidden divide-y divide-border bg-card">
+                        <div className="rounded-none border border-border overflow-hidden divide-y divide-border bg-card">
                             <KVRow label="File size" value={modelInfo.size_mb ? `${modelInfo.size_mb} MB` : null} />
                             <KVRow label="Created"   value={modelInfo.created ? new Date(modelInfo.created * 1000).toLocaleString() : null} />
                             {modelInfo.training_config?.model && (
@@ -277,7 +277,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
             {perClass?.length > 0 && (
                 <div>
                     <SectionHeader icon={ImageIcon} title="Per-Class Metrics" />
-                    <div className="rounded-xl border border-border overflow-hidden bg-card">
+                    <div className="rounded-none border border-border overflow-hidden bg-card">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="bg-muted/50 border-b border-border">
@@ -308,11 +308,11 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
             {isCompleted && !cmError && (
                 <div>
                     <SectionHeader icon={BarChart2} title="Confusion Matrix" />
-                    <div className="rounded-xl border border-border bg-card flex items-center justify-center p-6">
+                    <div className="rounded-none border border-border bg-card flex items-center justify-center p-6">
                         <img
                             src={cmUrl}
                             alt="Confusion matrix"
-                            className="max-w-full max-h-[460px] rounded-lg object-contain"
+                            className="max-w-full max-h-[460px] rounded-none object-contain"
                             onError={() => setCmError(true)}
                         />
                     </div>
@@ -459,7 +459,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                 </CardHeader>
                 <CardContent>
                     {sortedJobs.length === 0 ? (
-                        <div className="text-center py-14 text-muted-foreground bg-muted/20 rounded-lg border border-dashed">
+                        <div className="text-center py-14 text-muted-foreground bg-muted/20 rounded-none border border-dashed">
                             <Cpu className="mx-auto h-12 w-12 mb-4 opacity-40" />
                             <h3 className="text-base font-medium text-foreground mb-1">No Versions Yet</h3>
                             <p className="text-sm">Head over to the Train tab to start your first model training.</p>
@@ -481,7 +481,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                         key={job.job_id || `job-${jobIdx}`}
                                         type="button"
                                         onClick={() => setSelectedJob(job)}
-                                        className="group border rounded-xl p-5 bg-card/50 text-left hover:border-primary/50 hover:shadow-md transition-all flex flex-col min-h-[160px]"
+                                        className="group border rounded-none p-5 bg-card/50 text-left hover:border-primary/50 hover:shadow-none transition-all flex flex-col min-h-[160px]"
                                     >
                                         {/* title row */}
                                         <div className="flex items-start justify-between gap-2 mb-3">
@@ -527,9 +527,9 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                                         {Math.round(job.progress || 0)}%
                                                     </span>
                                                 </div>
-                                                <div className="w-full bg-muted-foreground/20 rounded-full h-1.5 overflow-hidden">
+                                                <div className="w-full bg-muted-foreground/20 rounded-none h-1.5 overflow-hidden">
                                                     <div
-                                                        className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                                                        className="bg-primary h-1.5 rounded-none transition-all duration-500"
                                                         style={{ width: `${Math.max(3, job.progress || 0)}%` }}
                                                     />
                                                 </div>
@@ -541,7 +541,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
                                             <div className="mt-auto flex gap-2">
                                                 {quickMetrics.map(([label, val]) => (
                                                     <div key={label}
-                                                        className="flex-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2 py-1.5 flex flex-col items-center">
+                                                        className="flex-1 bg-emerald-500/10 border border-emerald-500/20 rounded-none px-2 py-1.5 flex flex-col items-center">
                                                         <span className="text-[10px] text-emerald-500/60 leading-none mb-0.5">{label}</span>
                                                         <span className="text-sm font-bold font-mono tabular-nums text-emerald-400">
                                                             {formatMetricValue(val)}
@@ -553,7 +553,7 @@ export default function ProjectVersions({ dataset, onDeploy }) {
 
                                         {/* failed snippet */}
                                         {job.status === "failed" && (
-                                            <div className="mt-auto text-xs text-red-400 px-2.5 py-2 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-1.5">
+                                            <div className="mt-auto text-xs text-red-400 px-2.5 py-2 bg-red-500/10 border border-red-500/20 rounded-none flex items-start gap-1.5">
                                                 <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                                                 <span className="line-clamp-2">
                                                     {job.error ? job.error.substring(0, 80) + (job.error.length > 80 ? "…" : "") : "Training failed"}

@@ -32,14 +32,14 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
 
             {/* Progress Bar */}
             {total > 0 && (
-                <div className={`p-4 rounded-lg border ${progressBorder}`}>
+                <div className={`p-4 rounded-none border ${progressBorder}`}>
                     <div className="flex justify-between items-center mb-2">
                         <span className="text-sm font-medium">Annotation Progress</span>
                         <span className="text-sm font-semibold tabular-nums">{annotated} / {total} images</span>
                     </div>
-                    <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                    <div className="h-2.5 rounded-none bg-muted overflow-hidden">
                         <div
-                            className={`h-full rounded-full transition-all duration-500 ${progressColor}`}
+                            className={`h-full rounded-none transition-all duration-500 ${progressColor}`}
                             style={{ width: `${progress}%` }}
                         />
                     </div>
@@ -54,7 +54,7 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
 
             {/* Ready to Generate CTA */}
             {isComplete && (
-                <div className="flex items-center justify-between p-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10">
+                <div className="flex items-center justify-between p-4 rounded-none border border-emerald-500/40 bg-emerald-500/10">
                     <div className="flex items-center gap-3">
                         <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
                         <div>
@@ -75,7 +75,7 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
                 <Card>
                     <CardContent className="p-6">
                         <div className="flex items-center gap-4 mb-4">
-                            <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center text-primary">
+                            <div className="w-12 h-12 bg-primary/10 rounded-none flex items-center justify-center text-primary">
                                 <Image className="w-6 h-6" />
                             </div>
                             <div>
@@ -98,7 +98,7 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
                 <Card>
                     <CardContent className="p-6">
                         <div className="flex items-center gap-4 mb-4">
-                            <div className="w-12 h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
+                            <div className="w-12 h-12 bg-emerald-500/10 rounded-none flex items-center justify-center text-emerald-500">
                                 <CheckCircle className="w-6 h-6" />
                             </div>
                             <div>
@@ -137,7 +137,7 @@ export default function ProjectAnnotate({ dataset, stats, onNavigate }) {
 
             {total === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
-                    <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
+                    <div className="w-16 h-16 bg-muted rounded-none flex items-center justify-center mb-4">
                         <Image className="w-7 h-7 text-muted-foreground" />
                     </div>
                     <h3 className="font-semibold mb-1">No images yet</h3>

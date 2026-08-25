@@ -86,7 +86,7 @@ export default function ModelsTab() {
     <div className="space-y-8 animate-fade-in text-gray-100">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Model Registry</h2>
+          <h2 className="text-3xl font-bold tracking-tight    bg-clip-text text-transparent">Model Registry</h2>
           <p className="text-muted-foreground mt-1">Versioning and artifact management for your models.</p>
         </div>
         <Button
@@ -103,7 +103,7 @@ export default function ModelsTab() {
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-52 rounded-2xl bg-white/5 animate-shimmer border border-white/5" />
+            <div key={i} className="h-52 rounded-none bg-white/5 animate-shimmer border border-white/5" />
           ))}
         </div>
       ) : models.length > 0 ? (
@@ -111,11 +111,11 @@ export default function ModelsTab() {
           {models.map((model, index) => (
             <div
               key={index}
-              className="group relative rounded-2xl bg-card/40 backdrop-blur-md border border-white/5 hover:border-indigo-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden shadow-lg"
+              className="group relative rounded-none bg-card/40 backdrop-blur-md border border-white/5 hover:border-violet-500/30 hover:bg-white/5 transition-all duration-300 flex flex-col overflow-hidden shadow-none"
             >
               <div className="p-6 flex-1">
                 <div className="flex items-start justify-between mb-6">
-                  <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500/20 group-hover:scale-110 transition-all duration-300">
+                  <div className="w-12 h-12 rounded-none bg-violet-400/10 flex items-center justify-center text-violet-400 group-hover:bg-violet-400/20 group-hover:scale-110 transition-all duration-300">
                     <Box className="text-2xl" />
                   </div>
                   <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20">
@@ -174,8 +174,8 @@ export default function ModelsTab() {
           ))}
         </div>
       ) : (
-        <div className="py-20 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02]">
-          <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center mx-auto mb-4 text-indigo-400">
+        <div className="py-20 text-center rounded-none border border-dashed border-white/10 bg-white/[0.02]">
+          <div className="w-16 h-16 rounded-none bg-violet-400/10 flex items-center justify-center mx-auto mb-4 text-violet-400">
             <Database className="text-3xl" />
           </div>
           <h3 className="text-xl font-bold mb-2">Registry Empty</h3>

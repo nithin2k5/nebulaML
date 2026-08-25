@@ -79,7 +79,7 @@ export default function DashboardStats({ onNavigate }) {
       value: (liveStats.totalReviewed || 0).toString(),
       sub: "Q/A_PASSED",
       icon: Check,
-      color: "text-indigo-400 border-indigo-500/30",
+      color: "text-violet-400 border-violet-500/30",
     },
     {
       title: "MODELS",

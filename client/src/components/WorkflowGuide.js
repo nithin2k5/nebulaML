@@ -28,7 +28,7 @@ const stages = [
     title: "Upload & Project Setup",
     tagline: "Structure your data before you start labelling.",
     summary: "Create a project, choose its type (detection / segmentation / classification), and upload images via UI, API, or SDK.",
-    what: "Roboflow deduplicates via SHA-256 hashing, reads EXIF metadata for auto-orientation, and assigns images to train/valid/test splits (default 70/20/10).",
+    what: "Roboflow deduplicates via SHA-256 hashing, reads EXIF metadata for au, and assigns images to train/valid/test splits (default 70/20/10).",
     sources: ["Web UI drag-and-drop", "Python SDK: project.upload()", "REST API (any language)", "Direct import from CVAT, Label Studio"],
     tips: ["Set train/valid/test splits before annotating", "Use batch naming to track upload sessions", "Choose the right project type upfront — harder to change later"],
     pitfalls: ["Uploading duplicates inflates metrics", "Wrong project type means incompatible annotation tools"],
@@ -38,7 +38,7 @@ const stages = [
     id: 3, icon: Tag, color: "purple",
     title: "Annotation (Labeling)",
     tagline: "Annotation quality is the single biggest lever for model performance.",
-    summary: "Draw bounding boxes, polygons, or classification tags on every image. Use auto-labeling to speed this up 3–10×.",
+    summary: "Draw bounding boxes, polygons, or classification tags on every image. Use au to speed this up 3–10×.",
     what: "Bounding boxes use (x_center, y_center, width, height) normalized 0–1. Polygons trace exact object boundaries. Roboflow stores all annotations in a normalized JSON format so they survive any resize.",
     sources: ["Bounding boxes — object detection", "Polygons — instance segmentation", "Classification tags — image-level labels", "Keypoints — pose estimation"],
     tips: ["Keep boxes tight — edges should touch the object", "Use keyboard shortcuts (N = next, 1-9 = class keys)", "Use SAM or model-assisted labeling for large datasets", "Create annotation guidelines so teams stay consistent"],
@@ -49,9 +49,9 @@ const stages = [
     id: 4, icon: Sliders, color: "cyan",
     title: "Data Preprocessing",
     tagline: "Neural networks need consistent, standardized input.",
-    summary: "Resize, normalize, auto-orient, and optionally tile images before training. Applied at version-generation time, not at upload.",
+    summary: "Resize, normalize, au, and optionally tile images before training. Applied at version-generation time, not at upload.",
     what: "Roboflow reads EXIF orientation flags and physically rotates pixels. Letterboxing (adding gray padding) preserves aspect ratio better than stretching. Annotations are recalculated automatically after any resize.",
-    sources: ["Auto-orient (EXIF correction)", "Resize with letterbox (recommended)", "Grayscale conversion", "CLAHE contrast enhancement", "Tiling (for small objects in large images)"],
+    sources: ["Au (EXIF correction)", "Resize with letterbox (recommended)", "Grayscale conversion", "CLAHE contrast enhancement", "Tiling (for small objects in large images)"],
     tips: ["Use letterbox resize, not stretch — preserves aspect ratio", "Tile 4K images into 640×640 patches for small object detection", "640×640 is the YOLO standard; use 1280 for small objects"],
     pitfalls: ["Mixed resolutions in a batch cause silent errors", "Stretching changes aspect ratios (circles become ovals)"],
     analogy: "Like typesetting a book — all pages must be the same size before printing."
@@ -148,7 +148,7 @@ const stages = [
 
 const colorMap = {
   blue:    { bg: "bg-blue-500/10",    border: "border-blue-500/30",    text: "text-blue-400",    ring: "ring-blue-500/20",    dot: "bg-blue-400"    },
-  indigo:  { bg: "bg-indigo-500/10",  border: "border-indigo-500/30",  text: "text-indigo-400",  ring: "ring-indigo-500/20",  dot: "bg-indigo-400"  },
+  indigo:  { bg: "bg-violet-400/10",  border: "border-violet-500/30",  text: "text-violet-400",  ring: "ring-indigo-500/20",  dot: "bg-indigo-400"  },
   purple:  { bg: "bg-purple-500/10",  border: "border-purple-500/30",  text: "text-purple-400",  ring: "ring-purple-500/20",  dot: "bg-purple-400"  },
   cyan:    { bg: "bg-cyan-500/10",    border: "border-cyan-500/30",    text: "text-cyan-400",    ring: "ring-cyan-500/20",    dot: "bg-cyan-400"    },
   emerald: { bg: "bg-emerald-500/10", border: "border-emerald-500/30", text: "text-emerald-400", ring: "ring-emerald-500/20", dot: "bg-emerald-400" },
@@ -168,13 +168,13 @@ function StageCard({ stage, isActive, onClick }) {
     <button
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-3 p-3 rounded-xl border transition-all duration-200 text-left group",
+        "w-full flex items-center gap-3 p-3 rounded-none border transition-all duration-200 text-left group",
         isActive
           ? `${c.bg} ${c.border} ring-1 ${c.ring}`
           : "border-white/5 hover:border-white/10 hover:bg-white/[0.03]"
       )}
     >
-      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-all", c.bg, isActive ? c.border + " border" : "")}>
+      <div className={cn("w-9 h-9 rounded-none flex items-center justify-center shrink-0 transition-all", c.bg, isActive ? c.border + " border" : "")}>
         <Icon className={cn("w-4 h-4", c.text)} />
       </div>
       <div className="min-w-0 flex-1">
@@ -194,7 +194,7 @@ function StageCard({ stage, isActive, onClick }) {
 function InfoBlock({ icon: Icon, label, color, items }) {
   const c = colorMap[color] || colorMap.blue;
   return (
-    <div className={cn("rounded-xl border p-4 space-y-2", c.bg, c.border)}>
+    <div className={cn("rounded-none border p-4 space-y-2", c.bg, c.border)}>
       <div className={cn("flex items-center gap-2 text-xs font-bold uppercase tracking-wider", c.text)}>
         <Icon className="w-3.5 h-3.5" />
         {label}
@@ -202,7 +202,7 @@ function InfoBlock({ icon: Icon, label, color, items }) {
       <ul className="space-y-1">
         {items.map((item, i) => (
           <li key={i} className="flex items-start gap-2 text-xs text-gray-300">
-            <div className={cn("w-1 h-1 rounded-full mt-1.5 shrink-0", c.dot)} />
+            <div className={cn("w-1 h-1 rounded-none mt-1.5 shrink-0", c.dot)} />
             {item}
           </li>
         ))}
@@ -224,11 +224,11 @@ export default function WorkflowGuide() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+          <h2 className="text-3xl font-bold tracking-tight    bg-clip-text text-transparent">
             CV Workflow Guide
           </h2>
           <p className="text-muted-foreground mt-1">
-            End-to-end computer vision pipeline — from raw pixels to production.
+            End- computer vision pipeline — from raw pixels to production.
           </p>
         </div>
         <div className="text-right">
@@ -238,9 +238,9 @@ export default function WorkflowGuide() {
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+      <div className="h-1 rounded-none bg-white/5 overflow-hidden">
         <motion.div
-          className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"
+          className="h-full rounded-none    "
           animate={{ width: `${Math.max(2, progress)}%` }}
           transition={{ duration: 0.4 }}
         />
@@ -271,9 +271,9 @@ export default function WorkflowGuide() {
               className="space-y-4"
             >
               {/* Stage header */}
-              <div className={cn("rounded-2xl border p-6", c.bg, c.border)}>
+              <div className={cn("rounded-none border p-6", c.bg, c.border)}>
                 <div className="flex items-start gap-4">
-                  <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border", c.bg, c.border)}>
+                  <div className={cn("w-12 h-12 rounded-none flex items-center justify-center shrink-0 border", c.bg, c.border)}>
                     <Icon className={cn("w-6 h-6", c.text)} />
                   </div>
                   <div className="flex-1">
@@ -291,7 +291,7 @@ export default function WorkflowGuide() {
               </div>
 
               {/* What happens internally */}
-              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-2">
+              <div className="rounded-none border border-white/5 bg-white/[0.02] p-4 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-400">
                   <Info className="w-3.5 h-3.5" />
                   What Actually Happens
@@ -322,10 +322,10 @@ export default function WorkflowGuide() {
               </div>
 
               {/* Analogy */}
-              <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 flex items-start gap-3">
+              <div className="rounded-none border border-violet-500/20 bg-violet-400/5 p-4 flex items-start gap-3">
                 <div className="text-lg shrink-0 mt-0.5">💡</div>
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">Analogy</div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-violet-400 mb-1">Analogy</div>
                   <p className="text-sm text-gray-300 italic">&ldquo;{stage.analogy}&rdquo;</p>
                 </div>
               </div>
@@ -346,7 +346,7 @@ export default function WorkflowGuide() {
                       key={s.id}
                       onClick={() => setActiveId(s.id)}
                       className={cn(
-                        "w-1.5 h-1.5 rounded-full transition-all duration-200",
+                        "w-1.5 h-1.5 rounded-none transition-all duration-200",
                         s.id === activeId ? `w-4 ${colorMap[s.color].dot}` : "bg-white/20 hover:bg-white/40"
                       )}
                     />

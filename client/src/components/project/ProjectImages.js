@@ -170,7 +170,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
 
     if (images.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center p-12 text-center border rounded-xl bg-card text-card-foreground">
+            <div className="flex flex-col items-center justify-center p-12 text-center border rounded-none bg-card text-card-foreground">
                 <ImageIcon className="w-12 h-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold">No Images Found</h3>
                 <p className="text-muted-foreground mt-2">Upload images to get started.</p>
@@ -189,7 +189,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
                     <select 
                         value={filterStatus}
                         onChange={(e) => setFilterStatus(e.target.value)}
-                        className="text-sm bg-background border border-input rounded-md px-2 py-1"
+                        className="text-sm bg-background border border-input rounded-none px-2 py-1"
                     >
                         <option value="all">All Status</option>
                         <option value="annotated">Annotated</option>
@@ -199,7 +199,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
                     <select 
                         value={filterSplit}
                         onChange={(e) => setFilterSplit(e.target.value)}
-                        className="text-sm bg-background border border-input rounded-md px-2 py-1"
+                        className="text-sm bg-background border border-input rounded-none px-2 py-1"
                     >
                         <option value="all">All Splits</option>
                         <option value="train">Train</option>
@@ -242,7 +242,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
                     return (
                         <div 
                             key={img.id} 
-                            className={`group relative border rounded-lg overflow-hidden bg-muted/20 aspect-square transition-all cursor-pointer ${
+                            className={`group relative border rounded-none overflow-hidden bg-muted/20 aspect-square transition-all cursor-pointer ${
                                 isSelected ? "ring-2 ring-primary ring-offset-2" : ""
                             }`}
                             onClick={() => toggleSelection(img.id)}
@@ -276,7 +276,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
                                         <Trash2 className="h-4 w-4" />
                                     </Button>
                                 </div>
-                                <div className="text-xs text-white truncate px-1 drop-shadow-md bg-black/50 py-1 rounded">
+                                <div className="text-xs text-white truncate px-1 drop-shadow-none bg-black/50 py-1 rounded">
                                     {img.original_name || img.filename}
                                 </div>
                             </div>
