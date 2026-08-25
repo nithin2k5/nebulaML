@@ -2,15 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Square } from "lucide-react";
 
 export default function SplashScreen() {
   const router = useRouter();
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    // Check if we've seen the splash screen in this session
     const hasSeenSplash = sessionStorage.getItem("hasSeenSplash");
 
     if (hasSeenSplash) {
@@ -20,18 +18,16 @@ export default function SplashScreen() {
 
     sessionStorage.setItem("hasSeenSplash", "true");
 
-    // Fast loading progress
     const timer = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(timer);
           return 100;
         }
-        return prev + 15; // Faster progress
+        return prev + 15; 
       });
     }, 50);
 
-    // Redirect after just 800ms
     const redirectTimer = setTimeout(() => {
       router.push("/home");
     }, 800);
@@ -43,38 +39,41 @@ export default function SplashScreen() {
   }, [router]);
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 overflow-hidden">
-      {/* Background Ambience */}
-      <div className="absolute inset-0 z-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[100px] animate-pulse-glow" />
-      </div>
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center z-50 overflow-hidden cursor-crosshair">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#a78bfa15_1px,transparent_1px),linear-gradient(to_bottom,#a78bfa15_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none opacity-20" />
 
-      <div className="relative z-10 flex flex-col items-center">
-        {/* Logo Animation */}
-        <div className="relative mb-8">
-          <div className="absolute inset-0 bg-indigo-500 blur-2xl opacity-20 animate-pulse" />
-          <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-indigo-500/30 animate-float">
-            <Zap className="text-5xl text-white drop-shadow-md" />
+      <div className="relative z-10 w-full max-w-sm px-6">
+        <div className="border border-violet-500/40 bg-black/80 backdrop-blur-sm p-8 relative">
+          <div className="absolute -top-[1px] -left-[1px] bg-violet-500 text-black text-xs font-mono font-bold px-2 py-0.5 flex items-center gap-2">
+            <span>SYS_INIT</span>
+            <span className="opacity-70">1.00</span>
           </div>
-        </div>
+          
+          <div className="absolute -top-1 -left-1 w-2 h-2 border-t border-l border-violet-400" />
+          <div className="absolute -top-1 -right-1 w-2 h-2 border-t border-r border-violet-400" />
+          <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b border-l border-violet-400" />
+          <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b border-r border-violet-400" />
 
-        {/* Text */}
-        <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
-          Nebula<span className="text-indigo-500">ML</span>
-        </h1>
-        <p className="text-gray-500 text-sm mb-8 animate-pulse">Initializing Environment...</p>
+          <div className="flex flex-col mb-8">
+            <h1 className="text-2xl font-bold uppercase tracking-tight text-white flex items-center gap-2">
+              <Square className="w-4 h-4 fill-violet-500 text-violet-500" />
+              NBLA_ML
+            </h1>
+            <p className="text-gray-500 text-xs font-mono mt-2">Loading core modules...</p>
+          </div>
 
-        {/* Loading Bar */}
-        <div className="w-64 h-1.5 bg-zinc-900 rounded-full overflow-hidden border border-white/5 relative">
-          <div
-            className="absolute top-0 left-0 h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-300 ease-out shadow-[0_0_10px_rgba(99,102,241,0.5)]"
-            style={{ width: `${Math.min(progress, 100)}%` }}
-          />
-        </div>
-
-        {/* Progress Percentage */}
-        <div className="mt-2 font-mono text-xs text-indigo-400">
-          {Math.min(Math.floor(progress), 100)}%
+          <div className="space-y-2">
+            <div className="w-full h-1 bg-white/10 relative">
+              <div
+                className="absolute top-0 left-0 h-full bg-violet-500 transition-all duration-75 ease-linear"
+                style={{ width: `${Math.min(progress, 100)}%` }}
+              />
+            </div>
+            <div className="flex justify-between items-center text-[10px] font-mono text-violet-400">
+              <span>{Math.min(Math.floor(progress), 100)}%</span>
+              <span>[====&gt;.........]</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -1,54 +1,76 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, Home, ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
+
+function GridBackground() {
+  return (
+    <div className="fixed inset-0 z-0 pointer-events-none opacity-20">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ef444415_1px,transparent_1px),linear-gradient(to_bottom,#ef444415_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+    </div>
+  );
+}
+
+function BoundingBox({ label, children, className, score = "sys.err" }) {
+  return (
+    <div className={`relative border border-red-500/40 bg-black/50 backdrop-blur-sm ${className}`}>
+      <div className="absolute -top-[1px] -left-[1px] bg-red-500 text-black text-[10px] font-mono font-bold px-2 py-0.5 flex items-center gap-2 z-10">
+        <span>{label}</span>
+        <span className="opacity-70">{score}</span>
+      </div>
+      <div className="absolute -top-1 -left-1 w-2 h-2 border-t border-l border-red-500" />
+      <div className="absolute -top-1 -right-1 w-2 h-2 border-t border-r border-red-500" />
+      <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b border-l border-red-500" />
+      <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b border-r border-red-500" />
+      {children}
+    </div>
+  );
+}
 
 export default function UnauthorizedPage() {
   const router = useRouter();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-background to-black flex items-center justify-center p-4">
-      <Card className="max-w-md w-full bg-card/60 backdrop-blur-xl border-border/50">
-        <CardHeader className="text-center">
-          <div className="w-20 h-20 rounded-full bg-destructive/10 border-2 border-destructive/30 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="text-4xl text-destructive" />
-          </div>
-          <CardTitle className="text-2xl">Access Denied</CardTitle>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            You don&apos;t have permission to access this page.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="p-4 rounded-lg bg-muted/30 border border-border/50">
-            <p className="text-sm text-muted-foreground">
-              This page or action requires special permissions that your current role doesn&apos;t have.
-              Please contact an administrator if you believe this is an error.
-            </p>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center p-4 cursor-crosshair font-sans">
+      <GridBackground />
+
+      <div className="w-full max-w-md relative z-10">
+        <BoundingBox label="ACCESS_DENIED" score="err.403" className="p-8 pb-10">
+          <div className="mb-10 border-b border-white/10 pb-6 mt-2">
+            <h1 className="text-2xl font-bold uppercase tracking-tight flex items-center gap-2 text-red-500">
+              <AlertTriangle className="w-5 h-5" />
+              UNAUTHORIZED
+            </h1>
+            <p className="text-gray-500 font-mono text-xs mt-2 uppercase">Insufficient privileges for requested module.</p>
           </div>
 
-          <div className="flex gap-3">
-            <Button
-              onClick={() => router.back()}
-              variant="outline"
-              className="flex-1"
-            >
-              <ArrowLeft className="mr-2" />
-              Go Back
-            </Button>
-            <Button
-              onClick={() => router.push("/dashboard")}
-              className="flex-1 bg-primary hover:bg-primary/90"
-            >
-              Go back home
-            </Button>
+          <div className="space-y-6 relative z-10">
+            <div className="p-3 border border-red-500/30 bg-red-500/10 text-red-400 text-xs font-mono uppercase leading-relaxed">
+              &gt; User lacks required permissions to view this resource.
+              <br />
+              &gt; Action has been logged.
+              <br />
+              &gt; Contact administrator if this is an error.
+            </div>
+
+            <div className="flex flex-col gap-3 pt-4">
+              <button
+                onClick={() => router.push("/dashboard")}
+                className="w-full h-10 bg-red-500 hover:bg-red-400 text-black font-mono font-bold text-xs uppercase transition-colors"
+              >
+                [ RETURN_TO_DASHBOARD ]
+              </button>
+              <button
+                onClick={() => router.back()}
+                className="w-full h-10 border border-white/20 hover:border-white/60 text-white font-mono text-xs uppercase transition-colors flex items-center justify-center gap-2"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                [ GO_BACK ]
+              </button>
+            </div>
           </div>
-          <p className="mt-2 text-xs text-center text-gray-500">
-            If you think this is a mistake, please contact support.
-          </p>
-        </CardContent>
-      </Card>
+        </BoundingBox>
+      </div>
     </div>
   );
 }

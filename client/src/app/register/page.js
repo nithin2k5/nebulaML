@@ -3,23 +3,37 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Zap, AlertCircle, Mail, KeyRound, User, Briefcase, ArrowRight, ArrowLeft } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Zap, AlertCircle, ArrowLeft } from "lucide-react";
+
+function GridBackground() {
+  return (
+    <div className="fixed inset-0 z-0 pointer-events-none opacity-20">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#a78bfa15_1px,transparent_1px),linear-gradient(to_bottom,#a78bfa15_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+    </div>
+  );
+}
+
+function BoundingBox({ label, children, className, score = "sys.ok" }) {
+  return (
+    <div className={`relative border border-violet-500/40 bg-black/50 backdrop-blur-sm ${className}`}>
+      <div className="absolute -top-[1px] -left-[1px] bg-violet-500 text-black text-[10px] font-mono font-bold px-2 py-0.5 flex items-center gap-2 z-10">
+        <span>{label}</span>
+        <span className="opacity-70">{score}</span>
+      </div>
+      <div className="absolute -top-1 -left-1 w-2 h-2 border-t border-l border-violet-400" />
+      <div className="absolute -top-1 -right-1 w-2 h-2 border-t border-r border-violet-400" />
+      <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b border-l border-violet-400" />
+      <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b border-r border-violet-400" />
+      {children}
+    </div>
+  );
+}
 
 export default function RegisterPage() {
   const router = useRouter();
   const { register, verifyOtp, resendOtp } = useAuth();
-  const [formData, setFormData] = useState({
-    username: "",
-    email: "",
-    otp: "",
-    role: "user"
-  });
-  const [step, setStep] = useState("details"); // "details" or "otp"
+  const [formData, setFormData] = useState({ username: "", email: "", otp: "", role: "user" });
+  const [step, setStep] = useState("details");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
@@ -44,12 +58,7 @@ export default function RegisterPage() {
     setLoading(true);
 
     if (step === "details") {
-      const result = await register(
-        formData.username,
-        formData.email,
-        formData.role
-      );
-
+      const result = await register(formData.username, formData.email, formData.role);
       if (result.success) {
         setStep("otp");
       } else {
@@ -63,220 +72,150 @@ export default function RegisterPage() {
         setError(result.error);
       }
     }
-
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-[#030303] text-gray-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Dynamic Background */}
-      <div className="absolute top-[20%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-emerald-600/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] left-[-10%] w-[40vw] h-[40vw] rounded-full bg-indigo-600/20 blur-[120px] pointer-events-none" />
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 relative overflow-hidden cursor-crosshair">
+      <GridBackground />
 
       <div className="w-full max-w-md relative z-10">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center p-3 bg-white/5 rounded-2xl border border-white/10 mb-6 shadow-[0_0_30px_rgba(79,70,229,0.15)]">
-            <Zap className="text-3xl text-indigo-400" />
+        <BoundingBox label="INIT_WORKSPACE" score="1.00" className="p-8 pb-10">
+          <div className="mb-10 border-b border-white/10 pb-6 mt-2">
+            <h1 className="text-2xl font-bold uppercase tracking-tight flex items-center gap-2">
+              <Zap className="w-5 h-5 text-violet-500" />
+              CREATE_ACCOUNT
+            </h1>
+            <p className="text-gray-500 font-mono text-xs mt-2 uppercase">Allocate new resources for user.</p>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent mb-2">
-            Create Account
-          </h1>
-          <p className="text-gray-400 text-sm">Join the platform in seconds</p>
-        </div>
 
-        <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
-          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-          
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <AnimatePresence mode="wait" initial={false}>
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 text-red-400 text-sm"
-                >
-                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">{error}</p>
-                </motion.div>
-              )}
-              {resendSuccess && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3 text-emerald-400 text-sm"
-                >
-                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">{resendSuccess}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <form onSubmit={handleSubmit} className="space-y-6 relative z-10">
+            {error && (
+              <div className="p-3 border border-red-500/30 bg-red-500/10 flex items-start gap-3 text-red-400 text-xs font-mono">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <p>{error}</p>
+              </div>
+            )}
+            
+            {resendSuccess && (
+              <div className="p-3 border border-violet-500/30 bg-violet-500/10 flex items-start gap-3 text-violet-400 text-xs font-mono">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <p>{resendSuccess}</p>
+              </div>
+            )}
 
-            <AnimatePresence mode="wait" initial={false}>
-              {step === "details" ? (
-                <motion.div
-                  key="details-step"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-5"
-                >
-                  <div className="space-y-2">
-                    <Label htmlFor="username" className="text-gray-300 ml-1">Username</Label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <User className="h-5 w-5 text-gray-500 group-focus-within:text-indigo-400 transition-colors" />
-                      </div>
-                      <Input
-                        id="username"
-                        type="text"
-                        placeholder="Choose a username"
-                        value={formData.username}
-                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                        required
-                        className="pl-11 h-12 bg-black/40 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-indigo-500/50 focus-visible:border-indigo-500/50 rounded-xl transition-all"
-                      />
-                    </div>
-                  </div>
+            {step === "details" ? (
+              <div className="space-y-6">
+                <div className="space-y-2 flex flex-col">
+                  <label htmlFor="username" className="text-violet-400 font-mono text-xs uppercase">Alias [Username]</label>
+                  <input
+                    id="username"
+                    type="text"
+                    placeholder="sys.admin"
+                    value={formData.username}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    required
+                    className="h-10 bg-black border border-white/20 text-white placeholder:text-gray-600 focus:border-violet-500 focus:outline-none px-3 font-mono text-sm transition-colors"
+                  />
+                </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="email" className="text-gray-300 ml-1">Email Address</Label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <Mail className="h-5 w-5 text-gray-500 group-focus-within:text-indigo-400 transition-colors" />
-                      </div>
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="hello@example.com"
-                        value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        required
-                        className="pl-11 h-12 bg-black/40 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-indigo-500/50 focus-visible:border-indigo-500/50 rounded-xl transition-all"
-                      />
-                    </div>
-                  </div>
+                <div className="space-y-2 flex flex-col">
+                  <label htmlFor="email" className="text-violet-400 font-mono text-xs uppercase">Identity [Email]</label>
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="sys.admin@example.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    required
+                    className="h-10 bg-black border border-white/20 text-white placeholder:text-gray-600 focus:border-violet-500 focus:outline-none px-3 font-mono text-sm transition-colors"
+                  />
+                </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="role" className="text-gray-300 ml-1">User Role</Label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none z-10">
-                        <Briefcase className="h-5 w-5 text-gray-500 group-focus-within:text-indigo-400 transition-colors" />
-                      </div>
-                      <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                        <SelectTrigger className="pl-11 h-12 bg-black/40 border-white/10 text-white focus:ring-indigo-500/50 rounded-xl transition-all relative z-0">
-                          <SelectValue placeholder="Select a role" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-[#111] border-white/10 text-white">
-                          <SelectItem value="user" className="focus:bg-white/10 focus:text-white">User (Full Access)</SelectItem>
-                          <SelectItem value="viewer" className="focus:bg-white/10 focus:text-white">Viewer (Read Only)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <Button
-                    type="submit"
-                    className="w-full h-12 mt-4 rounded-xl bg-gradient-to-r from-indigo-500 to-emerald-500 hover:from-indigo-400 hover:to-emerald-400 text-white font-medium shadow-[0_0_20px_rgba(16,185,129,0.2)] transition-all hover:scale-[1.02] active:scale-[0.98]"
-                    disabled={loading}
+                <div className="space-y-2 flex flex-col">
+                  <label htmlFor="role" className="text-violet-400 font-mono text-xs uppercase">Privilege_Level [Role]</label>
+                  <select
+                    id="role"
+                    value={formData.role}
+                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    className="h-10 bg-black border border-white/20 text-white focus:border-violet-500 focus:outline-none px-3 font-mono text-sm transition-colors cursor-pointer appearance-none"
                   >
-                    {loading ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        Continue <ArrowRight className="w-4 h-4 ml-2" />
-                      </>
-                    )}
-                  </Button>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="otp-step"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
-                >
-                  <div className="space-y-3">
-                    <Label htmlFor="otp" className="text-gray-300 ml-1">Verification Code</Label>
-                    <div className="relative group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <KeyRound className="h-5 w-5 text-gray-500 group-focus-within:text-emerald-400 transition-colors" />
-                      </div>
-                      <Input
-                        id="otp"
-                        type="text"
-                        placeholder="6-digit code"
-                        value={formData.otp}
-                        onChange={(e) => setFormData({ ...formData, otp: e.target.value })}
-                        required
-                        maxLength={6}
-                        className="pl-11 h-12 bg-black/40 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-emerald-500/50 focus-visible:border-emerald-500/50 rounded-xl tracking-widest transition-all"
-                      />
-                    </div>
-                    <p className="text-xs text-gray-500 ml-1">
-                      We sent a code to <span className="text-gray-300 font-medium">{formData.email}</span>
-                      <br/>
-                      <button 
-                        type="button" 
-                        onClick={handleResend}
-                        disabled={resendLoading}
-                        className="text-indigo-400 hover:text-indigo-300 transition-colors mt-2"
-                      >
-                        {resendLoading ? "Sending..." : "Resend Code"}
-                      </button>
-                    </p>
-                  </div>
+                    <option value="user">USER [FULL_ACCESS]</option>
+                    <option value="viewer">VIEWER [READ_ONLY]</option>
+                  </select>
+                </div>
 
-                  <div className="space-y-3">
-                    <Button
-                      type="submit"
-                      className="w-full h-12 rounded-xl bg-gradient-to-r from-emerald-600 flex items-center justify-center to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-medium shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all hover:scale-[1.02] active:scale-[0.98]"
-                      disabled={loading || formData.otp.length < 6}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-10 bg-violet-500 hover:bg-violet-400 text-black font-mono font-bold text-xs uppercase transition-colors disabled:opacity-50 mt-4"
+                >
+                  {loading ? "[ PROCESSING... ]" : "EXECUTE"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="space-y-2 flex flex-col">
+                  <label htmlFor="otp" className="text-violet-400 font-mono text-xs uppercase">Auth_Token [OTP]</label>
+                  <input
+                    id="otp"
+                    type="text"
+                    placeholder="000000"
+                    value={formData.otp}
+                    onChange={(e) => setFormData({ ...formData, otp: e.target.value })}
+                    required
+                    maxLength={6}
+                    className="h-10 bg-black border border-white/20 text-white placeholder:text-gray-600 focus:border-violet-500 focus:outline-none px-3 font-mono text-sm tracking-[0.5em] transition-colors text-center"
+                  />
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-xs font-mono text-gray-500">Sent to: {formData.email}</span>
+                    <button 
+                      type="button" 
+                      onClick={handleResend}
+                      disabled={resendLoading}
+                      className="text-xs font-mono text-violet-400 hover:text-white transition-colors"
                     >
-                      {loading ? (
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      ) : (
-                        "Verify & Create Account"
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="w-full h-12 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
-                      onClick={() => setStep("details")}
-                    >
-                      <ArrowLeft className="w-4 h-4 mr-2" /> Back
-                    </Button>
+                      {resendLoading ? "SENDING..." : "[ RESEND ]"}
+                    </button>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button
+                    type="submit"
+                    disabled={loading || formData.otp.length < 6}
+                    className="w-full h-10 bg-violet-500 hover:bg-violet-400 text-black font-mono font-bold text-xs uppercase transition-colors disabled:opacity-50"
+                  >
+                    {loading ? "[ PROCESSING... ]" : "VERIFY"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStep("details")}
+                    className="w-full h-10 border border-white/20 hover:border-white/60 text-white font-mono text-xs uppercase transition-colors"
+                  >
+                    [ GO_BACK ]
+                  </button>
+                </div>
+              </div>
+            )}
           </form>
 
-          <div className="mt-8 text-center pt-6 border-t border-white/5">
-            <p className="text-sm text-gray-400">
-              Already have an account?{" "}
-              <button
-                onClick={() => router.push("/login")}
-                className="font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-                type="button"
-              >
-                Sign in
-              </button>
-            </p>
+          <div className="mt-8 border-t border-white/10 pt-4 flex justify-between relative z-10">
+            <button 
+              onClick={() => router.push("/login")}
+              className="font-mono text-xs text-gray-400 hover:text-white transition-colors uppercase"
+            >
+              [ EXISTING_ACCOUNT_LOGIN ]
+            </button>
           </div>
-        </div>
+        </BoundingBox>
 
-        <div className="text-center mt-8">
+        <div className="mt-6 flex justify-center">
           <button
             onClick={() => router.push("/home")}
-            className="text-sm text-gray-500 hover:text-gray-300 transition-colors inline-flex items-center"
+            className="font-mono text-xs text-gray-500 hover:text-white transition-colors flex items-center gap-2 uppercase"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" /> Return to Home
+            <ArrowLeft className="w-3 h-3" /> ABORT_TO_HOME
           </button>
         </div>
       </div>
