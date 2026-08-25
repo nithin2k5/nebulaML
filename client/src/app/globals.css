@@ -34,7 +34,7 @@
     --input: 240 5.9% 90%;
     --ring: 250 80% 55%;
 
-    --radius: 0.75rem;
+    --radius: 0rem;
   }
 
   .dark {
@@ -50,7 +50,7 @@
     --popover: 240 10% 7%;
     --popover-foreground: 0 0% 98%;
 
-    --primary: 250 90% 65%;
+    --primary: 255 92% 76%;
     /* Indigo-400 (Brighter for dark mode) */
     --primary-foreground: 0 0% 100%;
 
@@ -69,7 +69,7 @@
 
     --border: 240 4% 16%;
     --input: 240 4% 16%;
-    --ring: 250 90% 65%;
+    --ring: 255 92% 76%;
   }
 }
 
