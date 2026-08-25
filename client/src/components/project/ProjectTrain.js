@@ -232,7 +232,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
 
             {/* Pre-flight Check Banner */}
             {preflightLoading && (
-                <div className="p-3 rounded-lg border border-border bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="p-3 rounded-none border border-border bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="w-4 h-4 animate-spin" /> Running pre-flight checks...
                 </div>
             )}
@@ -244,7 +244,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                         <span>Active Runs ({activeJobs.length})</span>
                     </div>
                     {activeJobs.map(job => (
-                        <div key={job.job_id} className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4 space-y-2">
+                        <div key={job.job_id} className="rounded-none border border-blue-500/30 bg-blue-500/5 p-4 space-y-2">
                             <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2">
@@ -274,9 +274,9 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                     </Button>
                                 </div>
                             </div>
-                            <div className="w-full bg-muted-foreground/20 rounded-full h-1.5 overflow-hidden">
+                            <div className="w-full bg-muted-foreground/20 rounded-none h-1.5 overflow-hidden">
                                 <div
-                                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+                                    className="bg-blue-500 h-1.5 rounded-none transition-all duration-500"
                                     style={{ width: `${Math.max(2, job.progress || 0)}%` }}
                                 />
                             </div>
@@ -299,7 +299,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
             {preflight && !preflightLoading && (
                 <div className="space-y-2">
                     {/* Quality Score */}
-                    <div className={`p-3 rounded-lg border flex items-center justify-between ${
+                    <div className={`p-3 rounded-none border flex items-center justify-between ${
                         preflight.quality_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5' :
                         preflight.quality_score >= 40 ? 'border-amber-500/30 bg-amber-500/5' : 
                         'border-red-500/30 bg-red-500/5'
@@ -318,7 +318,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
 
                     {/* Blockers */}
                     {preflight.blockers?.map((b, i) => (
-                        <div key={`b-${i}`} className="p-3 rounded-lg border border-red-500/40 bg-red-500/10 flex items-start gap-2">
+                        <div key={`b-${i}`} className="p-3 rounded-none border border-red-500/40 bg-red-500/10 flex items-start gap-2">
                             <XCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                             <div className="text-sm">
                                 <span className="font-medium text-red-500">Blocker: </span>
@@ -330,7 +330,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
 
                     {/* Warnings */}
                     {preflight.warnings?.map((w, i) => (
-                        <div key={`w-${i}`} className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 flex items-start gap-2">
+                        <div key={`w-${i}`} className="p-3 rounded-none border border-amber-500/30 bg-amber-500/5 flex items-start gap-2">
                             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                             <div className="text-sm">
                                 <span className="font-medium text-amber-500">Warning: </span>
@@ -341,7 +341,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                     ))}
 
                     {preflight.can_train && preflight.warnings?.length === 0 && preflight.blockers?.length === 0 && (
-                        <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 flex items-center gap-2 text-sm">
+                        <div className="p-3 rounded-none border border-emerald-500/30 bg-emerald-500/5 flex items-center gap-2 text-sm">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                             <span className="text-emerald-600 font-medium">All pre-flight checks passed!</span>
                         </div>
@@ -366,9 +366,9 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                         <button
                                             key={key}
                                             onClick={() => setActivePreset(key)}
-                                            className={`p-4 rounded-lg border-2 transition-all text-left ${
+                                            className={`p-4 rounded-none border-2 transition-all text-left ${
                                                 isActive 
-                                                    ? 'border-primary bg-primary/5 shadow-sm' 
+                                                    ? 'border-primary bg-primary/5 shadow-none' 
                                                     : 'border-border hover:border-muted-foreground/30'
                                             }`}
                                         >
@@ -388,7 +388,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                             <CardTitle>Configuration</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="space-y-2 mb-6 p-4 bg-muted/30 rounded-lg border border-border">
+                            <div className="space-y-2 mb-6 p-4 bg-muted/30 rounded-none border border-border">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="space-y-1">
                                         <Label className="text-base font-semibold">Dataset Versions</Label>
@@ -424,7 +424,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                                     return (
                                                         <div
                                                             key={verId}
-                                                            className={`flex items-center justify-between gap-3 p-3 rounded-lg border transition-all ${
+                                                            className={`flex items-center justify-between gap-3 p-3 rounded-none border transition-all ${
                                                                 checked ? "border-primary/40 bg-primary/5" : "border-border hover:border-muted-foreground/30 bg-background/10"
                                                             }`}
                                                         >

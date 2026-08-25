@@ -241,12 +241,12 @@ export default function ProjectUpload({ dataset, onUploadComplete, onNavigate })
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, false)}
-                        className={`flex-1 min-h-[300px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center p-12 transition-all ${isDragging
+                        className={`flex-1 min-h-[300px] border-2 border-dashed rounded-none flex flex-col items-center justify-center p-12 transition-all ${isDragging
                             ? "border-primary bg-primary/5 scale-[0.99]"
                             : "border-border hover:border-primary/50 hover:bg-muted/30"
                             }`}
                     >
-                        <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-6">
+                        <div className="w-20 h-20 bg-muted rounded-none flex items-center justify-center mb-6">
                             <Upload className={`text-3xl ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
                         </div>
                         <h3 className="text-lg font-medium mb-2">
@@ -300,12 +300,12 @@ export default function ProjectUpload({ dataset, onUploadComplete, onNavigate })
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={(e) => handleDrop(e, true)}
-                        className={`flex-1 min-h-[300px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center p-12 transition-all ${isDragging
+                        className={`flex-1 min-h-[300px] border-2 border-dashed rounded-none flex flex-col items-center justify-center p-12 transition-all ${isDragging
                             ? "border-primary bg-primary/5 scale-[0.99]"
                             : "border-border hover:border-primary/50 hover:bg-muted/30"
                             }`}
                     >
-                        <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-6">
+                        <div className="w-20 h-20 bg-muted rounded-none flex items-center justify-center mb-6">
                             <Upload className={`text-3xl ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
                         </div>
                         <h3 className="text-lg font-medium mb-2">

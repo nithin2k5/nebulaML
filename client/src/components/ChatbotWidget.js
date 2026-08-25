@@ -86,17 +86,17 @@ export default function ChatbotWidget() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-6 w-[360px] sm:w-[420px] h-[550px] max-h-[calc(100vh-140px)] rounded-3xl bg-zinc-950/80 backdrop-blur-3xl overflow-hidden shadow-[0_0_80px_rgba(99,102,241,0.15)] flex flex-col border border-white/[0.08]"
+            className="mb-6 w-[360px] sm:w-[420px] h-[550px] max-h-[calc(100vh-140px)] rounded-none bg-zinc-950/80 backdrop-blur-3xl overflow-hidden shadow-none_0_80px_rgba(99,102,241,0.15)] flex flex-col border border-white/[0.08]"
           >
             {/* Header */}
-            <div className="relative p-5 border-b border-white/[0.05] flex items-center justify-between bg-gradient-to-r from-indigo-500/10 to-purple-500/10 overflow-hidden">
+            <div className="relative p-5 border-b border-white/[0.05] flex items-center justify-between    overflow-hidden">
               <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(99,102,241,0.15),transparent_50%)]"></div>
               <div className="relative flex items-center gap-4 z-10">
                 <div className="relative">
-                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 border border-white/20">
+                  <div className="w-10 h-10 rounded-none    flex items-center justify-center shadow-none shadow-none border border-white/20">
                     <Sparkles className="w-5 h-5 text-white" />
                   </div>
-                  <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-zinc-950"></div>
+                  <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-none bg-emerald-400 border-2 border-zinc-950"></div>
                 </div>
                 <div>
                   <h3 className="font-semibold text-white tracking-tight text-sm">Nebula AI</h3>
@@ -105,7 +105,7 @@ export default function ChatbotWidget() {
               </div>
               <button
                 onClick={() => setIsOpen(false)}
-                className="relative z-10 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors border border-white/5"
+                className="relative z-10 w-8 h-8 rounded-none bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors border border-white/5"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -127,18 +127,18 @@ export default function ChatbotWidget() {
                 >
                   {/* Assistant Avatar */}
                   {msg.role === "assistant" && (
-                    <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 border border-indigo-500/30 mt-1 shadow-[0_0_15px_rgba(99,102,241,0.2)]">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                    <div className="w-7 h-7 rounded-none bg-violet-400/20 flex items-center justify-center shrink-0 border border-violet-500/30 mt-1 shadow-none_0_15px_rgba(99,102,241,0.2)]">
+                      <Sparkles className="w-3.5 h-3.5 text-violet-400" />
                     </div>
                   )}
 
                   {/* Message Bubble */}
                   <div
                     className={cn(
-                      "px-4 py-3 rounded-2xl max-w-[82%] text-[13px] leading-relaxed shadow-sm",
+                      "px-4 py-3 rounded-none max-w-[82%] text-[13px] leading-relaxed shadow-none",
                       msg.role === "assistant"
-                        ? "bg-white/[0.03] border border-white/[0.05] text-gray-200 rounded-tl-sm"
-                        : "bg-gradient-to-br from-indigo-500 to-violet-600 text-white rounded-tr-sm shadow-indigo-500/20"
+                        ? "bg-white/[0.03] border border-white/[0.05] text-gray-200 rounded-none"
+                        : "   text-white rounded-none shadow-none"
                     )}
                   >
                     <div className="whitespace-pre-wrap">{msg.content}</div>
@@ -152,13 +152,13 @@ export default function ChatbotWidget() {
                   animate={{ opacity: 1 }}
                   className="flex gap-3 w-full justify-start relative z-10"
                 >
-                  <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 border border-indigo-500/30 mt-1 shadow-[0_0_15px_rgba(99,102,241,0.2)]">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <div className="w-7 h-7 rounded-none bg-violet-400/20 flex items-center justify-center shrink-0 border border-violet-500/30 mt-1 shadow-none_0_15px_rgba(99,102,241,0.2)]">
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
                   </div>
-                  <div className="px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.05] flex items-center rounded-tl-sm space-x-1.5">
-                    <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
-                    <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
-                    <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
+                  <div className="px-4 py-3 rounded-none bg-white/[0.03] border border-white/[0.05] flex items-center rounded-none space-x-1.5">
+                    <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-none" />
+                    <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-none" />
+                    <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 bg-indigo-400 rounded-none" />
                   </div>
                 </motion.div>
               )}
@@ -169,7 +169,7 @@ export default function ChatbotWidget() {
             <div className="p-4 bg-black/40 border-t border-white/[0.05] backdrop-blur-md">
               <form
                 onSubmit={handleSubmit}
-                className="relative flex items-end bg-white/[0.03] border border-white/[0.08] rounded-2xl overflow-hidden focus-within:border-indigo-500/50 focus-within:bg-white/[0.05] transition-all shadow-inner"
+                className="relative flex items-end bg-white/[0.03] border border-white/[0.08] rounded-none overflow-hidden focus-within:border-violet-500/50 focus-within:bg-white/[0.05] transition-all shadow-none"
               >
                 <textarea
                   value={input}
@@ -185,7 +185,7 @@ export default function ChatbotWidget() {
                     whileTap={{ scale: 0.95 }}
                     type="submit"
                     disabled={!input.trim() || isLoading}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center bg-indigo-500 text-white disabled:opacity-40 disabled:bg-white/10 transition-colors shadow-lg shadow-indigo-500/25"
+                    className="w-9 h-9 rounded-none flex items-center justify-center bg-violet-400 text-white disabled:opacity-40 disabled:bg-white/10 transition-colors shadow-none shadow-none"
                   >
                     <Send className="w-4 h-4 ml-0.5" />
                   </motion.button>
@@ -204,12 +204,12 @@ export default function ChatbotWidget() {
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={() => setIsOpen(!isOpen)}
-        className="relative group w-16 h-16 rounded-full flex items-center justify-center z-50 border border-white/10 outline-none"
+        className="relative group w-16 h-16 rounded-none flex items-center justify-center z-50 border border-white/10 outline-none"
       >
-        <div className="absolute inset-0 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 opacity-80 blur-md group-hover:opacity-100 transition-opacity duration-500 animate-pulse" />
-        <div className="absolute inset-0 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500" />
-        <div className="absolute inset-[1px] rounded-full bg-zinc-950/20 backdrop-blur-sm" />
-        <div className="relative text-white drop-shadow-md">
+        <div className="absolute inset-0 rounded-none     opacity-80 blur-md group-hover:opacity-100 transition-opacity duration-500 animate-pulse" />
+        <div className="absolute inset-0 rounded-none    " />
+        <div className="absolute inset-[1px] rounded-none bg-zinc-950/20 backdrop-blur-sm" />
+        <div className="relative text-white drop-shadow-none">
           {isOpen ? <X className="w-6 h-6" /> : <Sparkles className="w-7 h-7" />}
         </div>
       </motion.button>

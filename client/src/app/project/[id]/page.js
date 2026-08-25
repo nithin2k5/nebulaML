@@ -261,40 +261,42 @@ export default function ProjectPage() {
     ];
 
     return (
-        <div className="flex flex-col h-screen overflow-hidden">
+        <div className="flex flex-col h-screen overflow-hidden bg-black text-white font-sans">
             {/* Project Header */}
-            <header className="h-16 border-b border-border bg-background/50 backdrop-blur-sm flex items-center justify-between px-6 shrink-0">
+            <header className="h-12 border-b border-white/20 bg-black/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
                 <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard")}>
-                        <ArrowLeft />
+                    <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard")} className="border border-white/20 hover:border-white/50 rounded-none h-8 w-8">
+                        <ArrowLeft className="w-4 h-4" />
                     </Button>
-                    <div>
-                        <h1 className="font-bold text-lg flex items-center gap-2">
+                    <div className="flex items-center gap-3">
+                        <h1 className="font-bold text-sm uppercase tracking-widest flex items-center gap-2">
                             {dataset.name}
-                            <Badge variant="outline" className="font-normal text-xs">{dataset.type || "Object Detection"}</Badge>
                         </h1>
-                        <p className="text-xs text-muted-foreground">{stats?.total_images || 0} images • {dataset.classes?.length || 0} classes</p>
+                        <Badge variant="outline" className="text-[10px]">{dataset.type || "DETECTION"}</Badge>
+                        <span className="text-[10px] font-mono text-gray-500 ml-4 hidden md:inline">
+                            V_COUNT: {stats?.total_images || 0} // C_COUNT: {dataset.classes?.length || 0}
+                        </span>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     {isTraining && (
                         <div 
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium cursor-pointer hover:bg-amber-500/20 transition-colors"
+                            className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono font-bold uppercase tracking-widest cursor-pointer hover:bg-amber-500/20 transition-colors"
                             onClick={() => handleTabChange('versions')}
                             title="Click to view training progress"
                         >
-                            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                            Training {Math.round(runningJobs[0]?.progress || 0)}%
+                            <span className="w-1.5 h-1.5 bg-amber-400 animate-pulse" />
+                            SYS.TRAINING [{Math.round(runningJobs[0]?.progress || 0)}%]
                         </div>
                     )}
                     {failedJobs.length > 0 && !isTraining && !hasModels && (
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
-                            Last training failed
+                        <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/30 text-red-400 text-[10px] font-mono font-bold uppercase tracking-widest">
+                            SYS.ERR [TRAIN_FAIL]
                         </div>
                     )}
                     <Button size="sm" onClick={() => router.push(`/annotate?dataset=${dataset.id}`)}>
-                        Resume Annotating
+                        ANNOTATE
                     </Button>
                 </div>
             </header>
@@ -318,42 +320,44 @@ export default function ProjectPage() {
                 </div>
 
                 {isTraining && (
-                    <div className="px-6 py-3 bg-amber-500/5 border-b border-amber-500/20 flex items-center justify-between">
-                        <div className="flex items-center gap-3 text-sm">
-                            <div className="flex items-center gap-2">
-                                <Cpu className="w-4 h-4 text-amber-500 animate-pulse" />
-                                <span className="font-medium">Training in Progress</span>
+                    <div className="px-6 py-3 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-amber-400 font-bold">
+                                <Cpu className="w-4 h-4 animate-pulse" />
+                                <span>SYS.TRAINING_ACTIVE</span>
                             </div>
-                            <span className="text-muted-foreground">You can navigate freely - training continues in the background</span>
+                            <span className="text-amber-500/50 hidden md:inline">// BACKGROUND_PROCESS_RUNNING</span>
                         </div>
                         <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={() => handleTabChange('versions')}
-                            className="text-amber-600 hover:text-amber-500"
+                            className="border-amber-500/30 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
                         >
-                            View Progress
+                            [ VIEW_LOGS ]
                         </Button>
                     </div>
                 )}
 
                 {completionBanner && (
-                    <div className="px-6 py-3 bg-emerald-500/5 border-b border-emerald-500/20 flex items-center justify-between">
-                        <div className="flex items-center gap-3 text-sm">
-                            <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
-                            <span className="font-medium">Training complete!</span>
+                    <div className="px-6 py-3 bg-emerald-500/10 border-b border-emerald-500/30 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                                <CheckCircle className="w-4 h-4 shrink-0" />
+                                <span>SYS.TRAINING_COMPLETE</span>
+                            </div>
                             {completionBanner.mAP !== null && (
-                                <span className="text-muted-foreground">mAP50: <strong>{(completionBanner.mAP * 100).toFixed(1)}%</strong></span>
+                                <span className="text-emerald-500/70 hidden md:inline">// MAP50_SCORE: {(completionBanner.mAP * 100).toFixed(1)}%</span>
                             )}
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button size="sm" variant="outline" onClick={() => { setCompletionBanner(null); handleTabChange('test'); }}>
-                                Test it
+                            <Button size="sm" variant="outline" className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" onClick={() => { setCompletionBanner(null); handleTabChange('test'); }}>
+                                [ RUN_TEST ]
                             </Button>
-                            <Button size="sm" onClick={() => { setCompletionBanner(null); handleTabChange('deploy'); }}>
-                                Deploy it
+                            <Button size="sm" className="bg-emerald-500 text-black hover:bg-emerald-400" onClick={() => { setCompletionBanner(null); handleTabChange('deploy'); }}>
+                                [ DEPLOY_MODEL ]
                             </Button>
-                            <Button size="icon" variant="ghost" className="w-7 h-7" onClick={() => setCompletionBanner(null)}>
+                            <Button size="icon" variant="ghost" className="w-8 h-8 rounded-none border border-transparent hover:border-emerald-500/50 text-emerald-500" onClick={() => setCompletionBanner(null)}>
                                 <X className="w-4 h-4" />
                             </Button>
                         </div>

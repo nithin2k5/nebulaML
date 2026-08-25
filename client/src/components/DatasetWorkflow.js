@@ -211,7 +211,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
       const job = runningJobs[0];
       return (
         <div className="mt-6 space-y-4 animate-in fade-in duration-300">
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
+          <div className="rounded-none border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-amber-400 font-semibold">
                 <Loader2 className="animate-spin w-4 h-4" />
@@ -231,7 +231,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             {job?.metrics && Object.entries(job.metrics).length > 0 && (
               <div className="flex flex-wrap gap-2 pt-1">
                 {Object.entries(job.metrics).slice(0, 4).map(([k, v]) => (
-                  <span key={k} className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-mono">
+                  <span key={k} className="text-[10px] px-2 py-0.5 rounded-none bg-muted text-muted-foreground border border-border font-mono">
                     {k}: {formatMetricValue(v)}
                   </span>
                 ))}
@@ -253,7 +253,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
     if (status === "complete") {
       return (
         <div className="mt-6 space-y-4 animate-in fade-in duration-300">
-          <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-5 space-y-3">
+          <div className="rounded-none border border-green-500/30 bg-green-500/5 p-5 space-y-3">
             <div className="flex items-center gap-2 text-green-400 font-semibold">
               <CheckCircle className="w-4 h-4" />
               {completedJobs.length} Trained Model{completedJobs.length > 1 ? 's' : ''} Ready
@@ -261,7 +261,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             {completedJobs[0]?.metrics && (
               <div className="flex flex-wrap gap-2">
                 {Object.entries(completedJobs[0].metrics).slice(0, 4).map(([k, v]) => (
-                  <span key={k} className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border font-mono">
+                  <span key={k} className="text-[10px] px-2 py-0.5 rounded-none bg-muted text-muted-foreground border border-border font-mono">
                     {k}: {formatMetricValue(v)}
                   </span>
                 ))}
@@ -285,7 +285,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
     if (status === "failed") {
       return (
         <div className="mt-6 animate-in fade-in duration-300">
-          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3">
+          <div className="rounded-none border border-red-500/30 bg-red-500/5 p-5 space-y-3">
             <div className="flex items-center gap-2 text-red-400 font-semibold">
               <AlertCircle className="w-4 h-4" />
               Last training failed
@@ -336,7 +336,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
         <DialogTrigger asChild>
           <Button
             size="lg"
-            className="h-auto py-6 px-8 flex flex-col gap-2 bg-gradient-to-br from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-xl shadow-green-500/20 border-0"
+            className="h-auto py-6 px-8 flex flex-col gap-2    hover: hover: text-white shadow-none shadow-none border-0"
           >
             <Play className="text-3xl mb-1 text-white/90" />
             <span className="font-semibold text-lg">Start Training</span>
@@ -352,11 +352,11 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             
             {/* Preflight Checks */}
             {loadingPreflight ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground p-3 bg-muted/50 rounded-none">
                 <Loader2 className="w-4 h-4 animate-spin" /> Running pre-flight data checks...
               </div>
             ) : preflightData && (preflightData.warnings?.length > 0 || preflightData.blockers?.length > 0) ? (
-              <div className="flex flex-col gap-2 p-3 bg-card border rounded-lg shadow-sm">
+              <div className="flex flex-col gap-2 p-3 bg-card border rounded-none shadow-none">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Dataset Health Check</p>
                 {preflightData.blockers?.map((b, i) => (
                   <div key={i} className="flex gap-2 text-sm text-red-500 bg-red-500/10 p-2 rounded border border-red-500/20">
@@ -372,7 +372,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
                 ))}
               </div>
             ) : preflightData && (
-              <div className="flex items-center gap-2 text-sm text-green-500 bg-green-500/10 p-3 rounded-lg border border-green-500/20">
+              <div className="flex items-center gap-2 text-sm text-green-500 bg-green-500/10 p-3 rounded-none border border-green-500/20">
                 <ShieldCheck className="w-4 h-4 shrink-0" />
                 <span className="font-medium">Dataset is perfectly healthy and ready for training.</span>
               </div>
@@ -438,7 +438,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             </div>
 
             {/* Advanced Settings */}
-            <div className="mt-2 border rounded-lg overflow-hidden">
+            <div className="mt-2 border rounded-none overflow-hidden">
               <button 
                 className="w-full flex items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 transition-colors text-sm font-medium"
                 onClick={() => setShowAdvanced(!showAdvanced)}
@@ -447,7 +447,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
                 {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
               </button>
               {showAdvanced && (
-                <div className="p-3 border-t bg-card grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                <div className="p-3 border-t bg-card grid grid-cols-2 gap-4 animate-in slide-in-">
                   <div className="space-y-2">
                     <Label className="text-xs">Learning Rate</Label>
                     <Input
@@ -471,7 +471,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
           </div>
 
           <Button
-            className="w-full bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-500/20"
+            className="w-full bg-green-600 hover:bg-green-700 text-white shadow-none shadow-none"
             disabled={preflightData?.blockers?.length > 0}
             onClick={async () => {
               try {
@@ -515,13 +515,13 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className={cn(
-              "group relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all",
+              "group relative flex flex-col items-center justify-center rounded-none border-2 border-dashed p-8 text-center transition-all",
               isDragging
                 ? "border-primary bg-primary/5 scale-[1.01]"
                 : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30"
             )}
           >
-            <div className="rounded-full bg-background p-4 shadow-sm ring-1 ring-inset ring-gray-900/5 mb-4 group-hover:scale-110 transition-transform">
+            <div className="rounded-none bg-background p-4 shadow-none ring-1 ring-inset ring-gray-900/5 mb-4 group-hover:scale-110 transition-transform">
               <UploadIcon className={cn("text-2xl transition-colors", isDragging ? "text-primary" : "text-muted-foreground")} />
             </div>
 
@@ -554,7 +554,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
           </div>
 
           {dataset?.images?.length > 0 && (
-            <div className="mt-4 flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-500/10 px-3 py-2 rounded-md border border-green-100 dark:border-green-500/20">
+            <div className="mt-4 flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-500/10 px-3 py-2 rounded-none border border-green-100 dark:border-green-500/20">
               <CheckCircle className="w-4 h-4" />
               <span>{dataset.images.length} images uploaded successfully</span>
             </div>
@@ -565,7 +565,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
 
     if (step.number === 3 && (status === "current" || status === "complete")) {
       return (
-        <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="mt-6 space-y-4 animate-in fade-in slide-in- duration-300">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Card className="border-muted bg-muted/30">
               <CardContent className="p-4 flex flex-col items-center justify-center text-center">
@@ -593,7 +593,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             <Button
               size="lg"
               onClick={() => router.push(`/annotate?dataset=${dataset.id}`)}
-              className="w-full sm:w-auto min-w-[200px] shadow-lg shadow-primary/20 transition-all hover:scale-105"
+              className="w-full sm:w-auto min-w-[200px] shadow-none shadow-none transition-all hover:scale-105"
             >
               <Edit className="mr-2" />
               {status === "complete" ? "Review Annotations" : "Start Annotating"}
@@ -644,7 +644,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
                 <div key={step.id} className="flex flex-row md:flex-col items-center gap-4 md:gap-3 text-left md:text-center group">
                   <div
                     className={cn(
-                      "w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center border-2 transition-all duration-300 shadow-sm",
+                      "w-10 h-10 md:w-12 md:h-12 rounded-none flex items-center justify-center border-2 transition-all duration-300 shadow-none",
                       isComplete ? "bg-primary border-primary text-primary-foreground" :
                         isFailed  ? "bg-red-500/10 border-red-500 text-red-500" :
                         isCurrent ? "bg-background border-primary text-primary scale-110 ring-4 ring-primary/10" :
@@ -669,7 +669,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
           </div>
         </div>
 
-        <div className="min-h-[300px] border rounded-xl p-8 bg-card/50 backdrop-blur-sm shadow-sm relative overflow-hidden">
+        <div className="min-h-[300px] border rounded-none p-8 bg-card/50 backdrop-blur-sm shadow-none relative overflow-hidden">
           {steps.map(step => {
             const status = getStepStatus(step.number);
             const showContent =
@@ -681,7 +681,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
               <div key={step.id} className="animate-in fade-in duration-500">
                 <div className="mb-6 pb-6 border-b border-border/50">
                   <h3 className="text-xl font-semibold flex items-center gap-2">
-                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-none bg-primary/10 text-primary text-xs font-bold">
                       {step.number}
                     </span>
                     {step.title} Stage
@@ -697,7 +697,7 @@ export default function DatasetWorkflow({ dataset, onRefresh }) {
             <div className="animate-in fade-in duration-500">
               <div className="mb-6 pb-6 border-b border-border/50">
                 <h3 className="text-xl font-semibold flex items-center gap-2">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500/20 text-green-500 text-xs font-bold">4</span>
+                  <span className="flex items-center justify-center w-6 h-6 rounded-none bg-green-500/20 text-green-500 text-xs font-bold">4</span>
                   Train Stage
                 </h3>
               </div>

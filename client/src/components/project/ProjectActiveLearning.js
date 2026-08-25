@@ -226,7 +226,7 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
             </div>
 
             {/* Pipeline Visualization */}
-            <div className="flex items-center gap-3 p-4 rounded-lg border border-border bg-muted/20">
+            <div className="flex items-center gap-3 p-4 rounded-none border border-border bg-muted/20">
                 <div className="flex items-center gap-2 text-sm flex-wrap">
                     <Badge variant="outline" className="gap-1"><Brain className="w-3 h-3" />Deploy Model</Badge>
                     <ArrowRight className="w-4 h-4 text-muted-foreground" />
@@ -240,7 +240,7 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
 
             {/* Re-train CTA Banner (shown after approval) */}
             {showRetrainBanner && (
-                <div className="flex items-center justify-between p-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10">
+                <div className="flex items-center justify-between p-4 rounded-none border border-emerald-500/40 bg-emerald-500/10">
                     <div className="flex items-center gap-3">
                         <Sparkles className="w-5 h-5 text-emerald-500 shrink-0" />
                         <div>
@@ -356,7 +356,7 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
                                 <div
                                     key={img.image_id || `img-${imgIdx}`}
                                     onClick={() => toggleSelect(img.image_id)}
-                                    className={`relative group rounded-lg border-2 p-2 cursor-pointer transition-all ${selectedImages.has(img.image_id)
+                                    className={`relative group rounded-none border-2 p-2 cursor-pointer transition-all ${selectedImages.has(img.image_id)
                                             ? "border-primary bg-primary/5"
                                             : "border-border hover:border-primary/50"
                                         }`}
@@ -385,7 +385,7 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
                                         )}
                                     </div>
                                     {selectedImages.has(img.image_id) && (
-                                        <div className="absolute top-3 right-3 w-6 h-6 bg-primary rounded-full flex items-center justify-center">
+                                        <div className="absolute top-3 right-3 w-6 h-6 bg-primary rounded-none flex items-center justify-center">
                                             <CheckCircle className="w-4 h-4 text-primary-foreground" />
                                         </div>
                                     )}

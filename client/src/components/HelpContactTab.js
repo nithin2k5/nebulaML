@@ -41,9 +41,9 @@ const FAQ_ITEMS = [
       "Yes. Export datasets in standard YOLO format and download trained weights (.pt) or export to ONNX and other formats from the Models tab.",
   },
   {
-    question: "How does auto-annotation work?",
+    question: "How does au work?",
     answer:
-      "Upload images to a project and use auto-labeling tools in the annotate view. Proposed boxes and masks can be accepted or adjusted before training.",
+      "Upload images to a project and use au tools in the annotate view. Proposed boxes and masks can be accepted or adjusted before training.",
   },
   {
     question: "Where can I check if the platform is online?",
@@ -61,7 +61,7 @@ function FAQItem({ question, answer }) {
         onClick={() => setOpen(!open)}
         className="w-full py-4 flex items-center justify-between text-left gap-4 group"
       >
-        <span className="text-sm font-medium text-white group-hover:text-indigo-400 transition-colors">
+        <span className="text-sm font-medium text-white group-hover:text-violet-400 transition-colors">
           {question}
         </span>
         <ChevronDown
@@ -153,10 +153,10 @@ export default function HelpContactTab({ onNavigate }) {
     <div className="space-y-10 animate-fade-in text-gray-100">
       <div>
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-            <LifeBuoy className="w-5 h-5 text-indigo-400" />
+          <div className="w-10 h-10 rounded-none bg-violet-400/10 border border-violet-500/20 flex items-center justify-center">
+            <LifeBuoy className="w-5 h-5 text-violet-400" />
           </div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+          <h2 className="text-3xl font-bold tracking-tight    bg-clip-text text-transparent">
             Help &amp; Contact Us
           </h2>
         </div>
@@ -174,10 +174,10 @@ export default function HelpContactTab({ onNavigate }) {
               key={link.title}
               type="button"
               onClick={link.action}
-              className="text-left rounded-2xl border border-white/5 bg-card/40 backdrop-blur-md p-5 hover:bg-white/5 hover:border-indigo-500/30 transition-all group"
+              className="text-left rounded-none border border-white/5 bg-card/40 backdrop-blur-md p-5 hover:bg-white/5 hover:border-violet-500/30 transition-all group"
             >
-              <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-3 group-hover:border-indigo-500/30">
-                <Icon className="w-4 h-4 text-indigo-400" />
+              <div className="w-9 h-9 rounded-none bg-white/5 border border-white/10 flex items-center justify-center mb-3 group-hover:border-violet-500/30">
+                <Icon className="w-4 h-4 text-violet-400" />
               </div>
               <p className="font-semibold text-white mb-1 flex items-center gap-1.5">
                 {link.title}
@@ -190,7 +190,7 @@ export default function HelpContactTab({ onNavigate }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="rounded-2xl border border-white/5 bg-card/40 backdrop-blur-md p-6">
+        <div className="rounded-none border border-white/5 bg-card/40 backdrop-blur-md p-6">
           <h3 className="text-lg font-semibold mb-1">Frequently asked questions</h3>
           <p className="text-sm text-gray-400 mb-4">Quick answers to common topics.</p>
           <div>{FAQ_ITEMS.map((item) => (
@@ -198,13 +198,13 @@ export default function HelpContactTab({ onNavigate }) {
           ))}</div>
         </div>
 
-        <div className="rounded-2xl border border-white/5 bg-card/40 backdrop-blur-md p-6">
+        <div className="rounded-none border border-white/5 bg-card/40 backdrop-blur-md p-6">
           <h3 className="text-lg font-semibold mb-1">Contact us</h3>
           <p className="text-sm text-gray-400 mb-6">
             Send a message and we&apos;ll respond as soon as we can. You can also email{" "}
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
-              className="text-indigo-400 hover:text-indigo-300 underline-offset-2 hover:underline"
+              className="text-violet-400 hover:text-indigo-300 underline-offset-2 hover:underline"
             >
               {SUPPORT_EMAIL}
             </a>
@@ -274,22 +274,22 @@ export default function HelpContactTab({ onNavigate }) {
                 value={form.message}
                 onChange={(e) => handleChange("message", e.target.value)}
                 placeholder="Describe your question or issue..."
-                className="flex w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y min-h-[120px]"
+                className="flex w-full rounded-none border border-white/10 bg-white/5 px-3 py-2 text-sm shadow-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y min-h-[120px]"
               />
             </div>
 
             <Button
               type="submit"
               disabled={submitting}
-              className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500"
+              className="w-full sm:w-auto bg-violet-500 hover:bg-violet-400"
             >
               <Send className="w-4 h-4 mr-2" />
               Send message
             </Button>
           </form>
 
-          <div className="mt-6 flex items-start gap-3 rounded-xl bg-white/[0.03] border border-white/5 p-4 text-sm text-gray-400">
-            <Mail className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+          <div className="mt-6 flex items-start gap-3 rounded-none bg-white/[0.03] border border-white/5 p-4 text-sm text-gray-400">
+            <Mail className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
             <p>
               Submitting opens your default mail client with your message pre-filled.
               For account access issues, include your username so we can help faster.

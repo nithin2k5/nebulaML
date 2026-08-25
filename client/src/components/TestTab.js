@@ -283,14 +283,14 @@ export default function TestTab() {
     <div className="space-y-8 animate-fade-in text-gray-100">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Inference Playground</h2>
+          <h2 className="text-3xl font-bold tracking-tight    bg-clip-text text-transparent">Inference Playground</h2>
           <p className="text-muted-foreground mt-1">
             {mode === 'upload' ? 'Upload an image and run real-time object detection.' : 'Real-time object detection using your webcam.'}
           </p>
         </div>
 
         {/* Mode Toggle */}
-        <div className="flex items-center gap-2 bg-white/5 p-1 rounded-lg border border-white/10">
+        <div className="flex items-center gap-2 bg-white/5 p-1 rounded-none border border-white/10">
           <Button
             size="sm"
             variant={mode === "upload" ? "secondary" : "ghost"}
@@ -353,7 +353,7 @@ export default function TestTab() {
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <Label className="text-sm">Confidence</Label>
-                  <span className="text-xs font-mono text-indigo-400">{confidence.toFixed(2)}</span>
+                  <span className="text-xs font-mono text-violet-400">{confidence.toFixed(2)}</span>
                 </div>
                 <Input
                   type="range"
@@ -370,7 +370,7 @@ export default function TestTab() {
                 <Button
                   onClick={runInference}
                   disabled={!image || running || !selectedJobId}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white"
+                  className="w-full bg-violet-500 hover:bg-violet-400 text-white"
                 >
                   {running ? <Loader className="animate-spin mr-2" /> : <Play className="mr-2" />}
                   {running ? "Running..." : "Run Inference"}
@@ -382,7 +382,7 @@ export default function TestTab() {
                   variant={webcamRunning ? "destructive" : "default"}
                   className={cn(
                     "w-full",
-                    !webcamRunning && "bg-indigo-600 hover:bg-indigo-500 text-white"
+                    !webcamRunning && "bg-violet-500 hover:bg-violet-400 text-white"
                   )}
                 >
                   {webcamRunning ? (
@@ -436,15 +436,15 @@ export default function TestTab() {
                 {mode === "upload" && results?.detections?.length > 0 && (
                   <div className="pt-3 border-t border-white/5 space-y-2">
                     {results.detections.map((det, i) => (
-                      <div key={i} className="flex items-center justify-between text-sm p-2 rounded-lg bg-white/[0.03]">
+                      <div key={i} className="flex items-center justify-between text-sm p-2 rounded-none bg-white/[0.03]">
                         <div className="flex items-center gap-2">
-                          <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: classColors[i % classColors.length] }} />
+                          <div className="w-2.5 h-2.5 rounded-none" style={{ backgroundColor: classColors[i % classColors.length] }} />
                           <span className="text-gray-200">{det.class_name}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="w-16 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                          <div className="w-16 h-1.5 rounded-none bg-white/10 overflow-hidden">
                             <div
-                              className="h-full rounded-full transition-all"
+                              className="h-full rounded-none transition-all"
                               style={{
                                 width: `${det.confidence * 100}%`,
                                 backgroundColor: classColors[i % classColors.length]
@@ -473,15 +473,15 @@ export default function TestTab() {
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
                 className={cn(
-                  "h-[500px] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all",
+                  "h-[500px] border-2 border-dashed rounded-none flex flex-col items-center justify-center cursor-pointer transition-all",
                   isDragging
-                    ? "border-indigo-500 bg-indigo-500/5 scale-[0.99]"
+                    ? "border-violet-500 bg-violet-400/5 scale-[0.99]"
                     : "border-white/10 hover:border-white/20 bg-white/[0.02] hover:bg-white/[0.03]"
                 )}
               >
                 <div className={cn(
-                  "w-20 h-20 rounded-2xl flex items-center justify-center mb-6 transition-all",
-                  isDragging ? "bg-indigo-500/20 text-indigo-400 scale-110" : "bg-white/5 text-gray-500"
+                  "w-20 h-20 rounded-none flex items-center justify-center mb-6 transition-all",
+                  isDragging ? "bg-violet-400/20 text-violet-400 scale-110" : "bg-white/5 text-gray-500"
                 )}>
                   <Upload className="text-3xl" />
                 </div>
@@ -491,7 +491,7 @@ export default function TestTab() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="relative rounded-2xl overflow-hidden border border-white/5 bg-black flex items-center justify-center min-h-[400px]">
+                <div className="relative rounded-none overflow-hidden border border-white/5 bg-black flex items-center justify-center min-h-[400px]">
                   <canvas
                     ref={canvasRef}
                     className="max-w-full max-h-[500px]"
@@ -507,7 +507,7 @@ export default function TestTab() {
                   {running && (
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center">
                       <div className="text-center">
-                        <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                        <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-none animate-spin mx-auto mb-4" />
                         <p className="text-sm text-gray-300">Running inference...</p>
                       </div>
                     </div>
@@ -531,7 +531,7 @@ export default function TestTab() {
                       size="sm"
                       onClick={runInference}
                       disabled={running}
-                      className="bg-indigo-600 hover:bg-indigo-500"
+                      className="bg-violet-500 hover:bg-violet-400"
                     >
                       {running ? <Loader className="animate-spin mr-2" /> : <Zap className="mr-2" />}
                       Re-run
@@ -543,7 +543,7 @@ export default function TestTab() {
           ) : (
             // --- Webcam Mode Display ---
             <div className="space-y-4">
-              <div className="relative rounded-2xl overflow-hidden border border-white/5 bg-black flex items-center justify-center aspect-video">
+              <div className="relative rounded-none overflow-hidden border border-white/5 bg-black flex items-center justify-center aspect-video">
                 <Webcam
                   ref={webcamRef}
                   screenshotFormat="image/jpeg"
@@ -571,15 +571,15 @@ export default function TestTab() {
                 )}
               </div>
 
-              <div className="flex items-center justify-between p-4 bg-white/[0.03] rounded-xl border border-white/5">
+              <div className="flex items-center justify-between p-4 bg-white/[0.03] rounded-none border border-white/5">
                 <div className="flex items-center gap-3">
-                  <div className={cn("w-3 h-3 rounded-full animate-pulse", webcamRunning ? "bg-red-500" : "bg-gray-500")} />
+                  <div className={cn("w-3 h-3 rounded-none animate-pulse", webcamRunning ? "bg-red-500" : "bg-gray-500")} />
                   <span className="font-medium text-sm">
                     {webcamRunning ? "Live Inference Active" : "Camera Idle"}
                   </span>
                 </div>
                 {webcamRunning && (
-                  <Badge variant="outline" className="border-indigo-500/30 text-indigo-400 bg-indigo-500/10">
+                  <Badge variant="outline" className="border-violet-500/30 text-violet-400 bg-violet-400/10">
                     {intervalRef.current ? "Processing..." : "Ready"}
                   </Badge>
                 )}

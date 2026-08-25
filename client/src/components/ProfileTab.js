@@ -24,7 +24,7 @@ const ROLE_CONFIG = {
 
 function StatCard({ icon: Icon, label, value }) {
     return (
-        <div className="flex flex-col p-4 rounded-lg border border-zinc-800/60 bg-zinc-900/30">
+        <div className="flex flex-col p-4 rounded-none border border-zinc-800/60 bg-zinc-900/30">
             <div className="flex items-center gap-2 mb-2">
                 <Icon className="w-4 h-4 text-zinc-400" />
                 <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{label}</p>
@@ -229,8 +229,8 @@ export default function ProfileTab() {
                 
                 <div className="xl:col-span-2 space-y-6">
                     {/* User Hero Classic */}
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-6 flex flex-col sm:flex-row items-center gap-6">
-                        <div className="w-20 h-20 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 shadow-inner">
+                    <div className="rounded-none border border-zinc-800 bg-zinc-900/30 p-6 flex flex-col sm:flex-row items-center gap-6">
+                        <div className="w-20 h-20 rounded-none bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 shadow-none">
                             <span className="text-zinc-300 text-2xl font-medium select-none">{initials}</span>
                         </div>
                         <div className="text-center sm:text-left space-y-1.5 flex-1">
@@ -248,7 +248,7 @@ export default function ProfileTab() {
                     </div>
 
                     {/* Account Details */}
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/30">
+                    <div className="rounded-none border border-zinc-800 bg-zinc-900/30">
                         <div className="px-6 py-4 border-b border-zinc-800/60">
                             <h3 className="text-base font-medium text-zinc-100">Account Details</h3>
                         </div>
@@ -400,7 +400,7 @@ export default function ProfileTab() {
                 <div className="space-y-6">
                     {/* Stats */}
                     {stats && (
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-6">
+                        <div className="rounded-none border border-zinc-800 bg-zinc-900/30 p-6">
                             <h3 className="text-base font-medium text-zinc-100 mb-4">Activity Overview</h3>
                             <div className="grid grid-cols-2 gap-4">
                                 <StatCard icon={FolderOpen} label="Projects" value={stats.projects_owned} />
@@ -410,13 +410,13 @@ export default function ProfileTab() {
                     )}
 
                     {/* Security */}
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-6">
+                    <div className="rounded-none border border-zinc-800 bg-zinc-900/30 p-6">
                         <div className="flex items-center gap-2 mb-4 text-zinc-100">
                             <KeyRound className="w-4 h-4 text-zinc-400" />
                             <h3 className="text-base font-medium">Security</h3>
                         </div>
                         
-                        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4 mb-5">
+                        <div className="rounded-none border border-zinc-800 bg-zinc-950/50 p-4 mb-5">
                             <div className="flex items-center gap-3 mb-2">
                                 <Mail className="w-4 h-4 text-zinc-400" />
                                 <p className="text-sm font-medium text-zinc-200">Email OTP Authentication</p>
@@ -429,7 +429,7 @@ export default function ProfileTab() {
                         <div className="space-y-3">
                             {[
                                 { icon: Clock,        text: "OTP codes expire after 10 minutes" },
-                                { icon: Zap,          text: "Sessions auto-extend while active" },
+                                { icon: Zap,          text: "Sessions au while active" },
                                 { icon: Lock,         text: "Rate limited to 5 attempts per minute" },
                                 { icon: CheckCircle2, text: "Tokens never stored in plain text" },
                             ].map(({ icon: Icon, text }) => (

@@ -291,7 +291,7 @@ export default function ProjectDeploy({ dataset }) {
     if (jobs.length === 0) {
         return (
             <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
+                <div className="w-16 h-16 bg-muted rounded-none flex items-center justify-center mb-4">
                     <Terminal className="text-2xl text-muted-foreground" />
                 </div>
                 <h3 className="text-xl font-semibold mb-2">No Trained Models Available</h3>
@@ -349,7 +349,7 @@ export default function ProjectDeploy({ dataset }) {
                             <div className="pt-4 border-t border-border mt-4">
                                 <div className="flex items-center justify-between">
                                     <div className="space-y-0.5 mr-4">
-                                        <Label>Active Learning (Auto-Collect)</Label>
+                                        <Label>Active Learning (Au)</Label>
                                         <p className="text-xs text-muted-foreground">
                                             Low confidence predictions (&lt; {confidence}) will be automatically flagged in the Active Learn tab for human review.
                                         </p>
@@ -367,7 +367,7 @@ export default function ProjectDeploy({ dataset }) {
                         </CardHeader>
                         <CardContent className="space-y-4">
                             {newKeyToken && (
-                                <div className="bg-primary/10 border border-primary/20 p-3 rounded-md mb-4">
+                                <div className="bg-primary/10 border border-primary/20 p-3 rounded-none mb-4">
                                     <p className="text-xs font-semibold mb-1 text-primary">Key Generated! Copy it now:</p>
                                     <code className="text-xs break-all bg-background p-1.5 rounded block mb-2">{newKeyToken}</code>
                                     <p className="text-[10px] text-muted-foreground">This key will not be shown again.</p>
@@ -405,7 +405,7 @@ export default function ProjectDeploy({ dataset }) {
 
                             <div className="pt-4 border-t border-border mt-4">
                                 <Label className="text-xs mb-2 block">Python Example (Using API Key)</Label>
-                                <pre className="bg-muted p-3 rounded-md text-[10px] overflow-x-auto text-muted-foreground">
+                                <pre className="bg-muted p-3 rounded-none text-[10px] overflow-x-auto text-muted-foreground">
                                     {`import requests
 
 url = "${API_ENDPOINTS.INFERENCE.PREDICT || (API_ENDPOINTS.BASE_URL + "/inference/predict")}"
@@ -428,14 +428,14 @@ print(response.json())`}
                         </CardHeader>
                         <CardContent className="space-y-4">
                             {!selectedFile ? (
-                                <label className="border-2 border-dashed border-border rounded-xl p-12 text-center hover:border-primary transition-colors cursor-pointer flex flex-col items-center gap-3">
+                                <label className="border-2 border-dashed border-border rounded-none p-12 text-center hover:border-primary transition-colors cursor-pointer flex flex-col items-center gap-3">
                                     <Input
                                         type="file"
                                         accept="image/*"
                                         onChange={handleFileChange}
                                         className="hidden"
                                     />
-                                    <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center">
+                                    <div className="w-14 h-14 rounded-none bg-muted flex items-center justify-center">
                                         <Upload className="w-6 h-6 text-muted-foreground" />
                                     </div>
                                     <div>
@@ -446,7 +446,7 @@ print(response.json())`}
                             ) : (
                                 <div className="space-y-4">
                                     {/* Image + canvas overlay — canvas is always mounted so ref is stable */}
-                                    <div className="rounded-xl border border-border bg-muted/10 overflow-hidden flex items-center justify-center p-3 relative">
+                                    <div className="rounded-none border border-border bg-muted/10 overflow-hidden flex items-center justify-center p-3 relative">
                                         {/* Plain preview: shown while no results */}
                                         <img
                                             src={previewUrl}
@@ -462,7 +462,7 @@ print(response.json())`}
 
                                     {/* Detection list */}
                                     {results?.detections?.length > 0 && (
-                                        <div className="rounded-xl border border-border overflow-hidden">
+                                        <div className="rounded-none border border-border overflow-hidden">
                                             <div className="bg-muted/40 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide border-b border-border">
                                                 {results.num_detections} Detection{results.num_detections !== 1 ? "s" : ""}
                                             </div>
@@ -471,7 +471,7 @@ print(response.json())`}
                                                     <div key={idx} className="flex items-center justify-between px-4 py-2">
                                                         <div className="flex items-center gap-2">
                                                             <div
-                                                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                                className="w-2.5 h-2.5 rounded-none shrink-0"
                                                                 style={{ backgroundColor: `hsl(${(idx * 137.5) % 360}, 70%, 55%)` }}
                                                             />
                                                             <span className="text-sm font-medium">{det.class_name}</span>
@@ -533,7 +533,7 @@ print(response.json())`}
                         ].map((target) => (
                             <div
                                 key={target.platform}
-                                className="p-4 rounded-lg border border-border flex flex-col justify-between hover:border-primary/50 transition-all h-full"
+                                className="p-4 rounded-none border border-border flex flex-col justify-between hover:border-primary/50 transition-all h-full"
                             >
                                 <div>
                                     <p className="font-medium text-sm">{target.platform}</p>
@@ -561,7 +561,7 @@ print(response.json())`}
                     {selectedJob && (
                         <div className="mt-4">
                             <Label className="text-sm font-medium mb-2 block">Inference Script (Python)</Label>
-                            <pre className="bg-muted p-4 rounded-md text-xs overflow-x-auto">
+                            <pre className="bg-muted p-4 rounded-none text-xs overflow-x-auto">
                                 {`# Edge Inference Script for NebulaML Models
 # Platform: Raspberry Pi / Jetson / Desktop
 # Requirements: pip install ultralytics opencv-python

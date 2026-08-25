@@ -1,20 +1,20 @@
 import * as React from "react"
-import { cva } from "class-variance-authority";
+import { cva } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-none border px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest transition-colors focus:outline-none",
   {
     variants: {
       variant: {
         default:
-          "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80",
+          "border-transparent bg-violet-500/20 text-violet-400 border border-violet-500/50 hover:bg-violet-500 hover:text-black",
         secondary:
-          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border-transparent bg-white/10 text-white hover:bg-white/20 border border-white/20",
         destructive:
-          "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
-        outline: "text-foreground",
+          "border-transparent bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500 hover:text-black",
+        outline: "text-gray-400 border-white/20 hover:text-white hover:border-white/50",
       },
     },
     defaultVariants: {
@@ -28,7 +28,7 @@ function Badge({
   variant,
   ...props
 }) {
-  return (<div className={cn(badgeVariants({ variant }), className)} {...props} />);
+  return (<div className={cn(badgeVariants({ variant }), className)} {...props} />)
 }
 
 export { Badge, badgeVariants }

@@ -112,7 +112,7 @@ export default function ProjectHealth({ params }) {
                 <h2 className="text-xl font-semibold text-white flex items-center gap-2">
                     Health Overview
                     {isPolling && (
-                        <span className="flex items-center gap-1.5 text-xs font-normal text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+                        <span className="flex items-center gap-1.5 text-xs font-normal text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-none border border-purple-500/20">
                             <RefreshCw className="w-3 h-3 animate-spin" />
                             Analyzing in background...
                         </span>
@@ -205,11 +205,11 @@ export default function ProjectHealth({ params }) {
                                             style={{ height: "100%" }}
                                         >
                                             <div
-                                                className={`w-full rounded-t ${barColor} transition-all`}
+                                                className={`w-full rounded-none ${barColor} transition-all`}
                                                 style={{ height: `${heightPct}%` }}
                                             />
                                             <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col items-center z-10">
-                                                <div className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white whitespace-nowrap shadow-lg">
+                                                <div className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white whitespace-nowrap shadow-none">
                                                     {Math.round(score)}/100 · {date}
                                                 </div>
                                             </div>
@@ -274,7 +274,7 @@ export default function ProjectHealth({ params }) {
                     ))}
 
                     {analysis.warnings?.length === 0 && analysis.structure_valid && nearDups.length === 0 && totalImageIssues === 0 && (
-                        <div className="p-8 border border-white/10 rounded-lg text-center bg-white/5">
+                        <div className="p-8 border border-white/10 rounded-none text-center bg-white/5">
                             <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
                             <p className="text-gray-400">No major issues detected!</p>
                         </div>
@@ -290,16 +290,16 @@ export default function ProjectHealth({ params }) {
 
                     <div className="grid gap-3">
                         {analysis.recommendations?.map((rec, i) => (
-                            <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-md flex items-start gap-3">
-                                <div className="mt-0.5 p-1 bg-purple-500/20 rounded-full">
+                            <div key={i} className="p-3 bg-white/5 border border-white/10 rounded-none flex items-start gap-3">
+                                <div className="mt-0.5 p-1 bg-purple-500/20 rounded-none">
                                     <CheckCircle className="w-3 h-3 text-purple-400" />
                                 </div>
                                 <p className="text-sm text-gray-300">{rec}</p>
                             </div>
                         ))}
 
-                        {/* Auto-generated Config */}
-                        <div className="mt-4 p-4 border border-white/10 rounded-lg bg-zinc-950/50">
+                        {/* Au Config */}
+                        <div className="mt-4 p-4 border border-white/10 rounded-none bg-zinc-950/50">
                             <h4 className="text-xs font-uppercase text-gray-500 font-bold mb-3 tracking-wider">SUGGESTED TRAINING CONFIG</h4>
                             <div className="grid grid-cols-2 gap-4 text-sm">
                                 <div>
@@ -329,7 +329,7 @@ export default function ProjectHealth({ params }) {
                 <PieChart className="w-5 h-5 mr-2 text-blue-500" />
                 Class Distribution
             </h3>
-            <div className="h-64 border border-white/10 rounded-lg p-4 bg-zinc-950/50 flex items-end space-x-2 overflow-x-auto">
+            <div className="h-64 border border-white/10 rounded-none p-4 bg-zinc-950/50 flex items-end space-x-2 overflow-x-auto">
                 {Object.entries(analysis.class_frequency || {}).map(([className, count], i) => {
                     const max = Math.max(...Object.values(analysis.class_frequency));
                     const height = (count / max) * 100;
@@ -337,7 +337,7 @@ export default function ProjectHealth({ params }) {
                         <div key={i} className="flex-1 min-w-[50px] flex flex-col items-center group">
                             <div className="mb-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs text-white">{count}</div>
                             <div
-                                className="w-full bg-blue-500/20 border-t border-x border-blue-500/50 rounded-t hover:bg-blue-500/40 transition-colors relative"
+                                className="w-full bg-blue-500/20 border-t border-x border-blue-500/50 rounded-none hover:bg-blue-500/40 transition-colors relative"
                                 style={{ height: `${height}%` }}
                             ></div>
                             <div className="mt-2 text-xs text-gray-400 truncate w-full text-center" title={className}>
@@ -355,7 +355,7 @@ export default function ProjectHealth({ params }) {
                         <Layers className="w-5 h-5 mr-2 text-violet-400" />
                         Per-Class Quality Breakdown
                     </h3>
-                    <div className="border border-white/10 rounded-lg overflow-hidden bg-zinc-950/50">
+                    <div className="border border-white/10 rounded-none overflow-hidden bg-zinc-950/50">
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b border-white/10 text-gray-500 text-xs uppercase tracking-wider">

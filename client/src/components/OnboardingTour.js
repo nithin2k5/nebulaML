@@ -138,7 +138,7 @@ export default function OnboardingTour() {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
-          className="absolute rounded-xl shadow-[0_0_0_9999px_rgba(3,3,3,0.7)] pointer-events-none z-[101]"
+          className="absolute rounded-none shadow-none_0_0_9999px_rgba(3,3,3,0.7)] pointer-events-none z-[101]"
           style={spotlightStyle}
         />
       )}
@@ -151,7 +151,7 @@ export default function OnboardingTour() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -10, scale: 0.95 }}
           transition={{ duration: 0.2 }}
-          className="absolute w-80 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto z-[102]"
+          className="absolute w-80 bg-[#111] border border-white/10 rounded-none shadow-none overflow-hidden pointer-events-auto z-[102]"
           style={tooltipStyle}
         >
           {/* Progress indicators */}
@@ -161,7 +161,7 @@ export default function OnboardingTour() {
                 key={i} 
                 className={cn(
                   "h-full flex-1 transition-all duration-300", 
-                  i <= activeStep ? "bg-indigo-500" : "bg-transparent",
+                  i <= activeStep ? "bg-violet-400" : "bg-transparent",
                   i > 0 && "border-l border-black/20"
                 )} 
               />
@@ -171,12 +171,12 @@ export default function OnboardingTour() {
           <div className="p-5">
             <div className="flex items-start justify-between mb-2">
               <h3 className="font-bold text-white text-lg flex items-center gap-2">
-                {activeStep === 0 && <Flag className="w-4 h-4 text-indigo-400" />}
+                {activeStep === 0 && <Flag className="w-4 h-4 text-violet-400" />}
                 {step.title}
               </h3>
               <button 
                 onClick={handleClose}
-                className="text-gray-500 hover:text-white transition-colors p-1 -mr-2 -mt-2 rounded-lg hover:bg-white/5"
+                className="text-gray-500 hover:text-white transition-colors p-1 -mr-2 -mt-2 rounded-none hover:bg-white/5"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -204,7 +204,7 @@ export default function OnboardingTour() {
                 <Button 
                   size="sm" 
                   onClick={nextStep}
-                  className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20"
+                  className="h-8 bg-violet-500 hover:bg-violet-400 text-white shadow-none shadow-none"
                 >
                   {activeStep === TOUR_STEPS.length - 1 ? (
                     <>Done <Check className="w-4 h-4 ml-1.5" /></>
