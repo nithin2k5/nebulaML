@@ -152,54 +152,70 @@ export default function HomePage() {
       <main className="relative z-10 pt-24 px-6 md:px-12 max-w-7xl mx-auto space-y-24 pb-32">
         
         {/* Hero Section */}
-        <section className="min-h-[70vh] flex flex-col justify-center">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            
-            <div className="lg:col-span-8 space-y-6">
-              <BoundingBox label="OBJ_DETECTION_PLATFORM" score="1.00" className="p-8 md:p-12">
-                <h1 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-[0.9]">
-                  Train <span className="text-transparent border-text">YOLO</span> Models.
-                  <br />
-                  Deploy to Edge.
-                  <br />
-                  Nothing Else.
-                </h1>
-                
-                <p className="mt-8 text-gray-400 font-mono text-sm md:text-base max-w-xl leading-relaxed">
-                  A precision instrument for computer vision pipelines. Ingest datasets, configure hyperparameters, and run distributed inference without navigating opaque abstractions.
-                </p>
+        <section className="min-h-[85vh] flex flex-col justify-center relative">
+          <div className="absolute top-1/2 right-0 -translate-y-1/2 w-[500px] h-[500px] border border-white/5 rounded-full blur-[120px] bg-violet-500/10 pointer-events-none" />
+          
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center relative z-10">
+            <div className="lg:col-span-7 space-y-8">
+              <div className="inline-flex items-center gap-3 px-3 py-1.5 border border-violet-500/30 bg-violet-500/10 mb-2 shadow-[0_0_15px_rgba(167,139,250,0.1)]">
+                <div className="w-2 h-2 bg-violet-400 animate-pulse shadow-[0_0_10px_rgba(167,139,250,0.8)]" />
+                <span className="font-mono text-[10px] text-violet-300 uppercase tracking-widest font-bold">NBLA_ML // v2.4.0_STABLE</span>
+              </div>
+              
+              <h1 className="text-5xl md:text-7xl lg:text-[5.5rem] font-black uppercase tracking-tighter leading-[0.85]">
+                <span className="block text-white">ENGINEER</span>
+                <span className="block text-transparent border-text">VISION MODELS</span>
+                <span className="block text-white">AT SCALE.</span>
+              </h1>
+              
+              <p className="font-mono text-sm md:text-base text-gray-400 max-w-xl leading-relaxed border-l-2 border-violet-500/50 pl-5 py-1">
+                A bare-metal control surface for object detection pipelines. 
+                Zero abstractions. Direct GPU access. Native edge compilation.
+              </p>
 
-                <div className="mt-12 flex flex-col sm:flex-row gap-4">
-                  <button
-                    onClick={() => handleAction(user ? "/dashboard" : "/register")}
-                    className="group relative px-6 py-3 bg-violet-500 hover:bg-violet-400 text-black font-mono font-bold text-sm uppercase transition-colors flex items-center justify-between"
-                  >
-                    <span>Execute / Initialize</span>
-                    <Square className="w-3 h-3 ml-4 fill-current opacity-50 group-hover:opacity-100" />
-                  </button>
-                  <button
-                    onClick={() => window.open(`${API_BASE_URL}/docs`, '_blank')}
-                    className="px-6 py-3 border border-white/20 hover:border-white/60 text-white font-mono font-bold text-sm uppercase transition-colors"
-                  >
-                    Read_Documentation
-                  </button>
-                </div>
-              </BoundingBox>
+              <div className="flex flex-col sm:flex-row gap-4 pt-6">
+                <button
+                  onClick={() => handleAction(user ? "/dashboard" : "/register")}
+                  className="group relative px-8 py-4 bg-violet-500 hover:bg-violet-400 text-black font-mono font-bold text-sm uppercase transition-colors flex items-center justify-center gap-4"
+                >
+                  <span>[ INIT_WORKSPACE ]</span>
+                  <Activity className="w-4 h-4 opacity-50 group-hover:opacity-100" />
+                </button>
+                <button
+                  onClick={() => window.open(`${API_BASE_URL}/docs`, '_blank')}
+                  className="px-8 py-4 border border-white/20 hover:border-violet-500/50 hover:bg-violet-500/10 text-white font-mono font-bold text-sm uppercase transition-all flex items-center justify-center gap-2"
+                >
+                  <span>// READ_DOCS</span>
+                </button>
+              </div>
             </div>
 
-            <div className="lg:col-span-4 hidden lg:block">
-              <div className="border border-white/10 bg-black/40 p-6 space-y-6">
-                <div className="flex items-center gap-2 mb-6 border-b border-white/10 pb-4">
-                  <Activity className="w-4 h-4 text-violet-400" />
-                  <span className="font-mono text-xs text-violet-400 uppercase">System_Parameters</span>
+            <div className="lg:col-span-5 hidden lg:block relative">
+              <BoundingBox label="SYS.TELEMETRY" score="1.00" className="p-1">
+                <div className="bg-black border border-white/10 p-6 space-y-6">
+                  {/* Visualizer mock */}
+                  <div className="relative aspect-video bg-[#050505] border border-white/5 overflow-hidden flex items-center justify-center">
+                    <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:1rem_1rem]" />
+                    <div className="absolute inset-x-0 h-[1px] bg-violet-500/50 scan-line" />
+                    
+                    {/* Bounding box mock inside */}
+                    <div className="absolute top-[20%] left-[20%] w-[40%] h-[35%] border border-emerald-500 bg-emerald-500/10 group hover:bg-emerald-500/20 transition-colors">
+                      <div className="absolute -top-[18px] -left-[1px] bg-emerald-500 text-black text-[9px] font-mono px-1.5 font-bold tracking-widest">VEHICLE 0.98</div>
+                      <div className="absolute inset-0 border border-emerald-500/30 m-1" />
+                    </div>
+                    <div className="absolute bottom-[15%] right-[25%] w-[25%] h-[50%] border border-amber-500 bg-amber-500/10 group hover:bg-amber-500/20 transition-colors">
+                      <div className="absolute -top-[18px] -left-[1px] bg-amber-500 text-black text-[9px] font-mono px-1.5 font-bold tracking-widest">PEDESTRIAN 0.91</div>
+                      <div className="absolute inset-0 border border-amber-500/30 m-1" />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3 pt-2">
+                    <ParameterItem label="GPU_ALLOC" value="A100-SXM4" />
+                    <ParameterItem label="TENSOR_RT" value="ACTIVE" />
+                    <ParameterItem label="INFERENCE" value="2.4ms / FRAME" />
+                  </div>
                 </div>
-                
-                <ParameterItem label="Architecture" value="YOLOv8 -> v11" />
-                <ParameterItem label="Inference Engine" value="ONNX Runtime" />
-                <ParameterItem label="Backend" value="FastAPI / PyTorch" />
-                <ParameterItem label="Target Environment" value="Browser / Edge" />
-                <ParameterItem label="Dataset Format" value="YAML Config" />
-              </div>
+              </BoundingBox>
             </div>
 
           </div>
@@ -354,6 +370,15 @@ export default function HomePage() {
         }
         body {
           background-color: #000;
+        }
+        @keyframes scan {
+          0%, 100% { transform: translateY(-5000%); opacity: 0; }
+          5% { opacity: 1; }
+          95% { opacity: 1; }
+          50% { transform: translateY(5000%); }
+        }
+        .scan-line {
+          animation: scan 3s ease-in-out infinite;
         }
       `}</style>
     </div>
