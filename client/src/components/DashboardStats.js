@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { API_ENDPOINTS } from "@/lib/config";
-
 import { useAuth } from "@/context/AuthContext";
 
 export default function DashboardStats({ onNavigate }) {
@@ -62,121 +61,113 @@ export default function DashboardStats({ onNavigate }) {
 
   const stats = [
     {
-      title: "Datasets",
+      title: "PROJECTS",
       value: liveStats.totalDatasets.toString(),
-      sub: `${liveStats.totalImages} images total`,
+      sub: `${liveStats.totalImages} TOTAL_IMGS`,
       icon: Database,
-      color: "text-blue-400 bg-blue-400/10",
+      color: "text-blue-400 border-blue-500/30",
     },
     {
-      title: "Annotated",
+      title: "ANNOTATED",
       value: liveStats.totalAnnotated.toString(),
-      sub: `${annotationPercent}% complete`,
+      sub: `${annotationPercent}% COMPLETE`,
       icon: Activity,
-      color: "text-emerald-400 bg-emerald-400/10",
+      color: "text-emerald-400 border-emerald-500/30",
     },
     {
-      title: "Reviewed",
+      title: "REVIEWED",
       value: (liveStats.totalReviewed || 0).toString(),
-      sub: "Quality checked",
+      sub: "Q/A_PASSED",
       icon: Check,
-      color: "text-indigo-400 bg-indigo-400/10",
+      color: "text-indigo-400 border-indigo-500/30",
     },
     {
-      title: "Models",
+      title: "MODELS",
       value: liveStats.totalModels.toString(),
-      sub: "In registry",
+      sub: "IN_REGISTRY",
       icon: Cpu,
-      color: "text-purple-400 bg-purple-400/10",
+      color: "text-violet-400 border-violet-500/30",
     },
     {
-      title: "Pipeline",
-      value: annotationPercent >= 80 ? "Ready" : "Building",
-      sub: annotationPercent >= 80 ? "Ready to train" : "Need more labels",
+      title: "PIPELINE",
+      value: annotationPercent >= 80 ? "READY" : "BUILDING",
+      sub: annotationPercent >= 80 ? "RDY_TO_TRAIN" : "NEED_LABELS",
       icon: TrendingUp,
-      color: "text-amber-400 bg-amber-400/10",
+      color: "text-amber-400 border-amber-500/30",
     }
   ];
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-8 animate-fade-in font-sans">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {stats.map((stat, index) => (
-          <div
-            key={index}
-            className={cn(
-              "group relative p-6 rounded-2xl bg-card/40 backdrop-blur-md border border-white/5",
-              "hover:bg-white/5 transition-all duration-300 hover:-translate-y-1 shadow-lg shadow-black/10",
-              loading && "animate-shimmer"
-            )}
-          >
-            <div className="flex justify-between items-start mb-4">
-              <div className={cn("p-3 rounded-xl", stat.color)}>
-                <stat.icon className="text-xl" />
+          <Card key={index} className={cn("p-0 rounded-none border-white/20 bg-black", stat.color)}>
+            <CardContent className="p-4 flex flex-col justify-between h-full group">
+              <div className="flex justify-between items-start mb-4">
+                <div className={cn("p-2 border bg-black group-hover:bg-white/5 transition-colors", stat.color)}>
+                  <stat.icon className="w-4 h-4" />
+                </div>
               </div>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-sm font-medium">{stat.title}</p>
-              <h3 className="text-3xl font-bold mt-1 text-white tracking-tight">{stat.value}</h3>
-              <p className="text-xs text-muted-foreground mt-1">{stat.sub}</p>
-            </div>
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-          </div>
+              <div>
+                <p className="text-gray-500 text-[10px] font-mono font-bold uppercase tracking-widest">{stat.title}</p>
+                <h3 className="text-2xl font-bold mt-1 text-white tracking-tight font-mono">{stat.value}</h3>
+                <p className="text-[10px] text-gray-500 mt-1 font-mono uppercase">{stat.sub}</p>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="p-[1px] rounded-2xl bg-gradient-to-br from-indigo-500/20 via-transparent to-transparent">
-          <div className="h-full rounded-2xl bg-card/60 backdrop-blur-md border border-white/5 p-6 flex flex-col justify-between">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card className="rounded-none border-violet-500/30 bg-black p-0 hover:border-violet-500/60 transition-colors">
+          <CardContent className="p-6 flex flex-col justify-between h-full">
             <div>
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
-                  <Zap />
+                <div className="p-2 border border-violet-500/30 bg-violet-500/10 text-violet-400">
+                  <Zap className="w-4 h-4" />
                 </div>
-                <h3 className="text-lg font-bold">Quick Inference</h3>
+                <h3 className="text-sm font-bold uppercase tracking-widest text-white">QUICK_INFERENCE</h3>
               </div>
-              <p className="text-muted-foreground text-sm leading-relaxed mb-6">
+              <p className="text-gray-400 text-xs font-mono uppercase leading-relaxed mb-6">
                 Drag & drop images to test your best model instantly. Supported formats: JPG, PNG, WEBP.
               </p>
             </div>
             <Button
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white border-0 shadow-lg shadow-indigo-500/20"
+              className="w-full bg-violet-500 hover:bg-violet-400 text-black border-0 shadow-none"
               onClick={() => onNavigate && onNavigate("inference")}
             >
-              Start Detection
-              <ArrowRight className="ml-2" />
+              [ EXECUTE_DETECTION ]
+              <ArrowRight className="ml-2 w-4 h-4" />
             </Button>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        <div className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-500/20 via-transparent to-transparent">
-          <div className="h-full rounded-2xl bg-card/60 backdrop-blur-md border border-white/5 p-6 flex flex-col justify-between">
+        <Card className="rounded-none border-white/20 bg-black p-0 hover:border-white/40 transition-colors">
+          <CardContent className="p-6 flex flex-col justify-between h-full">
             <div>
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-purple-500/20 rounded-lg text-purple-400">
-                  <Cpu />
+                <div className="p-2 border border-white/20 bg-white/5 text-gray-300">
+                  <Cpu className="w-4 h-4" />
                 </div>
-                <h3 className="text-lg font-bold">Start New Training</h3>
+                <h3 className="text-sm font-bold uppercase tracking-widest text-white">NEW_TRAINING_JOB</h3>
               </div>
-              <p className="text-muted-foreground text-sm leading-relaxed mb-6">
-                Configure a new training run on your GPU. Requires a prepared dataset version.
+              <p className="text-gray-400 text-xs font-mono uppercase leading-relaxed mb-6">
+                Configure a new training run on GPU cluster. Requires a prepared dataset version.
               </p>
             </div>
             <Button
               variant="outline"
-              className="w-full border-white/10 hover:bg-white/5 bg-transparent"
+              className="w-full"
               onClick={() => onNavigate && onNavigate("datasets")}
             >
-              Create Dataset
-              <ArrowRight className="ml-2" />
+              [ INIT_DATASET ]
+              <ArrowRight className="ml-2 w-4 h-4" />
             </Button>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
-
-      {/* Recent Activity Table -> Removed per user request */}
     </div>
   );
 }

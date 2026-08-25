@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -209,55 +209,52 @@ export default function DatasetsTab() {
   };
 
   return (
-    <div className="space-y-8 animate-fade-in text-gray-100">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-fade-in text-white font-sans">
+      <div className="flex items-center justify-between border-b border-white/20 pb-6">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Datasets</h2>
-          <p className="text-muted-foreground mt-1">Create, manage, and annotate your object detection datasets.</p>
+          <h2 className="text-xl font-bold tracking-widest uppercase text-white">PROJECTS_DB</h2>
+          <p className="text-xs font-mono text-gray-500 uppercase mt-1">Manage and annotate object detection schemas.</p>
         </div>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
           <DialogTrigger asChild>
-            <Button className="bg-indigo-600 hover:bg-indigo-500 text-white">
-              <Plus className="mr-2" /> New Dataset
+            <Button>
+              <Plus className="mr-2 w-4 h-4" /> [ ALLOCATE_PROJECT ]
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-zinc-900 border-white/10">
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Dataset</DialogTitle>
-              <DialogDescription>Define your dataset and its object classes.</DialogDescription>
+              <DialogTitle>INIT_PROJECT_SCHEMA</DialogTitle>
+              <DialogDescription>Define your dataset matrix and object classifications.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label>Name</Label>
+                <Label className="text-[10px] font-mono text-violet-400">SCHEMA_NAME</Label>
                 <Input
-                  placeholder="e.g., Traffic Signs v1"
+                  placeholder="e.g., TRAFFIC_SIGNS_V1"
                   value={newDataset.name}
                   onChange={e => setNewDataset({ ...newDataset, name: e.target.value })}
-                  className="bg-black/30 border-white/10"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Description <span className="text-gray-500">(optional)</span></Label>
+                <Label className="text-[10px] font-mono text-violet-400">META_DESCRIPTION <span className="text-gray-600">[OPTIONAL]</span></Label>
                 <Input
-                  placeholder="Brief description..."
+                  placeholder="System description..."
                   value={newDataset.description}
                   onChange={e => setNewDataset({ ...newDataset, description: e.target.value })}
-                  className="bg-black/30 border-white/10"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Classes <span className="text-gray-500">(comma-separated)</span></Label>
+                <Label className="text-[10px] font-mono text-violet-400">CLASS_VECTORS <span className="text-gray-600">[COMMA_SEPARATED]</span></Label>
                 <Input
-                  placeholder="e.g., stop_sign, yield, speed_limit"
+                  placeholder="stop, yield, limit"
                   value={newDataset.classes}
                   onChange={e => setNewDataset({ ...newDataset, classes: e.target.value })}
-                  className="bg-black/30 border-white/10"
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowCreate(false)} className="border-white/10">Cancel</Button>
-              <Button onClick={handleCreateDataset} className="bg-indigo-600 hover:bg-indigo-500">Create</Button>
+              <Button variant="outline" onClick={() => setShowCreate(false)}>[ ABORT ]</Button>
+              <Button onClick={handleCreateDataset}>[ EXECUTE_INIT ]</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -266,41 +263,43 @@ export default function DatasetsTab() {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-48 rounded-2xl bg-white/5 animate-shimmer border border-white/5" />
+            <Card key={i} className="h-48 rounded-none bg-white/5 animate-pulse border border-white/10" />
           ))}
         </div>
       ) : datasets.length === 0 ? (
-        <div className="py-20 text-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] max-w-2xl mx-auto">
-          <div className="w-20 h-20 rounded-full bg-indigo-500/10 flex items-center justify-center mx-auto mb-6 text-indigo-400">
-            <Folder className="text-4xl" />
-          </div>
-          <h3 className="text-2xl font-bold mb-3">Welcome to NebulaML</h3>
-          <p className="text-gray-400 mb-8 max-w-md mx-auto leading-relaxed">
-            You don&apos;t have any datasets yet. Create your first dataset to start the ML pipeline.
-          </p>
+        <Card className="py-20 text-center rounded-none border border-white/20 bg-black max-w-2xl mx-auto">
+          <CardContent className="flex flex-col items-center justify-center pt-6">
+            <div className="w-16 h-16 border border-violet-500/30 bg-violet-500/10 flex items-center justify-center mb-6 text-violet-400">
+              <Folder className="w-8 h-8" />
+            </div>
+            <h3 className="text-lg font-bold mb-3 uppercase tracking-widest text-white">DB_EMPTY // NO_PROJECTS_FOUND</h3>
+            <p className="text-xs font-mono text-gray-500 mb-8 max-w-md mx-auto uppercase">
+              No datasets allocated. Initialize a new project schema to commence ML pipeline.
+            </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left max-w-xl mx-auto mb-10">
-            <div className="p-4 rounded-xl bg-white/5 border border-white/5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-3">1</div>
-              <h4 className="font-semibold text-sm mb-1">Create Dataset</h4>
-              <p className="text-xs text-gray-500">Define classes and metadata</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left max-w-xl mx-auto mb-10 w-full">
+              <div className="p-4 bg-black border border-white/20">
+                <div className="text-xs font-mono font-bold text-violet-400 mb-2">SEQ_01</div>
+                <h4 className="font-bold text-xs uppercase mb-1">ALLOCATE</h4>
+                <p className="text-[10px] font-mono text-gray-500 uppercase">Define classes & metadata</p>
+              </div>
+              <div className="p-4 bg-black border border-white/20 opacity-70">
+                <div className="text-xs font-mono font-bold text-emerald-400 mb-2">SEQ_02</div>
+                <h4 className="font-bold text-xs uppercase mb-1">INGEST</h4>
+                <p className="text-[10px] font-mono text-gray-500 uppercase">Upload imagery & labels</p>
+              </div>
+              <div className="p-4 bg-black border border-white/20 opacity-70">
+                <div className="text-xs font-mono font-bold text-amber-400 mb-2">SEQ_03</div>
+                <h4 className="font-bold text-xs uppercase mb-1">TRAIN</h4>
+                <p className="text-[10px] font-mono text-gray-500 uppercase">Execute YOLO training</p>
+              </div>
             </div>
-            <div className="p-4 rounded-xl bg-white/5 border border-white/5 opacity-70">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-3">2</div>
-              <h4 className="font-semibold text-sm mb-1">Upload & Label</h4>
-              <p className="text-xs text-gray-500">Add images and bounding boxes</p>
-            </div>
-            <div className="p-4 rounded-xl bg-white/5 border border-white/5 opacity-70">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center mb-3">3</div>
-              <h4 className="font-semibold text-sm mb-1">Train Model</h4>
-              <p className="text-xs text-gray-500">Click to train YOLO automatically</p>
-            </div>
-          </div>
 
-          <Button onClick={() => setShowCreate(true)} size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-transform hover:scale-105">
-            <Plus className="mr-2" /> Create First Dataset
-          </Button>
-        </div>
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus className="mr-2 w-4 h-4" /> [ INIT_FIRST_PROJECT ]
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {datasets?.map((dataset, dsIdx) => {
@@ -309,130 +308,118 @@ export default function DatasetsTab() {
             const progress = total > 0 ? Math.round((annotated / total) * 100) : 0;
 
             return (
-              <div
+              <Card
                 key={dataset.id || `ds-${dsIdx}`}
-                className="group relative rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 hover:border-indigo-500/50 hover:shadow-[0_0_40px_rgba(99,102,241,0.2)] hover:-translate-y-1 transition-all duration-500 flex flex-col overflow-hidden"
+                className="group relative rounded-none bg-black border border-white/20 hover:border-violet-500/50 transition-colors flex flex-col h-full"
               >
-                {/* Subtle gradient overlay on hover */}
-                <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                
-                <div className="p-6 flex flex-col flex-1 h-full relative z-10">
+                <CardContent className="p-6 flex flex-col h-full z-10 pt-8">
                   {/* Header */}
                   <div className="flex items-start justify-between mb-4 gap-3">
                     <div className="flex items-center gap-4 w-full overflow-hidden">
-                      <div className="w-12 h-12 rounded-2xl flex-shrink-0 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-indigo-300 group-hover:scale-110 group-hover:from-indigo-500 group-hover:to-purple-500 group-hover:text-white transition-all duration-500 shadow-inner">
-                        <FolderKanban className="w-6 h-6" />
+                      <div className="w-10 h-10 border border-violet-500/30 bg-violet-500/10 flex items-center justify-center text-violet-400 transition-colors group-hover:bg-violet-500 group-hover:text-black">
+                        <FolderKanban className="w-5 h-5" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-xl text-white truncate tracking-tight group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-indigo-400 group-hover:to-purple-400 transition-all duration-300" title={dataset.name}>{dataset.name}</h3>
+                        <h3 className="font-bold text-sm text-white uppercase tracking-widest truncate" title={dataset.name}>{dataset.name}</h3>
                         {dataset.description ? (
-                          <p className="text-sm text-gray-400 truncate mt-0.5" title={dataset.description}>{dataset.description}</p>
+                          <p className="text-[10px] font-mono text-gray-500 uppercase truncate mt-0.5" title={dataset.description}>{dataset.description}</p>
                         ) : (
-                          <p className="text-sm text-gray-500 italic mt-0.5">No description</p>
+                          <p className="text-[10px] font-mono text-gray-600 uppercase mt-0.5">NO_META</p>
                         )}
                       </div>
                     </div>
                   </div>
 
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-3 gap-3 my-5 bg-white/5 p-4 rounded-2xl border border-white/5 shadow-inner">
-                    <div className="flex flex-col items-center justify-center text-center">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mb-1">
-                        <Image className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Images</span>
+                  <div className="grid grid-cols-3 gap-0 my-4 border border-white/10 bg-black/50">
+                    <div className="flex flex-col items-center justify-center p-3 border-r border-white/10">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 uppercase mb-1">
+                        <span>IMGS</span>
                       </div>
-                      <span className="text-lg font-bold text-white">{total}</span>
+                      <span className="text-sm font-bold font-mono text-white">{total}</span>
                     </div>
-                    <div className="flex flex-col items-center justify-center text-center border-x border-white/10">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mb-1">
-                        <Box className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Classes</span>
+                    <div className="flex flex-col items-center justify-center p-3 border-r border-white/10">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 uppercase mb-1">
+                        <span>CLS</span>
                       </div>
-                      <span className="text-lg font-bold text-white">{dataset.classes?.length || 0}</span>
+                      <span className="text-sm font-bold font-mono text-white">{dataset.classes?.length || 0}</span>
                     </div>
-                    <div className="flex flex-col items-center justify-center text-center">
-                      <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium mb-1">
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Reviewed</span>
+                    <div className="flex flex-col items-center justify-center p-3">
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-500/70 uppercase mb-1">
+                        <span>REV</span>
                       </div>
-                      <span className="text-lg font-bold text-emerald-400">{dataset.stats?.reviewed_images || 0}</span>
+                      <span className="text-sm font-bold font-mono text-emerald-400">{dataset.stats?.reviewed_images || 0}</span>
                     </div>
                   </div>
 
                   {/* Progress & Classes */}
-                  <div className="mt-auto space-y-5 pt-2">
+                  <div className="mt-auto space-y-4 pt-2">
                     {/* Class badges */}
                     {dataset.classes?.length > 0 ? (
-                      <div className="flex flex-wrap gap-2 min-h-[28px]">
+                      <div className="flex flex-wrap gap-2 min-h-[24px]">
                         {dataset.classes.slice(0, 3).map((cls, i) => (
-                          <Badge key={i} variant="secondary" className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border-indigo-500/20 text-xs px-3 py-1 font-medium transition-colors">
+                          <Badge key={i} variant="secondary">
                             {cls}
                           </Badge>
                         ))}
                         {dataset.classes.length > 3 && (
-                          <Badge variant="secondary" className="bg-purple-500/10 text-purple-300 border-purple-500/20 text-xs px-3 py-1 font-medium">
-                            +{dataset.classes.length - 3} more
+                          <Badge variant="outline">
+                            +{dataset.classes.length - 3}
                           </Badge>
                         )}
                       </div>
                     ) : (
-                      <div className="h-[28px]" />
+                      <div className="h-[24px]" />
                     )}
 
                     {/* Progress Bar */}
-                    <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                    <div className="bg-black border border-white/10 p-2">
                       <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs font-semibold text-gray-400 tracking-wider uppercase">Annotation Progress</span>
-                        <Badge variant="outline" className={cn(
-                          "text-[10px] px-2 py-0.5 border-0 font-bold",
-                          progress === 100 ? "bg-emerald-500/20 text-emerald-400" : progress > 0 ? "bg-indigo-500/20 text-indigo-400" : "bg-white/10 text-gray-400"
-                        )}>{progress}%</Badge>
+                        <span className="text-[10px] font-mono font-bold text-gray-500 uppercase tracking-widest">ANN_PROGRESS</span>
+                        <span className={cn(
+                          "text-[10px] font-mono font-bold uppercase",
+                          progress === 100 ? "text-emerald-400" : progress > 0 ? "text-violet-400" : "text-gray-500"
+                        )}>{progress}%</span>
                       </div>
-                      <div className="h-2 rounded-full bg-black/50 overflow-hidden w-full shadow-inner">
+                      <div className="h-1 bg-white/10 w-full overflow-hidden">
                         <div
                           className={cn(
-                            "h-full rounded-full transition-all duration-1000 ease-out relative",
-                            progress === 100 ? "bg-emerald-500" : "bg-gradient-to-r from-indigo-500 to-purple-500"
+                            "h-full transition-all duration-1000 ease-out",
+                            progress === 100 ? "bg-emerald-500" : "bg-violet-500"
                           )}
                           style={{ width: `${progress}%` }}
-                        >
-                          {progress > 0 && progress < 100 && (
-                             <div className="absolute top-0 right-0 bottom-0 left-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] bg-[length:1rem_1rem] animate-[progress-bar-stripes_1s_linear_infinite]" />
-                          )}
-                        </div>
+                        />
                       </div>
                     </div>
                   </div>
-                </div>
+                </CardContent>
 
                 {/* Actions */}
-                <div className="px-6 py-4 bg-black/40 border-t border-white/10 flex items-center gap-3 relative z-10">
+                <div className="px-4 py-3 bg-black border-t border-white/10 flex items-center gap-2 relative z-10">
                   <Button
                     onClick={() => router.push(`/project/${dataset.id}`)}
-                    className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold shadow-lg shadow-indigo-500/25 border-0"
+                    className="flex-1"
                   >
-                    Open Workspace <ChevronRight className="ml-1 w-4 h-4" />
+                    [ ACCESS_DB ] <ChevronRight className="ml-1 w-4 h-4" />
                   </Button>
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-2">
                     <Button
-                      variant="ghost" size="icon"
+                      variant="outline" size="icon"
                       onClick={() => handleExport(dataset.id)}
-                      className="bg-white/5 text-gray-300 hover:text-white hover:bg-white/10 border border-white/5 transition-colors"
-                      title="Export Dataset"
+                      title="EXPORT"
                     >
                       <Download className="w-4 h-4" />
                     </Button>
                     <Button
-                      variant="ghost" size="icon"
+                      variant="destructive" size="icon"
                       onClick={() => handleDelete(dataset.id, dataset.name)}
-                      className="bg-red-500/10 text-red-400 hover:text-white hover:bg-red-500 border border-red-500/20 transition-colors"
-                      title="Delete Dataset"
+                      title="DELETE"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
-              </div>
+              </Card>
             );
           })}
         </div>
