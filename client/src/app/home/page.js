@@ -239,6 +239,61 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* Engine Specs Section */}
+        <section className="space-y-12 border-t border-white/10 pt-24">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-3xl font-bold uppercase tracking-tight">Engine.Specs</h2>
+              <p className="font-mono text-sm text-gray-500 mt-2">HARDWARE_&_SOFTWARE_TARGETS</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <BoundingBox label="INFERENCE_MODES" score="SYS.OK">
+              <div className="p-8 space-y-6">
+                <div className="flex justify-between border-b border-white/10 pb-4">
+                  <span className="font-mono text-xs uppercase text-gray-400">Target</span>
+                  <span className="font-mono text-xs uppercase text-violet-400">Latency Profile</span>
+                </div>
+                {[
+                  { target: "ONNX_RUNTIME (BROWSER)", latency: "~15-30ms / FRAME" },
+                  { target: "FASTAPI_BACKEND (CLOUD_GPU)", latency: "~8-12ms / FRAME" },
+                  { target: "COREML (iOS NEURAL_ENGINE)", latency: "~4-6ms / FRAME" },
+                  { target: "TENSORRT (JETSON_NANO)", latency: "~10-15ms / FRAME" }
+                ].map((spec, i) => (
+                  <div key={i} className="flex justify-between items-center group">
+                    <span className="font-mono text-sm text-white group-hover:text-violet-300 transition-colors">{spec.target}</span>
+                    <span className="font-mono text-xs text-gray-500">{spec.latency}</span>
+                  </div>
+                ))}
+              </div>
+            </BoundingBox>
+
+            <BoundingBox label="ARCHITECTURE_SUPPORT" score="SYS.OK">
+              <div className="p-8 space-y-6">
+                <div className="flex justify-between border-b border-white/10 pb-4">
+                  <span className="font-mono text-xs uppercase text-gray-400">Model_Family</span>
+                  <span className="font-mono text-xs uppercase text-violet-400">Status</span>
+                </div>
+                {[
+                  { model: "YOLOv8 (N, S, M, L, X)", status: "SUPPORTED" },
+                  { model: "YOLOv10 (N, S, M, B, L, X)", status: "SUPPORTED" },
+                  { model: "YOLOv11 (N, S, M, L, X)", status: "BETA_TESTING" },
+                  { model: "RT-DETR (ResNet50)", status: "EXPERIMENTAL" }
+                ].map((spec, i) => (
+                  <div key={i} className="flex justify-between items-center group">
+                    <span className="font-mono text-sm text-white group-hover:text-violet-300 transition-colors">{spec.model}</span>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-none ${spec.status === 'SUPPORTED' ? 'bg-emerald-500' : spec.status === 'BETA_TESTING' ? 'bg-amber-500 animate-pulse' : 'bg-gray-500'}`} />
+                      <span className="font-mono text-[10px] text-gray-400">{spec.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </BoundingBox>
+          </div>
+        </section>
+
         {/* Terminal / Technical Interface */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-12 border-t border-white/10 pt-24 items-center">
           <div>
