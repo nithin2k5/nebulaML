@@ -2892,10 +2892,10 @@ function AnnotationToolContent() {
 export default function AnnotatePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-black text-foreground flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading annotation tool...</p>
+      <div className="min-h-screen bg-black flex items-center justify-center font-mono text-violet-500 uppercase text-xs tracking-widest cursor-crosshair">
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-1.5 bg-violet-500 animate-pulse" />
+          [ SYS_INIT... ANNOTATION_CORE_LOADING ]
         </div>
       </div>
     }>
