@@ -300,13 +300,17 @@ function AnnotationToolContent() {
           break;
         case 'z':
         case 'Z':
-          if ((e.ctrlKey || e.metaKey) && boxHistory.length > 0) {
+          if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            const lastState = boxHistory[boxHistory.length - 1];
-            boxesRef.current = lastState;
-            setBoxes(lastState);
-            setBoxHistory(prev => prev.slice(0, -1));
-            showToast('Undo successful');
+            if (activeTool === 'ai' && aiHistoryRef.current.length > 0) {
+              handleAiUndo();
+            } else if (boxHistory.length > 0) {
+              const lastState = boxHistory[boxHistory.length - 1];
+              boxesRef.current = lastState;
+              setBoxes(lastState);
+              setBoxHistory(prev => prev.slice(0, -1));
+              showToast('Undo successful');
+            }
           }
           break;
         case 'c':
@@ -853,17 +857,12 @@ function AnnotationToolContent() {
     aiHistoryRef.current = hist.slice(0, -1);
     aiRoughBoxRef.current = prev.roughBox;
     aiPointsRef.current = prev.points;
-    aiMaskPolygonRef.current = null;
-    aiMetadataRef.current = null;
+    aiMaskPolygonRef.current = prev.maskPolygon;
+    aiMetadataRef.current = prev.metadata || null;
     setAiStateVersion(v => v + 1);
 
-    if (prev.roughBox || prev.points.some(p => p.type === 'fg')) {
-      callSmartSegment({ roughBox: prev.roughBox, points: prev.points });
-    } else {
-      drawCanvas();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callSmartSegment]);
+    drawCanvas();
+  }, [drawCanvas]);
 
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -951,6 +950,9 @@ function AnnotationToolContent() {
       if (clickedIndex !== -1) {
         const box = boxesRef.current[clickedIndex];
         
+        // Push state to history BEFORE modifying
+        setBoxHistory(prev => [...prev, boxesRef.current]);
+
         // Check for vertex hits if it's a polygon/line
         if (box.type === 'polygon' || box.type === 'line') {
           const hitRadius = 12 * (scaleRef.current || 1);
@@ -958,7 +960,7 @@ function AnnotationToolContent() {
             const p = box.points[vi];
             if (Math.hypot(x - p.x, y - p.y) < hitRadius) {
               setIsDrawing(true);
-              setDragOffset({ type: 'vertex', index: vi, initialBox: { ...box } });
+              setDragOffset({ type: 'vertex', boxIndex: clickedIndex, index: vi, initialBox: { ...box } });
               return;
             }
           }
@@ -966,9 +968,9 @@ function AnnotationToolContent() {
 
         setIsDrawing(true);
         if (!box.type || box.type === 'box' || box.type === 'joint') {
-          setDragOffset({ type: 'move', dx: x - box.x, dy: y - box.y });
+          setDragOffset({ type: 'move', boxIndex: clickedIndex, dx: x - box.x, dy: y - box.y });
         } else if (box.type === 'polygon' || box.type === 'line') {
-          setDragOffset({ type: 'move', x, y }); // store initial click
+          setDragOffset({ type: 'move', boxIndex: clickedIndex, x, y }); // store initial click
         }
       } else {
         setIsDrawing(false);
@@ -994,7 +996,8 @@ function AnnotationToolContent() {
         aiHistoryRef.current = [...aiHistoryRef.current, {
           roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
           points: [...aiPointsRef.current],
-          maskPolygon: aiMaskPolygonRef.current,
+          maskPolygon: aiMaskPolygonRef.current ? [...aiMaskPolygonRef.current] : null,
+          metadata: aiMetadataRef.current ? { ...aiMetadataRef.current } : null,
         }];
         aiBoxStartRef.current = { x, y };
         aiCurrentBoxRef.current = null;
@@ -1006,7 +1009,8 @@ function AnnotationToolContent() {
         aiHistoryRef.current = [...aiHistoryRef.current, {
           roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
           points: [...aiPointsRef.current],
-          maskPolygon: aiMaskPolygonRef.current,
+          maskPolygon: aiMaskPolygonRef.current ? [...aiMaskPolygonRef.current] : null,
+          metadata: aiMetadataRef.current ? { ...aiMetadataRef.current } : null,
         }];
         // Clicking inside an existing selection → treat as background (remove that area)
         const clickedInsideMask =
@@ -1121,14 +1125,16 @@ function AnnotationToolContent() {
     }
 
     // Dragging logic for select tool
-    if (activeTool === 'select' && isDrawing && selectedBoxIndex !== -1 && dragOffset) {
-      const box = boxesRef.current[selectedBoxIndex];
+    if (activeTool === 'select' && isDrawing && dragOffset && dragOffset.boxIndex !== undefined) {
+      const boxIdx = dragOffset.boxIndex;
+      const box = boxesRef.current[boxIdx];
+      if (!box) return; // safety
       const newBoxes = [...boxesRef.current];
       
       if (dragOffset.type === 'vertex') {
         const newPoints = [...box.points];
         newPoints[dragOffset.index] = { x, y };
-        newBoxes[selectedBoxIndex] = { 
+        newBoxes[boxIdx] = { 
           ...box, 
           points: newPoints,
           // Update bounding box
@@ -1139,11 +1145,11 @@ function AnnotationToolContent() {
         };
       } else if (dragOffset.type === 'move') {
         if (!box.type || box.type === 'box' || box.type === 'joint') {
-          newBoxes[selectedBoxIndex] = { ...box, x: x - dragOffset.dx, y: y - dragOffset.dy };
+          newBoxes[boxIdx] = { ...box, x: x - dragOffset.dx, y: y - dragOffset.dy };
         } else if ((box.type === 'polygon' || box.type === 'line') && dragOffset.x !== undefined) {
           const dx = x - dragOffset.x;
           const dy = y - dragOffset.y;
-          newBoxes[selectedBoxIndex] = {
+          newBoxes[boxIdx] = {
             ...box,
             points: box.points.map(p => ({ x: p.x + dx, y: p.y + dy })),
             x: box.x + dx,
@@ -1243,10 +1249,6 @@ function AnnotationToolContent() {
     // Poly is finished via double click or Enter key, but let's allow it to finish via context menu or something later. For now we use double click event.
     // So for polygon, up does nothing special unless it's select
     if (activeTool === 'select') {
-      if (isDrawing) { // finished dragging
-        // Save state to history after drag
-        setBoxHistory(prev => [...prev, boxesRef.current]);
-      }
       setIsDrawing(false);
       setDragOffset(null);
       return;

@@ -63,14 +63,18 @@ def _contour_to_polygon(contour, max_pts: int = 200, smooth: bool = True):
     blurring which would destroy edge detail. GrabCut masks benefit from
     smoothing to remove pixel-level noise.
     """
-    peri    = cv2.arcLength(contour, True)
-    # Less aggressive epsilon → more detail preserved
-    epsilon = 0.003 * peri
-    approx  = cv2.approxPolyDP(contour, epsilon, True)
-    pts     = approx.reshape(-1, 2).tolist()
-    if len(pts) > max_pts:
-        step = len(pts) / max_pts
-        pts  = [pts[int(i * step)] for i in range(max_pts)]
+    peri = cv2.arcLength(contour, True)
+    epsilon_factor = 0.001
+    
+    while True:
+        epsilon = epsilon_factor * peri
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        if len(approx) <= max_pts or epsilon_factor > 0.05:
+            break
+        epsilon_factor *= 1.5
+        
+    pts = approx.reshape(-1, 2).tolist()
+    
     if smooth:
         pts = _smooth_pts(pts, sigma=1.5)
     return [{"x": int(p[0]), "y": int(p[1])} for p in pts]
