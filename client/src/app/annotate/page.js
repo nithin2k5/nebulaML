@@ -862,7 +862,8 @@ function AnnotationToolContent() {
     setAiStateVersion(v => v + 1);
 
     drawCanvas();
-  }, [drawCanvas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getCanvasCoordinates = (e) => {
     const canvas = canvasRef.current;
