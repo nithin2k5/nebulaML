@@ -602,24 +602,22 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
                                 preprocessing={}, augmentations={}
                             )
                             if new_version_id:
-                            version = DatasetVersionService.get_version(new_version_id)
-                            if version and version.get("yaml_path"):
-                                job_id = str(uuid.uuid4())
-                                training_jobs[job_id] = {
-                                    "status": "pending",
-                                    "config": auto_config.dict(),
-                                    "progress": 0,
-                                    "dataset_id": dataset_id,
-                                    "version_id": new_version_id,
-                                    "created_at": datetime.now().isoformat(),
-                                    "user_id": current_user["id"],
-                                    "cancel_requested": False,
-                                    "auto_triggered": True,
-                                }
-                                _persist_job(job_id)
-                                asyncio.ensure_future(
-                                    run_training(job_id, version["yaml_path"], auto_config)
-                                )
+                                version = DatasetVersionService.get_version(new_version_id)
+                                if version and version.get("yaml_path"):
+                                    job_id = str(uuid.uuid4())
+                                    training_jobs[job_id] = {
+                                        "status": "pending",
+                                        "config": auto_config.dict(),
+                                        "progress": 0,
+                                        "dataset_id": dataset_id,
+                                        "version_id": new_version_id,
+                                        "created_at": datetime.now().isoformat(),
+                                        "user_id": current_user["id"],
+                                        "cancel_requested": False,
+                                        "model_type": get_backend(auto_config.model_name)
+                                    }
+                                    _persist_job(job_id)
+                                    background_tasks.add_task(run_training, job_id, version["yaml_path"], auto_config)
                                 logger.info(f"Auto-retrain job {job_id} queued for dataset {dataset_id}")
                     except Exception as train_err:
                         logger.error(f"Auto-retrain setup failed: {train_err}")
