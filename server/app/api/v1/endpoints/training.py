@@ -159,12 +159,14 @@ class DatasetTrainingRequest(BaseModel):
 class ExportAndTrainRequest(BaseModel):
     dataset_id: str
     config: TrainingConfig
+    force: bool = False
 
 class GenerateVersionRequest(BaseModel):
     dataset_id: str
     name: str = "Version 1"
     preprocessing: Dict[str, Any] = {}
     augmentations: Dict[str, Any] = {}
+    force: bool = False
 
 class AutoRetrainConfig(BaseModel):
     dataset_id: str
@@ -191,12 +193,22 @@ async def generate_dataset_version(
     require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
 
     engine = VersioningEngine()
-    version_id = engine.generate_version(
-        dataset_id=request.dataset_id,
-        name=request.name,
-        preprocessing=request.preprocessing,
-        augmentations=request.augmentations
-    )
+    try:
+        from app.services.versioning import DatasetDriftError
+        version_id = engine.generate_version(
+            dataset_id=request.dataset_id,
+            name=request.name,
+            preprocessing=request.preprocessing,
+            augmentations=request.augmentations,
+            force=request.force
+        )
+    except DatasetDriftError as e:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(e), "diff_summary": e.diff_summary}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     if not version_id:
         raise HTTPException(status_code=500, detail="Failed to generate dataset version")
@@ -955,12 +967,20 @@ async def export_and_train(
         name = f"Auto-Train v{version_num}"
         
         try:
+            from app.services.versioning import DatasetDriftError
             engine = VersioningEngine()
             new_version_id = engine.generate_version(
                 dataset_id=request.dataset_id,
                 name=name,
                 preprocessing={},
-                augmentations=request.config.augmentations or {}
+                augmentations=request.config.augmentations or {},
+                force=request.force
+            )
+        except DatasetDriftError as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=409,
+                content={"detail": str(e), "diff_summary": e.diff_summary}
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate dataset version for training: {str(e)}")

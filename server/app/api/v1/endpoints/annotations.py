@@ -587,15 +587,21 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
                             epochs=50, batch_size=16, img_size=640,
                             model_name="yolov8n.pt", patience=20, strict_epochs=False
                         )
-                        engine = VersioningEngine()
-                        versions = DatasetVersionService.list_dataset_versions(dataset_id)
-                        version_num = len(versions) + 1
-                        new_version_id = engine.generate_version(
-                            dataset_id=dataset_id,
-                            name=f"Auto-Retrain v{version_num}",
-                            preprocessing={}, augmentations={}
-                        )
-                        if new_version_id:
+                        
+                        from app.services.preflight import PreflightPipeline
+                        preflight_result = PreflightPipeline.run_all(dataset_id)
+                        if not preflight_result.get("can_train"):
+                            logger.warning(f"Auto-retrain for {dataset_id} aborted due to preflight blocking failures.")
+                        else:
+                            engine = VersioningEngine()
+                            versions = DatasetVersionService.list_dataset_versions(dataset_id)
+                            version_num = len(versions) + 1
+                            new_version_id = engine.generate_version(
+                                dataset_id=dataset_id,
+                                name=f"Auto-Retrain v{version_num}",
+                                preprocessing={}, augmentations={}
+                            )
+                            if new_version_id:
                             version = DatasetVersionService.get_version(new_version_id)
                             if version and version.get("yaml_path"):
                                 job_id = str(uuid.uuid4())

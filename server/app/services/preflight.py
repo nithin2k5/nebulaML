@@ -32,6 +32,15 @@ class PreflightPipeline:
     
     @staticmethod
     def run_all(dataset_id: str) -> Dict[str, Any]:
+        from app.services.dataset_manifest import prepare_splits, compute_manifest, PreflightResultService
+        import datetime
+        
+        # 1. Ensure splits are explicitly assigned before Stage D
+        prepare_splits(dataset_id)
+        
+        # 2. Compute manifest hash
+        manifest = compute_manifest(dataset_id)
+        
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset:
             raise ValueError(f"Dataset {dataset_id} not found")
@@ -65,15 +74,21 @@ class PreflightPipeline:
         blockers = [r for r in reports if r['severity'] == 'blocking']
         warnings = [r for r in reports if r['severity'] == 'warning']
         
-        return {
+        result = {
             "success": True,
             "dataset_id": dataset_id,
             "annotated_images": len(annotated_images),
             "reports": reports,
             "blockers": blockers,
             "warnings": warnings,
-            "can_train": len(blockers) == 0
+            "can_train": len(blockers) == 0,
+            "manifest_hash": manifest["manifest_hash"],
+            "computed_at": datetime.datetime.now().isoformat()
         }
+        
+        PreflightResultService.save_result(dataset_id, result)
+        
+        return result
 
     @staticmethod
     def _extract_data(dataset_id: str, annotated_images: List[Dict]) -> Dict[str, Any]:
