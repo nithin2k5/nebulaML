@@ -74,6 +74,10 @@ class YOLOTrainer:
         if on_train_epoch_end:
             self.model.add_callback('on_train_epoch_end', on_train_epoch_end)
 
+        on_train_batch_end = kwargs.pop('on_train_batch_end', None)
+        if on_train_batch_end:
+            self.model.add_callback('on_train_batch_end', on_train_batch_end)
+
         # Respect caller-supplied device; fall back to auto-detected device
         device = kwargs.pop('device', self.device)
 
