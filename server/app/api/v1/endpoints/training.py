@@ -440,10 +440,13 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             
         def batch_end_callback(trainer_obj):
             try:
-                # Check cancellation every batch to avoid long waits for large images/batches
                 if job_id in training_jobs and training_jobs[job_id].get("cancel_requested"):
-                    trainer_obj.stop = True
+                    from app.services.trainer import TrainingCancelledException
+                    raise TrainingCancelledException("Training cancelled by user")
             except Exception as e:
+                from app.services.trainer import TrainingCancelledException
+                if isinstance(e, TrainingCancelledException):
+                    raise
                 logger.error(f"Error in batch_end_callback: {e}")
 
         def epoch_end_callback(trainer_obj):
@@ -462,64 +465,91 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
                     if metrics:
                         training_jobs[job_id]["metrics"] = metrics
                     if training_jobs[job_id].get("cancel_requested"):
-                        trainer_obj.stop = True
+                        from app.services.trainer import TrainingCancelledException
+                        raise TrainingCancelledException("Training cancelled by user")
                     _persist_job(job_id)
             except Exception as e:
+                from app.services.trainer import TrainingCancelledException
+                if isinstance(e, TrainingCancelledException):
+                    raise
                 logger.error(f"Error in training callback: {e}")
                 
         train_params["on_train_epoch_end"] = epoch_end_callback
         train_params["on_train_batch_end"] = batch_end_callback
+        train_params["job_info"] = training_jobs[job_id]
         
         logger.info(f"Training parameters: {train_params}")
         results = await asyncio.to_thread(trainer.train, **train_params)
+        
+        # Task 1: increment weights_version
+        training_jobs[job_id]["weights_version"] = training_jobs[job_id].get("weights_version", 0) + 1
 
-        if training_jobs[job_id].get("cancel_requested"):
-            upd = {
-                "status": "cancelled",
-                "progress": training_jobs[job_id].get("progress", 0),
-                "current_epoch": training_jobs[job_id].get("current_epoch", 0),
-                "cancelled_at": datetime.now().isoformat(),
-            }
-            if isinstance(results, dict):
-                if results.get("model_path"):
-                    upd["model_path"] = results.get("model_path", "")
-                if results.get("metrics"):
-                    upd["metrics"] = results.get("metrics", {})
-            training_jobs[job_id].update(upd)
-            _persist_job(job_id)
-            logger.info(f"Training job {job_id} stopped by user")
-            return
 
-        training_jobs[job_id].update({
-            "status": "completed",
-            "progress": 100,
-            "current_epoch": config.epochs,
-            "results": results,
-            "model_path": results.get("model_path", "") if isinstance(results, dict) else "",
-            "metrics": results.get("metrics", {}) if isinstance(results, dict) else {},
-            "per_class_metrics": results.get("per_class_metrics", []) if isinstance(results, dict) else [],
-            "confusion_matrix_path": results.get("confusion_matrix_path") if isinstance(results, dict) else None,
-            "completed_at": datetime.now().isoformat(),
-        })
-        _persist_job(job_id)
-        logger.info(f"Training job {job_id} completed successfully")
+
+        final_status = "completed"
         
     except Exception as e:
-        logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
-        if training_jobs.get(job_id, {}).get("cancel_requested"):
+        from app.services.trainer import TrainingCancelledException
+        if isinstance(e, TrainingCancelledException):
+            logger.info(f"Training job {job_id} cancelled by user")
+            final_status = "cancelled"
+        else:
+            logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
+            final_status = "failed"
+            error_msg = str(e)
+            
+    finally:
+        # Task 3: Ensure GPU memory is released before the job slot is freed
+        if 'trainer' in locals() and hasattr(trainer, 'model'):
+            del trainer.model
+        if 'trainer' in locals():
+            del trainer
+            
+        import torch
+        import gc
+        gc.collect()
+        
+        mem_before = 0
+        mem_after = 0
+        if torch.cuda.is_available():
+            mem_before = torch.cuda.memory_allocated()
+            torch.cuda.empty_cache()
+            mem_after = torch.cuda.memory_allocated()
+            logger.info(f"GPU memory cleanup (CUDA): {mem_before} -> {mem_after} bytes")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            logger.info("GPU memory cleanup (MPS) completed")
+            
+        # Only after cleanup, we update the DB and mark the slot free
+        if final_status == "completed":
+            training_jobs[job_id].update({
+                "status": "completed",
+                "progress": 100,
+                "current_epoch": config.epochs,
+                "results": results,
+                "model_path": results.get("model_path", "") if isinstance(results, dict) else "",
+                "metrics": results.get("metrics", {}) if isinstance(results, dict) else {},
+                "per_class_metrics": results.get("per_class_metrics", []) if isinstance(results, dict) else [],
+                "confusion_matrix_path": results.get("confusion_matrix_path") if isinstance(results, dict) else None,
+                "completed_at": datetime.now().isoformat(),
+            })
+        elif final_status == "cancelled":
             training_jobs[job_id].update({
                 "status": "cancelled",
                 "progress": training_jobs[job_id].get("progress", 0),
                 "cancelled_at": datetime.now().isoformat(),
             })
-        else:
+        elif final_status == "failed":
             training_jobs[job_id].update({
                 "status": "failed",
-                "error": str(e),
+                "error": error_msg,
                 "progress": training_jobs[job_id].get("progress", 0),
                 "failed_at": datetime.now().isoformat(),
             })
+            
         _persist_job(job_id)
+        if final_status == "completed":
+            logger.info(f"Training job {job_id} completed successfully")
 
 @router.get("/status/{job_id}")
 async def get_training_status(job_id: str, current_user: dict = Depends(get_current_user)):
