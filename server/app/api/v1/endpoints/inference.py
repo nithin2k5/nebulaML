@@ -24,11 +24,48 @@ _RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
 _MAX_INFERENCE_SIZE = 10 * 1024 * 1024
 
 
-@lru_cache(maxsize=3)
+import time
+
+class ModelCache:
+    """Production model cache sized by approximate memory budget."""
+    def __init__(self, max_models: int = 10):
+        self.max_models = max_models
+        self.cache = {}
+        self.access_times = {}
+
+    def get(self, model_path: str, model_type: str = "yolo"):
+        # We use file modified time to detect retrains (stale weights)
+        try:
+            mtime = os.path.getmtime(model_path)
+        except OSError:
+            mtime = 0
+            
+        cache_key = f"{model_path}_{mtime}"
+        
+        # Invalidate old keys for the same path
+        keys_to_delete = [k for k in self.cache.keys() if k.startswith(model_path + "_") and k != cache_key]
+        for k in keys_to_delete:
+            del self.cache[k]
+            del self.access_times[k]
+            
+        if cache_key not in self.cache:
+            if len(self.cache) >= self.max_models:
+                # Evict LRU
+                oldest_key = min(self.access_times.keys(), key=lambda k: self.access_times[k])
+                del self.cache[oldest_key]
+                del self.access_times[oldest_key]
+                
+            from app.services.trainer_factory import create_inference
+            self.cache[cache_key] = create_inference(model_path, model_type)
+            
+        self.access_times[cache_key] = time.time()
+        return self.cache[cache_key]
+
+_model_cache = ModelCache(max_models=10)
+
 def get_inference_model(model_path: str, model_type: str = "yolo"):
-    """Load and cache up to 3 models in memory for fast swapping"""
-    from app.services.trainer_factory import create_inference
-    return create_inference(model_path, model_type)
+    """Load and cache models in memory for fast swapping"""
+    return _model_cache.get(model_path, model_type)
 
 
 import logging

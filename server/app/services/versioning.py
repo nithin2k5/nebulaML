@@ -12,6 +12,13 @@ import shutil
 
 from app.services.database import DatasetService, DatasetVersionService, AnnotationService
 
+class DatasetDriftError(Exception):
+    def __init__(self, message: str, diff_summary: Dict[str, Any]):
+        super().__init__(message)
+        self.diff_summary = diff_summary
+
+PREFLIGHT_TTL_SECONDS = 3600  # 1 hour
+
 class VersioningEngine:
     """
     Engine to handle generation of Roboflow-style dataset versions,
@@ -48,14 +55,46 @@ class VersioningEngine:
             
         return A.Compose(transforms, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
-    def generate_version(self, dataset_id: str, name: str, preprocessing: Dict, augmentations: Dict, split_ratio: Dict = None) -> Optional[str]:
+    def generate_version(self, dataset_id: str, name: str, preprocessing: Dict, augmentations: Dict, split_ratio: Dict = None, force: bool = False) -> Optional[str]:
         """
         Takes the base dataset, applies preprocessing and augmentations, 
         and saves an immutable YOLO-format folder for training.
         """
-        if split_ratio is None:
-            split_ratio = {"train": 0.8, "val": 0.1, "test": 0.1}
+        from app.services.dataset_manifest import compute_manifest, PreflightResultService
+        import datetime
+        import logging
+        logger = logging.getLogger(__name__)
+
+        current_manifest = compute_manifest(dataset_id)
+        last_result = PreflightResultService.get_latest(dataset_id)
+        
+        exported_without_current_preflight = False
+        
+        if not last_result:
+            raise ValueError("No preflight on record, run preflight before exporting.")
             
+        computed_at = datetime.datetime.fromisoformat(last_result.get("computed_at"))
+        now = datetime.datetime.now()
+        age_seconds = (now - computed_at).total_seconds()
+        
+        is_stale = age_seconds > PREFLIGHT_TTL_SECONDS
+        is_drifted = last_result.get("manifest_hash") != current_manifest["manifest_hash"]
+        
+        if is_stale or is_drifted:
+            if not force:
+                diff_summary = {
+                    "is_stale": is_stale,
+                    "is_drifted": is_drifted,
+                    "age_seconds": age_seconds,
+                    "last_hash": last_result.get("manifest_hash"),
+                    "current_hash": current_manifest["manifest_hash"]
+                }
+                msg = "Dataset drift detected: data has changed since last preflight." if is_drifted else "Preflight result is stale (older than 1 hour)."
+                raise DatasetDriftError(msg, diff_summary)
+            else:
+                logger.warning(f"Forcing export for {dataset_id} despite drift/staleness.")
+                exported_without_current_preflight = True
+
         dataset = DatasetService.get_dataset(dataset_id)
         if not dataset: return None
         
@@ -64,6 +103,9 @@ class VersioningEngine:
         if not annotated_images:
             raise ValueError("No annotated images found in the dataset. Please annotate some images before generating a version.")
         
+        if exported_without_current_preflight:
+            augmentations["_exported_without_current_preflight"] = True
+
         # 1. Register Version in DB
         versions_list = DatasetVersionService.list_dataset_versions(dataset_id)
         version_num = len(versions_list) + 1
@@ -88,16 +130,16 @@ class VersioningEngine:
         pipeline = self._build_augmentation_pipeline(preprocessing, augmentations)
         images = dataset['images']
         
-        # Deterministic split: seed from dataset_id so same dataset always
-        # produces the same train/val/test partition across version regenerations.
-        seed = int(hashlib.md5(dataset_id.encode()).hexdigest(), 16) % (2 ** 31)
-        rng = np.random.default_rng(seed)
         images = list(images)
-        rng.shuffle(images)
-        n_train = int(len(images) * split_ratio['train'])
-        n_val = int(len(images) * split_ratio['val'])
+        # We now rely entirely on the DB's explicitly assigned splits
+        splits = [img.get('split', 'train') for img in images]
         
-        splits = ['train'] * n_train + ['val'] * n_val + ['test'] * (len(images) - n_train - n_val)
+        
+        aug_data = {
+            "corrupt_images": [],
+            "annotations": {},
+            "image_dims": {}
+        }
         
         for img_data, split in zip(images, splits):
             # Only process images that are actually annotated
@@ -169,12 +211,21 @@ class VersioningEngine:
                 out_lbl_path = version_dir / split / 'labels' / out_img_name.replace('.jpg', '.txt')
                 
                 db_boxes = []
+                # Reconstruct pixel coords for Stage A validation
+                pixel_boxes = []
                 with open(out_lbl_path, 'w') as f:
                     for bbox, label in zip(processed_bboxes, processed_labels):
                         f.write(f"{label} {bbox[0]:.6f} {bbox[1]:.6f} {bbox[2]:.6f} {bbox[3]:.6f}\n")
                         db_boxes.append({
                             "class_id": label,
                             "bbox_normalized": [bbox[0], bbox[1], bbox[2], bbox[3]]
+                        })
+                        # Convert YOLO normalized back to top-left pixel format
+                        cx, cy, bw, bh = bbox[0], bbox[1], bbox[2], bbox[3]
+                        px = (cx - bw / 2.0) * w
+                        py = (cy - bh / 2.0) * h
+                        pixel_boxes.append({
+                            "x": px, "y": py, "width": bw * w, "height": bh * h
                         })
                 
                 # Store Processed Image record in immutable DB snapshot
@@ -184,10 +235,21 @@ class VersioningEngine:
                     out_img_name, str(out_img_path), 
                     w, h, split, db_boxes
                 )
+                
+                # Record for post-aug validation
+                aug_data["image_dims"][unique_img_id] = (w, h)
+                aug_data["annotations"][unique_img_id] = pixel_boxes
                         
             except Exception as e:
                 print(f"Error processing image {img_data['id']}: {e}")
                 continue
+
+        # Post-augmentation re-validation (Stage A)
+        from app.services.preflight import PreflightPipeline
+        aug_reports = PreflightPipeline._stage_a_structural(aug_data)
+        aug_blockers = [r for r in aug_reports if r['severity'] == 'blocking']
+        if aug_blockers:
+            raise DatasetDriftError("Post-augmentation structural validation failed (e.g., degenerate box created).", {"blockers": aug_blockers})
 
         # 4. Generate data.yaml for this specific version
         yaml_path = version_dir / 'data.yaml'

@@ -38,12 +38,12 @@ def _ensure_jobs_loaded():
     if not _jobs_loaded:
         try:
             persisted = TrainingJobService.load_all_jobs()
-            # Mark any jobs that were left in 'running'/'pending' state as 'failed'
-            # — they were interrupted by a server restart and will never complete.
+            # On startup, reconcile: any job marked running in the DB gets marked failed: orphaned_on_restart.
+            # (In a multi-process setup, we would check if the PID is still alive here.)
             for jid, jdata in persisted.items():
                 if jdata.get("status") in ("running", "pending"):
                     jdata["status"] = "failed"
-                    jdata["error"] = "Server restarted while job was in progress"
+                    jdata["error"] = "orphaned_on_restart"
                     try:
                         TrainingJobService.upsert_job(jid, jdata)
                     except Exception:
@@ -159,12 +159,14 @@ class DatasetTrainingRequest(BaseModel):
 class ExportAndTrainRequest(BaseModel):
     dataset_id: str
     config: TrainingConfig
+    force: bool = False
 
 class GenerateVersionRequest(BaseModel):
     dataset_id: str
     name: str = "Version 1"
     preprocessing: Dict[str, Any] = {}
     augmentations: Dict[str, Any] = {}
+    force: bool = False
 
 class AutoRetrainConfig(BaseModel):
     dataset_id: str
@@ -191,12 +193,22 @@ async def generate_dataset_version(
     require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
 
     engine = VersioningEngine()
-    version_id = engine.generate_version(
-        dataset_id=request.dataset_id,
-        name=request.name,
-        preprocessing=request.preprocessing,
-        augmentations=request.augmentations
-    )
+    try:
+        from app.services.versioning import DatasetDriftError
+        version_id = engine.generate_version(
+            dataset_id=request.dataset_id,
+            name=request.name,
+            preprocessing=request.preprocessing,
+            augmentations=request.augmentations,
+            force=request.force
+        )
+    except DatasetDriftError as e:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(e), "diff_summary": e.diff_summary}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
     if not version_id:
         raise HTTPException(status_code=500, detail="Failed to generate dataset version")
@@ -426,6 +438,14 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         if config.augmentations:
             train_params["augmentations"] = config.augmentations
             
+        def batch_end_callback(trainer_obj):
+            try:
+                # Check cancellation every batch to avoid long waits for large images/batches
+                if job_id in training_jobs and training_jobs[job_id].get("cancel_requested"):
+                    trainer_obj.stop = True
+            except Exception as e:
+                logger.error(f"Error in batch_end_callback: {e}")
+
         def epoch_end_callback(trainer_obj):
             try:
                 epoch = trainer_obj.epoch + 1
@@ -448,6 +468,7 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
                 logger.error(f"Error in training callback: {e}")
                 
         train_params["on_train_epoch_end"] = epoch_end_callback
+        train_params["on_train_batch_end"] = batch_end_callback
         
         logger.info(f"Training parameters: {train_params}")
         results = await asyncio.to_thread(trainer.train, **train_params)
@@ -669,97 +690,18 @@ async def get_training_metrics(job_id: str, current_user: dict = Depends(get_cur
 @router.get("/preflight/{dataset_id}")
 async def preflight_check(dataset_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Run pre-flight validation before training.
-    Returns warnings (informational) and blockers (prevent training).
+    Run pre-flight validation before training using the new pipeline stages.
     """
-    warnings = []
-    blockers = []
-    
     try:
-        analysis = DatasetAnalyzer.analyze_dataset(dataset_id)
-        
-        # Check class balance — warn if any class has 10x more than another
-        if analysis.class_frequency:
-            counts = list(analysis.class_frequency.values())
-            if len(counts) > 1:
-                max_count = max(counts)
-                min_count = min(counts)
-                if min_count > 0 and max_count / min_count >= 10:
-                    most = max(analysis.class_frequency, key=analysis.class_frequency.get)
-                    least = min(analysis.class_frequency, key=analysis.class_frequency.get)
-                    warnings.append({
-                        "type": "class_imbalance",
-                        "message": f"Severe class imbalance: '{most}' has {max_count} annotations vs '{least}' with {min_count}.",
-                        "suggestion": "Consider oversampling the minority class, using class weights, or collecting more data for underrepresented classes."
-                    })
-                elif min_count > 0 and max_count / min_count >= 3:
-                    warnings.append({
-                        "type": "class_imbalance",
-                        "message": f"Moderate class imbalance detected (ratio {max_count/min_count:.1f}x).",
-                        "suggestion": "Enable mosaic and mixup augmentations to help with class balance."
-                    })
-        
-        # Check corrupt images
-        if analysis.corrupt_images:
-            blockers.append({
-                "type": "corrupt_images",
-                "message": f"{len(analysis.corrupt_images)} corrupt image(s) detected.",
-                "files": analysis.corrupt_images[:10],
-                "suggestion": "Remove or re-upload these images before training."
-            })
-        
-        # Check minimum annotated images
-        if analysis.annotated_images < 5:
-            blockers.append({
-                "type": "insufficient_data",
-                "message": f"Only {analysis.annotated_images} annotated images. Minimum 5 required.",
-                "suggestion": "Annotate more images before starting training."
-            })
-        elif analysis.annotated_images < 20:
-            warnings.append({
-                "type": "low_data",
-                "message": f"Only {analysis.annotated_images} annotated images. Results may be unreliable.",
-                "suggestion": "Consider annotating at least 50+ images per class for better results."
-            })
-        
-        # Check split distribution
-        train_ratio = analysis.split_ratios.get("train", 0)
-        val_ratio = analysis.split_ratios.get("val", 0)
-        if train_ratio > 0 and val_ratio == 0:
-            warnings.append({
-                "type": "no_validation_split",
-                "message": "No validation split detected. Model performance cannot be evaluated.",
-                "suggestion": "Assign some images to the 'val' split, or use the auto-split feature."
-            })
-        
-        # Check data leakage
-        if analysis.data_leakage_detected:
-            warnings.append({
-                "type": "data_leakage",
-                "message": "Duplicate images found across train/val splits.",
-                "suggestion": "Remove duplicates to prevent inflated metrics."
-            })
-        
-        # Overall quality
-        quality_score = analysis.overall_quality_score
-        
-        return {
-            "success": True,
-            "dataset_id": dataset_id,
-            "quality_score": round(quality_score, 1),
-            "annotated_images": analysis.annotated_images,
-            "total_annotations": analysis.total_annotations,
-            "class_frequency": analysis.class_frequency,
-            "warnings": warnings,
-            "blockers": blockers,
-            "can_train": len(blockers) == 0 
-        }
+        from app.services.preflight import PreflightPipeline
+        return PreflightPipeline.run_all(dataset_id)
     except Exception as e:
         logger.error(f"Preflight check failed: {e}")
         return {
             "success": False,
+            "reports": [],
             "warnings": [],
-            "blockers": [{"type": "error", "message": str(e), "suggestion": "Check server logs."}],
+            "blockers": [{"stage": "System", "check": "execution_error", "severity": "blocking", "message": str(e)}],
             "can_train": False
         }
 
@@ -1025,12 +967,20 @@ async def export_and_train(
         name = f"Auto-Train v{version_num}"
         
         try:
+            from app.services.versioning import DatasetDriftError
             engine = VersioningEngine()
             new_version_id = engine.generate_version(
                 dataset_id=request.dataset_id,
                 name=name,
                 preprocessing={},
-                augmentations=request.config.augmentations or {}
+                augmentations=request.config.augmentations or {},
+                force=request.force
+            )
+        except DatasetDriftError as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=409,
+                content={"detail": str(e), "diff_summary": e.diff_summary}
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate dataset version for training: {str(e)}")
