@@ -1,8 +1,12 @@
+import ultralytics
 from ultralytics import YOLO
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 import torch
+
+class TrainingCancelledException(Exception):
+    pass
 
 class YOLOTrainer:
     """YOLO model training handler"""
@@ -14,13 +18,9 @@ class YOLOTrainer:
         Args:
             model_name: Base model to start training from
         """
+        self.model_name = model_name
         self.model = YOLO(model_name)
-        if torch.cuda.is_available():
-            self.device = 'cuda'
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            self.device = 'mps'
-        else:
-            self.device = 'cpu'
+        # Task 4: Move device detection to be computed per-job inside train()
         
     def train(
         self,
@@ -31,6 +31,7 @@ class YOLOTrainer:
         name: str = "yolo_custom",
         strict_epochs: bool = False,
         augmentations: Optional[Dict[str, Any]] = None,
+        job_info: Optional[Dict[str, Any]] = None, # Used to update training_jobs with detected device
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -44,6 +45,7 @@ class YOLOTrainer:
             name: Training run name
             strict_epochs: If True, enforce exact epoch count (disable early stopping)
             augmentations: Dictionary of augmentation parameters (mosaic, mixup, etc.)
+            job_info: Dictionary containing the job_id (to update device_used)
             **kwargs: Additional training arguments
             
         Returns:
@@ -54,6 +56,20 @@ class YOLOTrainer:
             raise ValueError(f"Epochs must be at least 1, got {epochs}")
         if epochs > 1000:
             raise ValueError(f"Epochs cannot exceed 1000, got {epochs}")
+            
+        # Task 4: Per-job device detection
+        device = kwargs.pop('device', None)
+        if not device:
+            if torch.cuda.is_available():
+                device = 'cuda'
+            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                device = 'mps'
+            else:
+                device = 'cpu'
+        
+        self.device = device
+        if job_info is not None:
+            job_info['device_used'] = self.device
         
         # If strict mode, disable early stopping by setting patience very high
         if strict_epochs:
@@ -78,9 +94,6 @@ class YOLOTrainer:
         if on_train_batch_end:
             self.model.add_callback('on_train_batch_end', on_train_batch_end)
 
-        # Respect caller-supplied device; fall back to auto-detected device
-        device = kwargs.pop('device', self.device)
-
         results = self.model.train(
             data=data_yaml,
             epochs=epochs,
@@ -90,16 +103,22 @@ class YOLOTrainer:
             device=device,
             **kwargs
         )
-        # Export the best model to ONNX for faster inference
+        
         best_model_path = str(results.save_dir / "weights" / "best.pt")
-        try:
-            best_model = YOLO(best_model_path)
-            best_model.export(format="onnx")
-        except Exception as e:
-            # Non-fatal if export fails
-            print(f"ONNX export failed: {e}")
-            pass
-            
+        
+        # Task 5: Only export ONNX if we haven't raised TrainingCancelledException
+        # Note: If train() raises an exception, we won't reach this code. 
+        # But if the user didn't request cancellation or we completed, we export.
+        onnx_export_status = "skipped"
+        if Path(best_model_path).exists() and Path(best_model_path).stat().st_size > 0:
+            try:
+                best_model = YOLO(best_model_path)
+                best_model.export(format="onnx")
+                onnx_export_status = "success"
+            except Exception as e:
+                print(f"ONNX export failed: {e}")
+                onnx_export_status = "failed"
+                
         # Extract per-class metrics if available
         per_class_metrics = []
         try:
@@ -145,6 +164,7 @@ class YOLOTrainer:
             "epochs_completed": epochs_completed,
             "model_path": best_model_path,
             "results_dir": str(results.save_dir),
+            "onnx_export_status": onnx_export_status,
             "metrics": {
                 "map50": float(results.results_dict.get("metrics/mAP50(B)", 0)),
                 "map50-95": float(results.results_dict.get("metrics/mAP50-95(B)", 0)),

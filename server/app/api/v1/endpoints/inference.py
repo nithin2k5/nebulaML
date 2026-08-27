@@ -33,15 +33,12 @@ class ModelCache:
         self.cache = {}
         self.access_times = {}
 
-    def get(self, model_path: str, model_type: str = "yolo"):
-        # We use file modified time to detect retrains (stale weights)
-        try:
-            mtime = os.path.getmtime(model_path)
-        except OSError:
-            mtime = 0
+    def get(self, model_path: str, model_type: str = "yolo", version: str = None):
+        if version is not None:
+            cache_key = f"{model_path}_{version}"
+        else:
+            cache_key = model_path
             
-        cache_key = f"{model_path}_{mtime}"
-        
         # Invalidate old keys for the same path
         keys_to_delete = [k for k in self.cache.keys() if k.startswith(model_path + "_") and k != cache_key]
         for k in keys_to_delete:
@@ -63,21 +60,24 @@ class ModelCache:
 
 _model_cache = ModelCache(max_models=10)
 
-def get_inference_model(model_path: str, model_type: str = "yolo"):
+def get_inference_model(model_path: str, model_type: str = "yolo", version: str = None):
     """Load and cache models in memory for fast swapping"""
-    return _model_cache.get(model_path, model_type)
+    return _model_cache.get(model_path, model_type, version)
 
 
 import logging
 logger = logging.getLogger(__name__)
 
-def _get_job_model_type(job_id: str) -> str:
-    """Get the model backend type for a training job."""
+def _get_job_info(job_id: str) -> dict:
+    """Get job information."""
     from app.api.v1.endpoints.training import training_jobs, _ensure_jobs_loaded
     _ensure_jobs_loaded()
-    job = training_jobs.get(job_id, {})
-    model_type = job.get("model_type", "yolo")
-    return model_type
+    return training_jobs.get(job_id, {})
+
+def _get_job_model_type(job_id: str) -> str:
+    """Get the model backend type for a training job."""
+    job = _get_job_info(job_id)
+    return job.get("model_type", "yolo")
 
 def _resolve_job_weights(job_id: str) -> str:
     """Return the absolute path to the best weights for a training job.
@@ -136,16 +136,19 @@ async def predict_image(
     """
     try:
         # Determine model path and type
+        version = None
         if job_id:
             model_path = _resolve_job_weights(job_id)
             model_type = _get_job_model_type(job_id)
+            job = _get_job_info(job_id)
+            version = str(job.get("weights_version", ""))
         else:
             from app.services.model_registry import get_backend
             model_path = model_name or "yolov8n.pt"
             model_type = get_backend(model_path)
 
         # Get cached model
-        inference_model = get_inference_model(model_path, model_type)
+        inference_model = get_inference_model(model_path, model_type, version)
 
         # Enforce file size limit
         content = await file.read()
@@ -205,15 +208,18 @@ async def predict_batch(
 
     try:
         # Resolve model path and type (same logic as /predict)
+        version = None
         if job_id:
             model_path = _resolve_job_weights(job_id)
             model_type = _get_job_model_type(job_id)
+            job = _get_job_info(job_id)
+            version = str(job.get("weights_version", ""))
         else:
             from app.services.model_registry import get_backend
             model_path = model_name or "yolov8n.pt"
             model_type = get_backend(model_path)
             
-        inference_model = get_inference_model(model_path, model_type)
+        inference_model = get_inference_model(model_path, model_type, version)
         
         all_results = []
         images = []
