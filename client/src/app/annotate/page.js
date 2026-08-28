@@ -1035,7 +1035,8 @@ function AnnotationToolContent() {
             aiCurrentPolygonRef.current = [{x, y}];
           } else {
             const startPt = aiCurrentPolygonRef.current[0];
-            if (startPt && Math.hypot(x - startPt.x, y - startPt.y) < 10 / scale && aiCurrentPolygonRef.current.length >= 3) {
+            const currentScale = scaleRef.current || 1;
+            if (startPt && Math.hypot(x - startPt.x, y - startPt.y) < 10 / currentScale && aiCurrentPolygonRef.current.length >= 3) {
               aiIsDrawingPolygonRef.current = false;
               const pts = aiCurrentPolygonRef.current;
               const minX = Math.min(...pts.map(p => p.x));
