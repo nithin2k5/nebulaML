@@ -135,7 +135,7 @@ function AnnotationToolContent() {
   const animFrameRef = useRef(null);   // rAF handle for throttling mouse-move redraws
   const currentPointsRef = useRef([]); // sync with polygon clicks — state updates async; 2nd click used to see stale []
 
-  const [aiSubTool, setAiSubTool] = useState('box'); // 'box' | 'fg' | 'bg'
+  const [aiSubTool, setAiSubTool] = useState('polygon'); // 'box' | 'polygon' | 'fg' | 'bg'
   const [aiProcessing, setAiProcessing] = useState(false);
   const [aiStateVersion, setAiStateVersion] = useState(0);
 
@@ -143,6 +143,8 @@ function AnnotationToolContent() {
   const aiBoxStartRef = useRef(null);       // drag start point {x,y}
   const aiCurrentBoxRef = useRef(null);     // live box while mouse is dragged
   const aiIsDrawingBoxRef = useRef(false);  // true while dragging rough box
+  const aiIsDrawingPolygonRef = useRef(false);
+  const aiCurrentPolygonRef = useRef([]);     // live polygon points
   const aiPointsRef = useRef([]);           // [{x,y,type:'fg'|'bg'}] in image px
   const aiMaskPolygonRef = useRef(null);    // [{x,y}] contour from server
   const aiHistoryRef = useRef([]);          // undo stack: [{roughBox, points, maskPolygon}]
@@ -253,6 +255,9 @@ function AnnotationToolContent() {
             aiCurrentBoxRef.current = null;
             aiBoxStartRef.current = null;
             aiIsDrawingBoxRef.current = false;
+            aiIsDrawingPolygonRef.current = false;
+            aiCurrentPolygonRef.current = [];
+            cursorPosRef.current = null;
             aiPointsRef.current = [];
             aiMaskPolygonRef.current = null;
             aiHistoryRef.current = [];
@@ -260,7 +265,7 @@ function AnnotationToolContent() {
             aiHoverInsideMaskRef.current = false;
             aiRequestIdRef.current++;
             setAiStateVersion(v => v + 1);
-            setAiSubTool('box');
+            setAiSubTool('polygon');
             drawCanvas();
           } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
             setIsDrawing(false);
@@ -344,6 +349,14 @@ function AnnotationToolContent() {
             if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
           }
           break;
+        case 'l':
+        case 'L':
+          if (activeTool === 'ai') {
+            e.preventDefault();
+            setAiSubTool('polygon');
+            if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+          }
+          break;
         case 'b':
         case 'B':
           if (activeTool === 'ai' && aiMaskPolygonRef.current) {
@@ -362,6 +375,9 @@ function AnnotationToolContent() {
             aiCurrentBoxRef.current = null;
             aiBoxStartRef.current = null;
             aiIsDrawingBoxRef.current = false;
+            aiIsDrawingPolygonRef.current = false;
+            aiCurrentPolygonRef.current = [];
+            cursorPosRef.current = null;
             aiPointsRef.current = [];
             aiMaskPolygonRef.current = null;
             aiHistoryRef.current = [];
@@ -369,7 +385,7 @@ function AnnotationToolContent() {
             aiHoverInsideMaskRef.current = false;
             aiRequestIdRef.current++;
             setAiStateVersion(v => v + 1);
-            setAiSubTool('box');
+            setAiSubTool('polygon');
             if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
             drawCanvas();
           }
@@ -766,7 +782,7 @@ function AnnotationToolContent() {
     aiHistoryRef.current = [];
     aiMetadataRef.current = null;
     setAiStateVersion(v => v + 1);
-    setAiSubTool('box');
+    setAiSubTool('polygon');
 
     toast.success('Smart selection saved!');
     drawCanvas();
@@ -778,6 +794,9 @@ function AnnotationToolContent() {
     aiCurrentBoxRef.current = null;
     aiBoxStartRef.current = null;
     aiIsDrawingBoxRef.current = false;
+    aiIsDrawingPolygonRef.current = false;
+    aiCurrentPolygonRef.current = [];
+    cursorPosRef.current = null;
     aiPointsRef.current = [];
     aiMaskPolygonRef.current = null;
     aiHistoryRef.current = [];
@@ -785,7 +804,7 @@ function AnnotationToolContent() {
     aiHoverInsideMaskRef.current = false;
     aiDragVertexIdxRef.current = -1;
     aiRequestIdRef.current++;
-    setAiSubTool('box');
+    setAiSubTool('polygon');
     setAiViewMode('mask');
     setAiStateVersion(v => v + 1);
     drawCanvas();
@@ -993,16 +1012,54 @@ function AnnotationToolContent() {
         }
       }
 
-      if (aiSubTool === 'box') {
-        aiHistoryRef.current = [...aiHistoryRef.current, {
-          roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
-          points: [...aiPointsRef.current],
-          maskPolygon: aiMaskPolygonRef.current ? [...aiMaskPolygonRef.current] : null,
-          metadata: aiMetadataRef.current ? { ...aiMetadataRef.current } : null,
-        }];
-        aiBoxStartRef.current = { x, y };
-        aiCurrentBoxRef.current = null;
-        aiIsDrawingBoxRef.current = true;
+      if (aiSubTool === 'box' || aiSubTool === 'polygon') {
+        if (aiSubTool === 'box') {
+          aiHistoryRef.current = [...aiHistoryRef.current, {
+            roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+            points: [...aiPointsRef.current],
+            maskPolygon: aiMaskPolygonRef.current ? [...aiMaskPolygonRef.current] : null,
+            metadata: aiMetadataRef.current ? { ...aiMetadataRef.current } : null,
+          }];
+          aiBoxStartRef.current = { x, y };
+          aiCurrentBoxRef.current = null;
+          aiIsDrawingBoxRef.current = true;
+        } else if (aiSubTool === 'polygon') {
+          if (!aiIsDrawingPolygonRef.current) {
+            aiHistoryRef.current = [...aiHistoryRef.current, {
+              roughBox: aiRoughBoxRef.current ? { ...aiRoughBoxRef.current } : null,
+              points: [...aiPointsRef.current],
+              maskPolygon: aiMaskPolygonRef.current ? [...aiMaskPolygonRef.current] : null,
+              metadata: aiMetadataRef.current ? { ...aiMetadataRef.current } : null,
+            }];
+            aiIsDrawingPolygonRef.current = true;
+            aiCurrentPolygonRef.current = [{x, y}];
+          } else {
+            const startPt = aiCurrentPolygonRef.current[0];
+            if (startPt && Math.hypot(x - startPt.x, y - startPt.y) < 10 / scale && aiCurrentPolygonRef.current.length >= 3) {
+              aiIsDrawingPolygonRef.current = false;
+              const pts = aiCurrentPolygonRef.current;
+              const minX = Math.min(...pts.map(p => p.x));
+              const maxX = Math.max(...pts.map(p => p.x));
+              const minY = Math.min(...pts.map(p => p.y));
+              const maxY = Math.max(...pts.map(p => p.y));
+              if (maxX - minX > 10 && maxY - minY > 10) {
+                aiRoughBoxRef.current = {
+                  x1: minX, y1: minY,
+                  x2: maxX, y2: maxY,
+                };
+                aiCurrentPolygonRef.current = [];
+                cursorPosRef.current = null;
+                setAiStateVersion(v => v + 1);
+                callSmartSegment();
+              } else {
+                aiCurrentPolygonRef.current = [];
+                cursorPosRef.current = null;
+              }
+            } else {
+              aiCurrentPolygonRef.current.push({x, y});
+            }
+          }
+        }
         drawCanvas();
         return;
       }
@@ -1206,6 +1263,14 @@ function AnnotationToolContent() {
             drawCanvas();
           });
         }
+      } else if (aiIsDrawingPolygonRef.current) {
+        cursorPosRef.current = { x, y };
+        if (!animFrameRef.current) {
+          animFrameRef.current = requestAnimationFrame(() => {
+            animFrameRef.current = null;
+            drawCanvas();
+          });
+        }
       } else if (aiMaskPolygonRef.current && (aiSubTool === 'fg' || aiSubTool === 'bg')) {
         // Check for proximity to vertex handles
         const poly = aiMaskPolygonRef.current;
@@ -1255,8 +1320,8 @@ function AnnotationToolContent() {
       return;
     }
 
-    if (activeTool === 'ai' && aiSubTool === 'box') {
-      if (aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
+    if (activeTool === 'ai' && (aiSubTool === 'box' || aiSubTool === 'polygon')) {
+      if (aiSubTool === 'box' && aiIsDrawingBoxRef.current && aiBoxStartRef.current) {
         aiIsDrawingBoxRef.current = false;
         const { x, y } = getCanvasCoordinates(e);
         const startPt = aiBoxStartRef.current;
@@ -1544,8 +1609,43 @@ function AnnotationToolContent() {
 
       if (activeTool === 'ai') {
         const roughBox = aiCurrentBoxRef.current || aiRoughBoxRef.current;
+        const polygonPts = aiCurrentPolygonRef.current;
         const maskPolygon = aiMaskPolygonRef.current;
         const aiPts = aiPointsRef.current;
+
+        if (polygonPts && polygonPts.length > 0) {
+          ctx.save();
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 1.5 * scale;
+          ctx.setLineDash([5 * scale, 4 * scale]);
+          ctx.beginPath();
+          ctx.moveTo(polygonPts[0].x, polygonPts[0].y);
+          for (let i = 1; i < polygonPts.length; i++) {
+            ctx.lineTo(polygonPts[i].x, polygonPts[i].y);
+          }
+          if (aiIsDrawingPolygonRef.current && cursorPosRef.current) {
+            ctx.lineTo(cursorPosRef.current.x, cursorPosRef.current.y);
+            if (polygonPts.length >= 3 && Math.hypot(cursorPosRef.current.x - polygonPts[0].x, cursorPosRef.current.y - polygonPts[0].y) < 10 / scale) {
+              ctx.lineTo(polygonPts[0].x, polygonPts[0].y);
+            }
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          
+          polygonPts.forEach((p, idx) => {
+            ctx.beginPath();
+            if (idx === 0) {
+              ctx.arc(p.x, p.y, 3.5 * scale, 0, Math.PI * 2);
+              ctx.fillStyle = '#f97316';
+              ctx.fill();
+            } else {
+              ctx.arc(p.x, p.y, 2.5 * scale, 0, Math.PI * 2);
+              ctx.fillStyle = '#f97316';
+              ctx.fill();
+            }
+          });
+          ctx.restore();
+        }
 
         if (roughBox) {
           ctx.save();
@@ -2122,9 +2222,10 @@ function AnnotationToolContent() {
                   <div className="space-y-3" key={aiStateVersion}>
                     <p className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider px-1">Smart Selection</p>
 
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="grid grid-cols-4 gap-1.5">
                       {[
                         { id: 'box', label: 'Draw Box', icon: '⬚', key: 'D' },
+                        { id: 'polygon', label: 'Polygon', icon: '⬡', key: 'L' },
                         { id: 'fg', label: 'Foreground', icon: '+', key: 'F' },
                         { id: 'bg', label: 'Background', icon: '−', key: 'B' },
                       ].map(t => (
@@ -2158,7 +2259,7 @@ function AnnotationToolContent() {
                         <span className="text-[10px] text-orange-300">Box drawn — click foreground points to refine</span>
                       ) : (
                         <span className="text-[10px] text-gray-500">
-                          {aiSubTool === 'box' ? 'Drag a region, or switch to fg and click directly' : aiSubTool === 'fg' ? 'Left-click: foreground · Right-click: background' : 'Click outside the object to exclude'}
+                          {aiSubTool === 'box' ? 'Drag a region, or switch to fg and click directly' : aiSubTool === 'polygon' ? 'Click points to draw a polygon around the object' : aiSubTool === 'fg' ? 'Left-click: foreground · Right-click: background' : 'Click outside the object to exclude'}
                         </span>
                       )}
                     </div>
@@ -2333,7 +2434,7 @@ function AnnotationToolContent() {
                 <div className="mt-4 p-3 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-lg">
                   <h3 className="font-medium text-[11px] text-fuchsia-300 uppercase tracking-wider mb-2">Zero-Shot Annotator</h3>
                   <p className="text-[10px] text-fuchsia-200/70 mb-3 leading-tight">
-                    Powered by Vision-Language Models. Type what you want to find (e.g. "cars", "red shirt").
+                    Powered by Vision-Language Models. Type what you want to find (e.g. &quot;cars&quot;, &quot;red shirt&quot;).
                   </p>
                   <div className="flex gap-2">
                     <Input
@@ -2499,6 +2600,10 @@ function AnnotationToolContent() {
                           aiIsDrawingBoxRef.current = false;
                           aiCurrentBoxRef.current = null;
                           aiBoxStartRef.current = null;
+                          setTimeout(() => drawCanvas(), 0);
+                        }
+                        if (aiIsDrawingPolygonRef.current) {
+                          cursorPosRef.current = null;
                           setTimeout(() => drawCanvas(), 0);
                         }
                         // Reset cursor to sub-tool default on leave

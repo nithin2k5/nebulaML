@@ -274,7 +274,7 @@ export default function ProjectPage() {
                         </h1>
                         <Badge variant="outline" className="text-[10px]">{dataset.type || "DETECTION"}</Badge>
                         <span className="text-[10px] font-mono text-gray-500 ml-4 hidden md:inline">
-                            V_COUNT: {stats?.total_images || 0} // C_COUNT: {dataset.classes?.length || 0}
+                            V_COUNT: {stats?.total_images || 0} {"//"} C_COUNT: {dataset.classes?.length || 0}
                         </span>
                     </div>
                 </div>
@@ -326,7 +326,7 @@ export default function ProjectPage() {
                                 <Cpu className="w-4 h-4 animate-pulse" />
                                 <span>SYS.TRAINING_ACTIVE</span>
                             </div>
-                            <span className="text-amber-500/50 hidden md:inline">// BACKGROUND_PROCESS_RUNNING</span>
+                            <span className="text-amber-500/50 hidden md:inline">{"// BACKGROUND_PROCESS_RUNNING"}</span>
                         </div>
                         <Button
                             variant="outline"
@@ -347,7 +347,7 @@ export default function ProjectPage() {
                                 <span>SYS.TRAINING_COMPLETE</span>
                             </div>
                             {completionBanner.mAP !== null && (
-                                <span className="text-emerald-500/70 hidden md:inline">// MAP50_SCORE: {(completionBanner.mAP * 100).toFixed(1)}%</span>
+                                <span className="text-emerald-500/70 hidden md:inline">{"// MAP50_SCORE:"} {(completionBanner.mAP * 100).toFixed(1)}%</span>
                             )}
                         </div>
                         <div className="flex items-center gap-2">

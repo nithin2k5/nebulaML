@@ -185,7 +185,7 @@ export default function HomePage() {
                   onClick={() => window.open(`${API_BASE_URL}/docs`, '_blank')}
                   className="px-8 py-4 border border-white/20 hover:border-violet-500/50 hover:bg-violet-500/10 text-white font-mono font-bold text-sm uppercase transition-all flex items-center justify-center gap-2"
                 >
-                  <span>// READ_DOCS</span>
+                  <span>{"// READ_DOCS"}</span>
                 </button>
               </div>
             </div>
