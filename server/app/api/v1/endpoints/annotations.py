@@ -849,7 +849,7 @@ async def split_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
         
-    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "editor")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
 
     train_ratio = request.get("train", 0.7)
     val_ratio = request.get("val", 0.2)
