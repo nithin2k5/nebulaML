@@ -12,6 +12,19 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
+import sys
+import platform
+import ctypes
+
+if platform.system() == "Darwin":
+    # Fix for pyexpat on macOS Homebrew Python 3.14+ failing to load libexpat.1.dylib
+    brew_expat = "/opt/homebrew/opt/expat/lib/libexpat.1.dylib"
+    if os.path.exists(brew_expat):
+        try:
+            ctypes.CDLL(brew_expat)
+        except OSError:
+            pass
+
 from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration, chat
 from app.db.session import initialize_database
 from app.core.config import settings
