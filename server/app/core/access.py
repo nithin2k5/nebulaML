@@ -34,6 +34,6 @@ def require_role(dataset_id: str, user_id: int, owner_id: int, minimum: str) -> 
     if role is None or _ROLE_RANK.get(role, 0) < _ROLE_RANK.get(minimum, 99):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this dataset",
+            detail=f"Not authorized to access this dataset (requires {minimum} role or higher)",
         )
     return role
