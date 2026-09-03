@@ -153,7 +153,11 @@ export default function ProjectTest({ dataset }) {
     try {
       const formData = new FormData();
       formData.append("file", testImages[idx].file);
-      formData.append("model_name", selectedModel);
+      if (selectedModel.startsWith("job_")) {
+        formData.append("job_id", selectedModel.replace("job_", ""));
+      } else {
+        formData.append("model_name", selectedModel);
+      }
       formData.append("confidence", confidence.toString());
       formData.append("iou", iou.toString());
 
@@ -204,7 +208,11 @@ export default function ProjectTest({ dataset }) {
       const chunk = pending.slice(i, i + chunkSize);
       try {
         const formData = new FormData();
-        formData.append("model_name", selectedModel);
+        if (selectedModel.startsWith("job_")) {
+          formData.append("job_id", selectedModel.replace("job_", ""));
+        } else {
+          formData.append("model_name", selectedModel);
+        }
         formData.append("confidence", confidence.toString());
         formData.append("iou", iou.toString());
         chunk.forEach(img => formData.append("files", img.file, img.name));
