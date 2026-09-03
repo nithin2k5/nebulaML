@@ -5,6 +5,8 @@ Handles authentication, authorization, and role management
 
 import jwt
 import bcrypt
+import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List
 import os
@@ -12,7 +14,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+logger = logging.getLogger(__name__)
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # No known-value fallback: a hardcoded default would let anyone who has
+    # read this file forge valid tokens against a deployment that forgot to
+    # set SECRET_KEY. A random per-process secret fails closed instead -
+    # existing tokens/deployments must set SECRET_KEY explicitly to persist
+    # sessions across restarts.
+    SECRET_KEY = secrets.token_urlsafe(32)
+    logger.warning(
+        "SECRET_KEY is not set in the environment. Using a randomly generated "
+        "key for this process only; all existing tokens will be invalidated "
+        "on restart. Set SECRET_KEY before deploying to production."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 BCRYPT_ROUNDS = 12  # Increased for production-grade security

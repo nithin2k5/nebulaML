@@ -1,5 +1,9 @@
 import os
+import logging
+import secrets
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     """
@@ -7,7 +11,10 @@ class Settings(BaseSettings):
     Automatically reads from a `.env` file if present in the working directory.
     """
     # Define these with explicit typing for validation
-    secret_key: str = "your-super-secret-default-key-please-change-in-prod"
+    # No known-value fallback here: a hardcoded default is a publicly
+    # readable forgeable secret. See the fail-closed (random, process-local)
+    # fallback applied below when SECRET_KEY is unset.
+    secret_key: str = ""
     algorithm: str = "HS256"
     # Database Configuration (MySQL)
     db_host: str = "localhost"
@@ -37,3 +44,10 @@ class Settings(BaseSettings):
         return [orig.strip() for orig in self.cors_origins.split(",") if orig.strip()]
 
 settings = Settings()
+if not settings.secret_key:
+    settings.secret_key = secrets.token_urlsafe(32)
+    logger.warning(
+        "SECRET_KEY is not set in the environment. Using a randomly generated "
+        "key for this process only; tokens signed with it (e.g. invite links) "
+        "will stop validating on restart. Set SECRET_KEY before deploying to production."
+    )
