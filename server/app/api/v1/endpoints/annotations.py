@@ -1334,13 +1334,25 @@ async def serve_image(dataset_id: str, image_filename: str, token: Optional[str]
     Accepts auth via Bearer header OR ?token= query param so <img src> tags work.
     """
     from app.core.rbac import decode_access_token
-    if not token or not decode_access_token(token):
+    payload = decode_access_token(token) if token else None
+    if not payload:
         raise HTTPException(status_code=401, detail="Authentication required to view images")
 
-    image_path = Path(f"datasets/{dataset_id}/images/{image_filename}")
-    
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    require_role(dataset_id, payload["user_id"], db_dataset["user_id"], "viewer")
+
+    # Reject any path-traversal attempt; only a bare filename may be requested.
+    safe_filename = Path(image_filename).name
+    if safe_filename != image_filename or safe_filename in ("", ".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid image filename")
+
+    image_path = Path(f"datasets/{dataset_id}/images/{safe_filename}")
+
     if not image_path.exists():
-        raise HTTPException(status_code=404, detail=f"Image not found: {image_filename}")
+        raise HTTPException(status_code=404, detail=f"Image not found: {safe_filename}")
     
     # Determine media type based on extension
     ext = image_filename.lower().split('.')[-1]
