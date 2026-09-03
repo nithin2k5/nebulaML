@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import jwt
 from app.core.config import settings
 from app.core.email import send_project_invite_email
+from app.core.access import require_role
 
 router = APIRouter()
 
@@ -30,14 +31,8 @@ async def get_members(dataset_id: str, current_user: dict = Depends(get_current_
         if not ds:
             raise HTTPException(status_code=404, detail="Dataset not found")
             
-        is_owner = ds['user_id'] == current_user['id']
-        
-        cursor.execute("SELECT role FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, current_user['id']))
-        mem = cursor.fetchone()
-        
-        if not is_owner and not mem:
-            raise HTTPException(status_code=403, detail="Not authorized")
-            
+        require_role(dataset_id, current_user['id'], ds['user_id'], "viewer")
+
         # Get all members
         query = """
             SELECT pm.id, pm.user_id, pm.role, u.email, u.username
@@ -80,13 +75,8 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
         if not ds:
             raise HTTPException(status_code=404, detail="Dataset not found")
             
-        is_owner = ds['user_id'] == current_user['id']
-        cursor.execute("SELECT role FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, current_user['id']))
-        mem = cursor.fetchone()
-        
-        if not is_owner and (not mem or mem['role'] != 'admin'):
-            raise HTTPException(status_code=403, detail="Only owners and admins can add members")
-            
+        require_role(dataset_id, current_user['id'], ds['user_id'], "admin")
+
         # Resolve the target user by email or username
         query = req.query.strip()
         if "@" in query:
@@ -215,14 +205,10 @@ async def remove_member(dataset_id: str, user_id: int, current_user: dict = Depe
         if not ds:
             raise HTTPException(status_code=404, detail="Dataset not found")
             
-        is_owner = ds['user_id'] == current_user['id']
-        cursor.execute("SELECT role FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, current_user['id']))
-        mem = cursor.fetchone()
-        
         # can remove oneself, otherwise need admin/owner
-        if current_user['id'] != user_id and not is_owner and (not mem or mem['role'] != 'admin'):
-            raise HTTPException(status_code=403, detail="Not authorized to remove this member")
-            
+        if current_user['id'] != user_id:
+            require_role(dataset_id, current_user['id'], ds['user_id'], "admin")
+
         cursor.execute("DELETE FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, user_id))
         
         # Log activity
@@ -253,13 +239,8 @@ async def get_activity(dataset_id: str, current_user: dict = Depends(get_current
         if not ds:
             raise HTTPException(status_code=404, detail="Dataset not found")
             
-        is_owner = ds['user_id'] == current_user['id']
-        cursor.execute("SELECT role FROM project_members WHERE dataset_id = %s AND user_id = %s", (dataset_id, current_user['id']))
-        mem = cursor.fetchone()
-        
-        if not is_owner and not mem:
-            raise HTTPException(status_code=403, detail="Not authorized")
-            
+        require_role(dataset_id, current_user['id'], ds['user_id'], "viewer")
+
         query = """
             SELECT a.id, a.action, a.details, a.created_at, u.username, u.email
             FROM activity_logs a
