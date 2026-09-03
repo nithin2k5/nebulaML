@@ -263,33 +263,29 @@ async def login(request: Request, credentials: UserLogin):
         user = cursor.fetchone()
         
 
-        if not user:
-            cursor.close()
-            connection.close()
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found"
+        if user:
+            # Generate OTP only for accounts that actually exist. The
+            # response below is identical either way so the endpoint can't
+            # be used to enumerate which emails are registered.
+            otp_code = f"{random.randint(100000, 999999)}"
+            otp_expiry = datetime.now() + timedelta(minutes=10)
+
+            cursor.execute(
+                "UPDATE users SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
+                (otp_code, otp_expiry, user["id"])
             )
-            
-        # Generate OTP for all users
-        otp_code = f"{random.randint(100000, 999999)}"
-        otp_expiry = datetime.now() + timedelta(minutes=10)
-        
-        cursor.execute(
-            "UPDATE users SET verification_code = %s, verification_code_expires = %s WHERE id = %s",
-            (otp_code, otp_expiry, user["id"])
-        )
-        connection.commit()
+            connection.commit()
+
+            try:
+                send_otp_email(credentials.email, otp_code)
+            except Exception as mail_err:
+                logger.exception("send_otp_email failed after OTP was stored: %s", mail_err)
+
         cursor.close()
         connection.close()
 
-        try:
-            send_otp_email(credentials.email, otp_code)
-        except Exception as mail_err:
-            logger.exception("send_otp_email failed after OTP was stored: %s", mail_err)
-
         return {
-            "message": "OTP sent to email",
+            "message": "If an account exists for this email, an OTP has been sent",
             "email": credentials.email
         }
 
