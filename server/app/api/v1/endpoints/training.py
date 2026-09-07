@@ -76,6 +76,22 @@ def _persist_job(job_id: str):
         logger.warning(f"Could not persist job {job_id}: {e}")
 
 
+def _assert_capacity():
+    """Reject the request if the training queue is full.
+
+    Counts pending as well as running: a job sits in 'pending' between
+    registration and the background task picking it up, so counting only
+    'running' lets concurrent requests slip past the limit.
+    """
+    active = sum(1 for j in training_jobs.values() if j.get("status") in ("running", "pending"))
+    if active >= MAX_CONCURRENT_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many training jobs in progress ({active}/{MAX_CONCURRENT_JOBS}). "
+                   "Wait for one to finish before starting another."
+        )
+
+
 def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
     uid = job.get("user_id")
     if uid is None:
@@ -252,13 +268,7 @@ async def start_training(
     ):
         raise HTTPException(status_code=400, detail="Uploaded file must be a YAML file")
 
-    # Enforce concurrency limit
-    active = sum(1 for j in training_jobs.values() if j.get("status") == "running")
-    if active >= MAX_CONCURRENT_JOBS:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Too many training jobs running ({active}/{MAX_CONCURRENT_JOBS}). Wait for one to finish before starting another."
-        )
+    _assert_capacity()
 
     try:
         # Create TrainingConfig from form data
@@ -326,6 +336,7 @@ async def start_micro_training(
     Uses existing dataset from database instead of uploaded YAML.
     """
     _ensure_jobs_loaded()
+    _assert_capacity()
     try:
         # Create minimal config
         config = TrainingConfig(
@@ -373,6 +384,8 @@ async def start_micro_training(
         
         return {"job_id": job_id, "status": "started"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start micro-training: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -640,7 +653,7 @@ async def get_queue_status(current_user: dict = Depends(get_current_user)):
         "pending": len(pending_jobs),
         "pending_jobs": pending_jobs,
         "max_concurrent": MAX_CONCURRENT_JOBS,
-        "slots_available": max(0, MAX_CONCURRENT_JOBS - running),
+        "slots_available": max(0, MAX_CONCURRENT_JOBS - running - len(pending_jobs)),
     }
 
 
@@ -855,12 +868,7 @@ async def start_training_from_dataset(
             raise HTTPException(status_code=404, detail="Dataset not found")
         require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
 
-        active = sum(1 for j in training_jobs.values() if j.get("status") in ["running", "pending"])
-        if active >= MAX_CONCURRENT_JOBS:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many training jobs running ({active}/{MAX_CONCURRENT_JOBS}). Wait for one to finish before starting another."
-            )
+        _assert_capacity()
 
         # Analyze dataset first
         try:
@@ -966,6 +974,7 @@ async def export_and_train(
     Export dataset and start training in one operation (strict training mode)
     """
     _ensure_jobs_loaded()
+    _assert_capacity()
     try:
         from app.core.access import require_role
         dataset = DatasetService.get_dataset(request.dataset_id)
@@ -1053,6 +1062,8 @@ async def export_and_train(
             "augmentations": request.config.augmentations
         })
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Export and train error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
