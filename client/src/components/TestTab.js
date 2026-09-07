@@ -411,6 +411,7 @@ export default function TestTab() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label="Copy results as JSON"
                       className="h-7 w-7 text-gray-400 hover:text-white"
                       onClick={() => {
                         navigator.clipboard.writeText(JSON.stringify(results, null, 2));

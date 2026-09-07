@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 import ProjectVersions from "@/components/project/ProjectVersions";
 import TrainingLive from "@/components/project/TrainingLive";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 const PRESET_META = {
     fast: { icon: Zap, color: "text-amber-500", label: "Fast", desc: "~5 min • Quick iteration, lower accuracy", epochs: 25, batch_size: 32, img_size: 416, model_name: "yolov8n.pt", learning_rate: 0.01, patience: 10 },
@@ -23,6 +24,7 @@ const PRESET_META = {
 };
 
 export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, versionRefreshKey = 0 }) {
+    const confirm = useConfirm();
     const { token } = useAuth();
     const [versions, setVersions] = useState([]);
     const [selectedVersionIds, setSelectedVersionIds] = useState([]);
@@ -115,7 +117,11 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
     };
 
     const cancelJob = async (jobId) => {
-        if (!window.confirm("Stop training? The run ends after the current epoch.")) return;
+        if (!(await confirm({
+          title: "Stop training",
+          description: "The run stops at the next batch boundary. Checkpoints already saved are kept.",
+          confirmLabel: "Stop run",
+        }))) return;
         try {
             const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
                 method: "POST",

@@ -103,7 +103,7 @@ export default function WizardBanner({ pipelineStages, activeTab, onNavigate }) 
                             );
                         })}
                     </div>
-                    <Button variant="ghost" size="icon" className="w-6 h-6 shrink-0 rounded-none border border-transparent hover:border-violet-500" onClick={dismiss}>
+                    <Button variant="ghost" size="icon" aria-label="Dismiss" className="w-6 h-6 shrink-0 rounded-none border border-transparent hover:border-violet-500" onClick={dismiss}>
                         <X className="w-3.5 h-3.5" />
                     </Button>
                 </div>

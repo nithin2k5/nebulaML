@@ -11,8 +11,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function ModelsTab() {
+  const confirm = useConfirm();
   const { token } = useAuth();
   const [models, setModels] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -58,7 +60,11 @@ export default function ModelsTab() {
   };
 
   const handleDelete = async (modelName) => {
-    if (!confirm(`Delete model "${modelName}" permanently?`)) return;
+    if (!(await confirm({
+      title: "Delete model",
+      description: `"${modelName}" will be permanently removed. Anything deployed against it will stop working.`,
+      confirmLabel: "Delete",
+    }))) return;
     try {
       const response = await fetch(API_ENDPOINTS.MODELS.DELETE(modelName), { 
         method: "DELETE",
@@ -165,6 +171,7 @@ export default function ModelsTab() {
                   onClick={() => handleDelete(model.name)}
                   variant="ghost"
                   size="icon"
+                  aria-label="Delete model"
                   className="text-gray-400 hover:text-red-400 hover:bg-red-400/10 h-8 w-8"
                 >
                   <Trash2 className="w-3.5 h-3.5" />

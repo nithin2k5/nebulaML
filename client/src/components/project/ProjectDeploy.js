@@ -12,8 +12,10 @@ import { Upload, CheckCircle, Loader, Terminal, X, Download } from "lucide-react
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function ProjectDeploy({ dataset }) {
+    const confirm = useConfirm();
     const { token } = useAuth();
     const [jobs, setJobs] = useState([]);
     const [selectedJob, setSelectedJob] = useState(null);
@@ -95,7 +97,11 @@ export default function ProjectDeploy({ dataset }) {
     };
 
     const handleDeleteKey = async (keyId) => {
-        if (!window.confirm("Revoke this API Key? Any scripts using it will break.")) return;
+        if (!(await confirm({
+          title: "Revoke API key",
+          description: "Any script or integration using this key stops working immediately.",
+          confirmLabel: "Revoke",
+        }))) return;
         try {
             const res = await fetch(API_ENDPOINTS.AUTH.API_KEYS_REVOKE(keyId), {
                 method: "DELETE",
@@ -395,7 +401,7 @@ export default function ProjectDeploy({ dataset }) {
                                                 <p className="font-medium">{k.name}</p>
                                                 <p className="text-[10px] text-muted-foreground">Created: {new Date(k.created_at).toLocaleDateString()}</p>
                                             </div>
-                                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => handleDeleteKey(k.id)}>
+                                            <Button variant="ghost" size="icon" aria-label="Revoke API key" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={() => handleDeleteKey(k.id)}>
                                                 <X className="w-3 h-3" />
                                             </Button>
                                         </div>

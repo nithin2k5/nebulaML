@@ -268,10 +268,10 @@ export default function ProfileTab() {
                                                 )}
                                                 autoFocus
                                             />
-                                            <Button type="submit" size="icon" className="h-9 w-9 bg-zinc-100 hover:bg-white text-zinc-900" disabled={saving}>
+                                            <Button type="submit" size="icon" aria-label="Save name" className="h-9 w-9 bg-zinc-100 hover:bg-white text-zinc-900" disabled={saving}>
                                                 <Check className="w-4 h-4" />
                                             </Button>
-                                            <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-zinc-400 hover:text-white" onClick={cancelEdit} disabled={saving}>
+                                            <Button type="button" size="icon" aria-label="Cancel editing" variant="ghost" className="h-9 w-9 text-zinc-400 hover:text-white" onClick={cancelEdit} disabled={saving}>
                                                 <X className="w-4 h-4" />
                                             </Button>
                                         </div>

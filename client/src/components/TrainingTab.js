@@ -19,6 +19,7 @@ import GamifiedTerminal from "./GamifiedTerminal";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 // ── Mini chart for a single job ───────────────────────────────────────────────
 function JobChart({ jobId, status }) {
@@ -281,6 +282,7 @@ function LiveJobTracker({ initialJob, onStop }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function TrainingTab() {
+  const confirm = useConfirm();
   const { token } = useAuth();
   const [jobs, setJobs] = useState([]);
   const [expandedLogs, setExpandedLogs] = useState({});
@@ -308,7 +310,11 @@ export default function TrainingTab() {
 
   // ── Stop job ────────────────────────────────────────────────────────────────
   const handleStop = async (jobId) => {
-    if (!confirm("Stop this training run?")) return;
+    if (!(await confirm({
+      title: "Stop training",
+      description: "The run stops at the next batch boundary. Checkpoints already saved are kept.",
+      confirmLabel: "Stop run",
+    }))) return;
     try {
       const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
         method: "POST", headers: { Authorization: `Bearer ${token}` },

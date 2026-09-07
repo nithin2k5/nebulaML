@@ -8,8 +8,10 @@ const AuthContext = createContext({});
 export const useAuth = () => useContext(AuthContext);
 
 import { API_BASE_URL } from "@/lib/config";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export function AuthProvider({ children }) {
+  const confirm = useConfirm();
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -133,7 +135,13 @@ export function AuthProvider({ children }) {
       if (remaining <= thresholdSeconds && remaining > 0) {
         if (Date.now() - promptRef.current < pollMs) return;
         promptRef.current = Date.now();
-        const ok = window.confirm("Your session is about to expire. Extend session?");
+        const ok = await confirm({
+          title: "Session expiring",
+          description: "Your session expires shortly. Extend it to stay signed in.",
+          confirmLabel: "Extend session",
+          cancelLabel: "Sign out",
+          variant: "default",
+        });
         if (ok) {
           await extendSession();
         } else {
@@ -146,7 +154,7 @@ export function AuthProvider({ children }) {
     }, pollMs);
 
     return () => clearInterval(interval);
-  }, [token, loading, router]);
+  }, [token, loading, router, confirm]);
 
   const login = async (email) => {
     try {
