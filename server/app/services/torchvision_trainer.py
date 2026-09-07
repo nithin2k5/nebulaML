@@ -260,8 +260,33 @@ class TorchVisionTrainer(BaseTrainer):
 
         # 4. Optimizer
         params = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.SGD(params, lr=lr, momentum=0.9, weight_decay=0.0005)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=max(epochs // 3, 1), gamma=0.1)
+        optimizer = torch.optim.SGD(
+            params, lr=lr, momentum=0.9,
+            weight_decay=float(kwargs.pop("weight_decay", None) or 0.0005),
+        )
+
+        if bool(kwargs.pop("cos_lr", False)):
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        else:
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=max(epochs // 3, 1), gamma=0.1
+            )
+
+        # Faster R-CNN and RetinaNet routinely diverge in the first few hundred
+        # iterations at the reference LR without a warmup, so ramp it in.
+        warmup_epochs = float(kwargs.pop("warmup_epochs", 1.0) or 0.0)
+        warmup_iters = min(int(len(train_loader) * warmup_epochs), 1000)
+        warmup_scheduler = (
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.001, total_iters=warmup_iters
+            )
+            if warmup_iters > 0 else None
+        )
+
+        # AMP is a CUDA feature; enabling it elsewhere just adds overhead.
+        use_amp = bool(kwargs.pop("amp", True)) and device.type == "cuda"
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+        global_step = 0
 
         # Output directory
         run_dir = Path(project) / name
@@ -282,13 +307,27 @@ class TorchVisionTrainer(BaseTrainer):
                 images = [img.to(device) for img in images]
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-                loss_dict = model(images, targets)
-                losses = sum(loss for loss in loss_dict.values())
+                with torch.amp.autocast("cuda", enabled=use_amp):
+                    loss_dict = model(images, targets)
+                    losses = sum(loss for loss in loss_dict.values())
 
-                optimizer.zero_grad()
-                losses.backward()
-                optimizer.step()
+                if not torch.isfinite(losses):
+                    # A single bad batch shouldn't poison every weight in the model.
+                    logger.warning("Non-finite loss at epoch %d, skipping batch", epoch)
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+
+                optimizer.zero_grad(set_to_none=True)
+                scaler.scale(losses).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(params, max_norm=10.0)
+                scaler.step(optimizer)
+                scaler.update()
                 epoch_loss += losses.item()
+
+                if warmup_scheduler is not None and global_step < warmup_iters:
+                    warmup_scheduler.step()
+                global_step += 1
 
                 # Lets a cancel request take effect mid-epoch rather than waiting
                 # for the epoch (and its validation pass) to finish.

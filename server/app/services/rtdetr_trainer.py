@@ -270,7 +270,20 @@ class RTDetrTrainer(BaseTrainer):
             )
 
         # 4. Optimizer
-        optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr))
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=float(lr),
+            weight_decay=float(kwargs.pop("weight_decay", None) or 1e-4),
+        )
+        # There was previously no schedule at all — a flat LR for the whole run.
+        if bool(kwargs.pop("cos_lr", True)):
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        else:
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=max(epochs // 3, 1), gamma=0.1
+            )
+
+        use_amp = bool(kwargs.pop("amp", True)) and device.type == "cuda"
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
         # Prepare output directory
         run_dir = Path(project) / name
@@ -291,12 +304,23 @@ class RTDetrTrainer(BaseTrainer):
                 labels = [
                     {k: v.to(device) for k, v in t.items()} for t in batch_data["labels"]
                 ]
-                outputs = model(pixel_values=pixel_values, labels=labels)
-                loss = outputs.loss
+                with torch.amp.autocast("cuda", enabled=use_amp):
+                    outputs = model(pixel_values=pixel_values, labels=labels)
+                    loss = outputs.loss
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                if not torch.isfinite(loss):
+                    # A single bad batch shouldn't poison every weight in the model.
+                    logger.warning("Non-finite loss at epoch %d, skipping batch", epoch)
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+
+                optimizer.zero_grad(set_to_none=True)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                # DETR-family training is unstable without tight gradient clipping.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
+                scaler.step(optimizer)
+                scaler.update()
                 epoch_loss += loss.item()
 
                 # Lets a cancel request take effect mid-epoch rather than waiting
@@ -304,6 +328,7 @@ class RTDetrTrainer(BaseTrainer):
                 if batch_end_cb:
                     batch_end_cb(TrainerState(epoch=epoch - 1, epochs=epochs))
 
+            lr_scheduler.step()
             avg_loss = epoch_loss / max(len(train_loader), 1)
 
             def _save_best():
