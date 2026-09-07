@@ -36,7 +36,7 @@ class BaseTrainer(ABC):
     @abstractmethod
     def train(
         self,
-        data_config: str,
+        data_yaml: str,
         epochs: int = 100,
         imgsz: int = 640,
         batch: int = 16,
@@ -45,13 +45,15 @@ class BaseTrainer(ABC):
         exist_ok: bool = True,
         strict_epochs: bool = False,
         augmentations: Optional[dict] = None,
-        epoch_callback: Optional[Callable] = None,
+        on_train_epoch_end: Optional[Callable] = None,
+        on_train_batch_end: Optional[Callable] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Train the model on the given dataset.
 
         Args:
-            data_config: Path to dataset config (YOLO YAML or COCO JSON depending on backend).
+            data_yaml: Path to the YOLO dataset YAML. Backends that need COCO
+                convert it internally.
             epochs: Number of training epochs.
             imgsz: Input image size.
             batch: Batch size.
@@ -60,7 +62,9 @@ class BaseTrainer(ABC):
             exist_ok: If True, allow overwriting existing run directory.
             strict_epochs: If True, disable early stopping.
             augmentations: Dict of augmentation parameters.
-            epoch_callback: Called after each epoch with (epoch, total_epochs, metrics_dict).
+            on_train_epoch_end: Called after each epoch with a TrainerState. May raise
+                TrainingCancelledException, which implementations must let propagate.
+            on_train_batch_end: Same contract, called after each batch.
             **kwargs: Backend-specific extra parameters.
 
         Returns:
@@ -86,7 +90,7 @@ class BaseTrainer(ABC):
         pass
 
     @abstractmethod
-    def validate(self, data_config: str) -> Dict[str, Any]:
+    def validate(self, data_yaml: str) -> Dict[str, Any]:
         """Run validation on a dataset. Returns metrics dict."""
         pass
 

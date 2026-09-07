@@ -208,9 +208,7 @@ class AutoRetrainConfig(BaseModel):
     enabled: bool = False
     min_new_annotations: int = Field(default=50, ge=10, le=1000)
 
-# In-memory store for auto-retrain configs
-auto_retrain_configs: Dict[str, Dict[str, Any]] = {}
-    
+
 @router.post("/versions/generate")
 async def generate_dataset_version(
     request: GenerateVersionRequest,
@@ -419,6 +417,14 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
     """
     Background task to run training with strict validation
     """
+    # Seeded before the try so the finally block is always well defined — an early
+    # return or a failure on the very first statement used to raise UnboundLocalError
+    # there, masking the real error.
+    final_status = "failed"
+    error_msg = "Training did not start"
+    results: Dict[str, Any] = {}
+    trainer = None
+
     try:
         training_jobs[job_id]["status"] = "running"
         training_jobs[job_id]["progress"] = 0
@@ -427,14 +433,10 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         _persist_job(job_id)
 
         if training_jobs[job_id].get("cancel_requested"):
-            training_jobs[job_id].update({
-                "status": "cancelled",
-                "cancelled_at": datetime.now().isoformat(),
-            })
-            _persist_job(job_id)
             logger.info(f"Training job {job_id} cancelled before start")
+            final_status = "cancelled"
             return
-        
+
         logger.info(f"Starting training job {job_id} with {config.epochs} epochs")
         
         # Validate dataset YAML exists
@@ -510,10 +512,9 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         # Task 1: increment weights_version
         training_jobs[job_id]["weights_version"] = training_jobs[job_id].get("weights_version", 0) + 1
 
-
-
         final_status = "completed"
-        
+
+
     except TrainingCancelledException:
         logger.info(f"Training job {job_id} cancelled by user")
         final_status = "cancelled"
@@ -526,11 +527,11 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
 
     finally:
         # Task 3: Ensure GPU memory is released before the job slot is freed
-        if 'trainer' in locals() and hasattr(trainer, 'model'):
-            del trainer.model
-        if 'trainer' in locals():
-            del trainer
-            
+        if trainer is not None:
+            if hasattr(trainer, "model"):
+                trainer.model = None
+            trainer = None
+
         import torch
         import gc
         gc.collect()
@@ -551,12 +552,13 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             training_jobs[job_id].update({
                 "status": "completed",
                 "progress": 100,
-                "current_epoch": config.epochs,
+                # Early stopping can finish short of config.epochs.
+                "current_epoch": results.get("epochs_completed", config.epochs),
                 "results": results,
-                "model_path": results.get("model_path", "") if isinstance(results, dict) else "",
-                "metrics": results.get("metrics", {}) if isinstance(results, dict) else {},
-                "per_class_metrics": results.get("per_class_metrics", []) if isinstance(results, dict) else [],
-                "confusion_matrix_path": results.get("confusion_matrix_path") if isinstance(results, dict) else None,
+                "model_path": results.get("model_path", ""),
+                "metrics": results.get("metrics", {}),
+                "per_class_metrics": results.get("per_class_metrics", []),
+                "confusion_matrix_path": results.get("confusion_matrix_path"),
                 "completed_at": datetime.now().isoformat(),
             })
         elif final_status == "cancelled":
@@ -597,30 +599,34 @@ async def stream_job_details(job_id: str, current_user: dict = Depends(get_curre
     _get_owned_job(job_id, current_user)
 
     async def event_stream():
-        last_status = None
-        last_epoch = None
+        last_signature = None
         while True:
             # Re-fetch the job from the dict to get latest reference
             current_job = training_jobs.get(job_id)
             if not current_job:
                 break
-                
+
             status = current_job.get("status")
-            epoch = current_job.get("current_epoch")
-            
-            # Yield if something changed (status or epoch) or periodically to keep-alive
-            # Omit full output to prevent massive payloads
-            payload_dict = current_job.copy()
-            if "output" in payload_dict and len(payload_dict["output"]) > 1000:
-                payload_dict["output"] = payload_dict["output"][-1000:]
-            payload = json.dumps(payload_dict, default=str)
-            yield f"data: {payload}\n\n"
-            
-            if status in ("completed", "failed", "cancelled", "success"):
+            signature = (status, current_job.get("current_epoch"), current_job.get("progress"))
+
+            # Only push when something actually changed; a terminal status always
+            # gets one final frame so the client can close cleanly.
+            terminal = status in ("completed", "failed", "cancelled", "success")
+            if signature != last_signature or terminal:
+                last_signature = signature
+                # Omit full output to prevent massive payloads
+                payload_dict = current_job.copy()
+                if "output" in payload_dict and len(payload_dict["output"]) > 1000:
+                    payload_dict["output"] = payload_dict["output"][-1000:]
+                yield f"data: {json.dumps(payload_dict, default=str)}\n\n"
+            else:
+                yield ": keep-alive\n\n"
+
+            if terminal:
                 break
-                
+
             await asyncio.sleep(2.0)
-            
+
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @router.post("/cancel/{job_id}")

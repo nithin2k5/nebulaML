@@ -356,9 +356,9 @@ class TorchVisionTrainer(BaseTrainer):
             "confusion_matrix_path": None,
         }
 
-    def validate(self, data_config: str = "", **kwargs) -> Dict[str, Any]:
+    def validate(self, data_yaml: str = "", **kwargs) -> Dict[str, Any]:
         """Evaluate the current model against the val split of a YOLO data.yaml."""
-        coco_paths = yolo_yaml_to_coco_json(data_config)
+        coco_paths = yolo_yaml_to_coco_json(data_yaml)
         if "val" not in coco_paths:
             raise FileNotFoundError("Dataset has no validation split to evaluate against")
 
