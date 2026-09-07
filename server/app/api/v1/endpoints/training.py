@@ -101,6 +101,21 @@ def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
         return True
     return uid == current_user.get("id")
 
+
+def _get_owned_job(job_id: str, current_user: dict) -> Dict[str, Any]:
+    """Fetch a job the caller is allowed to see, or raise 404/403.
+
+    Also loads persisted jobs first, so a job started before the last restart is
+    still addressable.
+    """
+    _ensure_jobs_loaded()
+    job = training_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not _job_owner_ok(job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
+    return job
+
 ALLOWED_MODELS = get_allowed_model_keys()
 
 class TrainingConfig(BaseModel):
@@ -244,6 +259,12 @@ async def list_dataset_versions(dataset_id: str, current_user: dict = Depends(ge
     """
     List all generated versions of a dataset
     """
+    from app.core.access import require_role
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
+
     versions = DatasetVersionService.list_dataset_versions(dataset_id)
     return {"versions": versions}
 
@@ -561,37 +582,19 @@ async def get_training_status(job_id: str, current_user: dict = Depends(get_curr
     """
     Get training job status
     """
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    return training_jobs[job_id]
+    return _get_owned_job(job_id, current_user)
 
 
 @router.get("/job/{job_id}")
 async def get_training_job_by_id(job_id: str, current_user: dict = Depends(get_current_user)):
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized to view this job")
-        
-    return job
+    return _get_owned_job(job_id, current_user)
 
 @router.get("/job/{job_id}/stream")
 async def stream_job_details(job_id: str, current_user: dict = Depends(get_current_user)):
     from fastapi.responses import StreamingResponse
     import json
     
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-        
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized to view this job")
+    _get_owned_job(job_id, current_user)
 
     async def event_stream():
         last_status = None
@@ -622,12 +625,7 @@ async def stream_job_details(job_id: str, current_user: dict = Depends(get_curre
 
 @router.post("/cancel/{job_id}")
 async def cancel_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized to cancel this job")
+    job = _get_owned_job(job_id, current_user)
     status = job.get("status")
     if status not in ("running", "pending"):
         raise HTTPException(status_code=400, detail=f"Cannot cancel job with status '{status}'")
@@ -677,11 +675,7 @@ async def delete_training_job(job_id: str, current_user: dict = Depends(get_curr
     """
     Remove a finished training job from the list. Use POST /cancel while running.
     """
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    job = _get_owned_job(job_id, current_user)
     if job.get("status") in ("running", "pending"):
         raise HTTPException(status_code=400, detail="Cancel the job first; training is still in progress")
     del training_jobs[job_id]
@@ -695,9 +689,8 @@ async def get_training_metrics(job_id: str, current_user: dict = Depends(get_cur
     import pandas as pd
     import io
     
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-        
+    _get_owned_job(job_id, current_user)
+
     # Must match the project dir run_training passes to the trainer.
     results_path = _RUNS_BASE / f"job_{job_id}" / "results.csv"
     
@@ -746,9 +739,8 @@ async def get_confusion_matrix(job_id: str, current_user: dict = Depends(get_cur
     """
     from fastapi.responses import FileResponse
     
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
+    _get_owned_job(job_id, current_user)
+
     # YOLO saves confusion_matrix.png and confusion_matrix_normalized.png
     for variant in ["confusion_matrix_normalized.png", "confusion_matrix.png"]:
         cm_path = _RUNS_BASE / f"job_{job_id}" / variant
@@ -763,10 +755,7 @@ async def get_per_class_metrics(job_id: str, current_user: dict = Depends(get_cu
     """
     Return per-class precision, recall, mAP50 from the results.
     """
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    job = training_jobs[job_id]
+    job = _get_owned_job(job_id, current_user)
     per_class = job.get("per_class_metrics", [])
 
     return {
