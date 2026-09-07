@@ -16,6 +16,31 @@ class TrainingCancelledException(Exception):
     """
 
 
+def set_seed(seed: int, deterministic: bool = False) -> None:
+    """Seed Python, numpy and torch RNGs so a run can be reproduced.
+
+    The hand-rolled backends need this explicitly; ultralytics seeds itself from
+    the `seed` argument.
+    """
+    import random
+
+    import numpy as np
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    if deterministic:
+        # warn_only: some detection ops have no deterministic kernel, and failing
+        # the run over that is worse than a slightly non-reproducible op.
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
 class TrainerState:
     """Stand-in for the ultralytics trainer object that callbacks expect.
 

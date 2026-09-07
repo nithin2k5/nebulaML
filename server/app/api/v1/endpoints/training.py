@@ -118,22 +118,60 @@ def _get_owned_job(job_id: str, current_user: dict) -> Dict[str, Any]:
 
 ALLOWED_MODELS = get_allowed_model_keys()
 
+ALLOWED_OPTIMIZERS = {"auto", "SGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp"}
+
+
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
-    batch_size: int = Field(default=16, ge=1, le=128, description="Batch size (1-128)")
+    batch_size: int = Field(default=16, ge=-1, le=128, description="Batch size (1-128), or -1 to size it automatically from available memory")
     img_size: int = Field(default=640, ge=320, le=1280, description="Image size (320-1280)")
     model_name: str = Field(default="yolov8n.pt", description="Base model name (yolov8, yolov9, yolov10, yolo11)")
-    learning_rate: Optional[float] = Field(default=None, ge=0.00001, le=1.0, description="Learning rate")
+    learning_rate: Optional[float] = Field(default=None, ge=0.00001, le=1.0, description="Initial learning rate (lr0)")
     patience: Optional[int] = Field(default=50, ge=1, le=200, description="Early stopping patience")
     device: Optional[str] = Field(default=None, description="Device (cpu, cuda, mps, or None for auto)")
     strict_epochs: bool = Field(default=False, description="If True, enforce exact epoch count (disable early stopping)")
     augmentations: Optional[Dict[str, Any]] = Field(default=None, description="Data augmentation parameters")
     preset: Optional[str] = Field(default=None, description="Preset name: fast, balanced, accurate")
 
+    # Reproducibility
+    seed: int = Field(default=0, ge=0, le=2_147_483_647, description="Random seed; the same seed and config reproduces a run")
+    deterministic: bool = Field(default=True, description="Force deterministic algorithms. Slower, but makes runs exactly repeatable")
+
+    # Optimisation schedule
+    optimizer: str = Field(default="auto", description=f"One of {sorted(ALLOWED_OPTIMIZERS)}")
+    lr_final: Optional[float] = Field(default=None, ge=0.0001, le=1.0, description="Final LR as a fraction of the initial LR (lrf)")
+    weight_decay: Optional[float] = Field(default=None, ge=0.0, le=0.1, description="Optimizer weight decay")
+    warmup_epochs: Optional[float] = Field(default=None, ge=0.0, le=20.0, description="Epochs of LR warmup before the main schedule")
+    cos_lr: bool = Field(default=False, description="Use a cosine LR schedule instead of linear decay")
+
+    # Throughput / memory
+    workers: Optional[int] = Field(default=None, ge=0, le=16, description="Dataloader worker processes")
+    cache: bool = Field(default=False, description="Cache images in RAM. Much faster per epoch on small datasets")
+    amp: bool = Field(default=True, description="Mixed precision training")
+
+    # Fine-tuning behaviour
+    freeze: Optional[int] = Field(default=None, ge=0, le=24, description="Freeze the first N layers; useful for small datasets")
+    dropout: Optional[float] = Field(default=None, ge=0.0, le=0.9, description="Dropout regularisation")
+    close_mosaic: int = Field(default=10, ge=0, le=100, description="Disable mosaic augmentation for the final N epochs so the model settles on real images")
+    save_period: int = Field(default=10, ge=-1, le=100, description="Checkpoint every N epochs (-1 disables), so an interrupted run can resume")
+
     @validator('model_name')
     def validate_model_name(cls, v):
         if v not in ALLOWED_MODELS:
             raise ValueError(f"Unsupported model '{v}'. Allowed: {sorted(ALLOWED_MODELS)}")
+        return v
+
+    @validator('optimizer')
+    def validate_optimizer(cls, v):
+        if v not in ALLOWED_OPTIMIZERS:
+            raise ValueError(f"Unsupported optimizer '{v}'. Allowed: {sorted(ALLOWED_OPTIMIZERS)}")
+        return v
+
+    @validator('batch_size')
+    def validate_batch_size(cls, v):
+        # -1 means AutoBatch; anything else below 1 is meaningless.
+        if v < 1 and v != -1:
+            raise ValueError("Batch size must be at least 1, or -1 for automatic sizing")
         return v
 
     def apply_preset(self):
@@ -168,22 +206,6 @@ class TrainingConfig(BaseModel):
                 if k not in set_fields:
                     setattr(self, k, v)
         return self
-    
-    @validator('epochs')
-    def validate_epochs(cls, v):
-        if v < 1:
-            raise ValueError("Epochs must be at least 1")
-        if v > 1000:
-            raise ValueError("Epochs cannot exceed 1000")
-        return v
-    
-    @validator('batch_size')
-    def validate_batch_size(cls, v):
-        if v < 1:
-            raise ValueError("Batch size must be at least 1")
-        if v > 128:
-            raise ValueError("Batch size cannot exceed 128")
-        return v
 
 class DatasetTrainingRequest(BaseModel):
     dataset_id: str
@@ -458,23 +480,49 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             "strict_epochs": config.strict_epochs,  # Pass strict mode to trainer
         }
         
+        # Reproducibility and schedule settings always apply.
+        train_params.update({
+            "seed": config.seed,
+            "deterministic": config.deterministic,
+            "optimizer": config.optimizer,
+            "cos_lr": config.cos_lr,
+            "amp": config.amp,
+            "cache": config.cache,
+            # Mosaic hurts in the final epochs; turning it off lets the model settle.
+            "close_mosaic": min(config.close_mosaic, config.epochs),
+            # Checkpoint regardless of strict mode so an interrupted run can resume.
+            "save_period": config.save_period,
+        })
+
         # Add optional parameters
-        if config.learning_rate:
+        if config.learning_rate is not None:
             train_params["lr0"] = config.learning_rate
-        if config.patience and not config.strict_epochs:
-            # Only use patience if not in strict mode
-            train_params["patience"] = config.patience
-        elif config.strict_epochs:
+        if config.lr_final is not None:
+            train_params["lrf"] = config.lr_final
+        if config.weight_decay is not None:
+            train_params["weight_decay"] = config.weight_decay
+        if config.warmup_epochs is not None:
+            train_params["warmup_epochs"] = config.warmup_epochs
+        if config.workers is not None:
+            train_params["workers"] = config.workers
+        if config.freeze is not None:
+            train_params["freeze"] = config.freeze
+        if config.dropout is not None:
+            train_params["dropout"] = config.dropout
+
+        if config.strict_epochs:
             # In strict mode, disable early stopping - ensure all epochs run
             train_params["patience"] = config.epochs + 1
-            train_params["save_period"] = 10  # Save checkpoints every 10 epochs
+        elif config.patience:
+            train_params["patience"] = config.patience
+
         if config.device:
             train_params["device"] = config.device
-        
+
         # Add augmentations if present
         if config.augmentations:
             train_params["augmentations"] = config.augmentations
-            
+
         def batch_end_callback(trainer_obj):
             if training_jobs.get(job_id, {}).get("cancel_requested"):
                 raise TrainingCancelledException("Training cancelled by user")

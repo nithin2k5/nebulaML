@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
-from app.services.base_trainer import BaseTrainer, TrainerState, TrainingCancelledException
+from app.services.base_trainer import BaseTrainer, TrainerState, TrainingCancelledException, set_seed
 from app.services.dataset_converter import yolo_yaml_to_coco_json
 from app.services.detection_metrics import evaluate_detections
 
@@ -208,6 +208,14 @@ class RTDetrTrainer(BaseTrainer):
         if job_info is not None:
             job_info["device_used"] = str(device)
 
+        set_seed(int(kwargs.pop("seed", 0)), bool(kwargs.pop("deterministic", False)))
+        workers = int(kwargs.pop("workers", 0) or 0)
+
+        if batch < 1:
+            # -1 selects ultralytics AutoBatch; these hand-rolled loops need a concrete size.
+            batch = 4
+            logger.info("Automatic batch sizing is not supported here, using batch=%d", batch)
+
         logger.info("RT-DETR training: checkpoint=%s, epochs=%d, lr=%s, device=%s",
                      self.checkpoint, epochs, lr, device)
 
@@ -243,7 +251,7 @@ class RTDetrTrainer(BaseTrainer):
         train_ds = _COCODataset(train_json, processor)
         train_loader = DataLoader(
             train_ds, batch_size=batch, shuffle=True,
-            collate_fn=_collate, num_workers=0,
+            collate_fn=_collate, num_workers=workers,
         )
 
         class_names = {c["id"]: c["name"] for c in categories}
@@ -253,7 +261,7 @@ class RTDetrTrainer(BaseTrainer):
             if len(val_ds) > 0:
                 val_loader = DataLoader(
                     val_ds, batch_size=batch, shuffle=False,
-                    collate_fn=_collate_val, num_workers=0,
+                    collate_fn=_collate_val, num_workers=workers,
                 )
         if val_loader is None:
             logger.warning(
@@ -386,7 +394,7 @@ class RTDetrTrainer(BaseTrainer):
         val_loader = DataLoader(
             _COCOValDataset(coco_paths["val"], self.processor),
             batch_size=int(kwargs.get("batch", 4)), shuffle=False,
-            collate_fn=_collate_val, num_workers=0,
+            collate_fn=_collate_val, num_workers=int(kwargs.get("workers", 0) or 0),
         )
         return self._evaluate(self.model, self.processor, val_loader, self.device, class_names)
 
