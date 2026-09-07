@@ -8,6 +8,28 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Callable
 
 
+class TrainingCancelledException(Exception):
+    """Raised from a training callback when the user has requested cancellation.
+
+    Lives here rather than in a single backend so every trainer can let it
+    propagate out of train() instead of swallowing it as a generic callback error.
+    """
+
+
+class TrainerState:
+    """Stand-in for the ultralytics trainer object that callbacks expect.
+
+    The training endpoint's callbacks are written against ultralytics' interface,
+    so the hand-rolled backends pass one of these to stay compatible.
+    """
+
+    def __init__(self, epoch: int = 0, epochs: int = 0, metrics: Optional[dict] = None):
+        self.epoch = epoch
+        self.epochs = epochs
+        self.metrics = metrics or {}
+        self.stop = False
+
+
 class BaseTrainer(ABC):
     """Abstract interface for a detection model trainer."""
 

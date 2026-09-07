@@ -17,6 +17,7 @@ import sys
 import shutil
 
 # Import trainer
+from app.services.base_trainer import TrainingCancelledException
 from app.services.trainer_factory import create_trainer
 from app.services.model_registry import get_allowed_model_keys, get_backend, get_model_info, get_registry_for_api
 from app.services.dataset_analyzer import DatasetAnalyzer
@@ -439,15 +440,8 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             train_params["augmentations"] = config.augmentations
             
         def batch_end_callback(trainer_obj):
-            try:
-                if job_id in training_jobs and training_jobs[job_id].get("cancel_requested"):
-                    from app.services.trainer import TrainingCancelledException
-                    raise TrainingCancelledException("Training cancelled by user")
-            except Exception as e:
-                from app.services.trainer import TrainingCancelledException
-                if isinstance(e, TrainingCancelledException):
-                    raise
-                logger.error(f"Error in batch_end_callback: {e}")
+            if training_jobs.get(job_id, {}).get("cancel_requested"):
+                raise TrainingCancelledException("Training cancelled by user")
 
         def epoch_end_callback(trainer_obj):
             try:
@@ -465,13 +459,11 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
                     if metrics:
                         training_jobs[job_id]["metrics"] = metrics
                     if training_jobs[job_id].get("cancel_requested"):
-                        from app.services.trainer import TrainingCancelledException
                         raise TrainingCancelledException("Training cancelled by user")
                     _persist_job(job_id)
+            except TrainingCancelledException:
+                raise
             except Exception as e:
-                from app.services.trainer import TrainingCancelledException
-                if isinstance(e, TrainingCancelledException):
-                    raise
                 logger.error(f"Error in training callback: {e}")
                 
         train_params["on_train_epoch_end"] = epoch_end_callback
@@ -488,16 +480,16 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
 
         final_status = "completed"
         
+    except TrainingCancelledException:
+        logger.info(f"Training job {job_id} cancelled by user")
+        final_status = "cancelled"
+
     except Exception as e:
-        from app.services.trainer import TrainingCancelledException
-        if isinstance(e, TrainingCancelledException):
-            logger.info(f"Training job {job_id} cancelled by user")
-            final_status = "cancelled"
-        else:
-            logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
-            final_status = "failed"
-            error_msg = str(e)
-            
+        logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
+        final_status = "failed"
+        error_msg = str(e)
+
+
     finally:
         # Task 3: Ensure GPU memory is released before the job slot is freed
         if 'trainer' in locals() and hasattr(trainer, 'model'):
@@ -628,7 +620,7 @@ async def cancel_training_job(job_id: str, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=400, detail=f"Cannot cancel job with status '{status}'")
     job["cancel_requested"] = True
     _persist_job(job_id)
-    return {"success": True, "message": "Cancellation requested; training stops after the current epoch completes"}
+    return {"success": True, "message": "Cancellation requested; training stops at the next batch boundary"}
 
 @router.get("/queue-status")
 async def get_queue_status(current_user: dict = Depends(get_current_user)):

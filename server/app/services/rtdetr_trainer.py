@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
-from app.services.base_trainer import BaseTrainer
+from app.services.base_trainer import BaseTrainer, TrainerState, TrainingCancelledException
 from app.services.dataset_converter import yolo_yaml_to_coco_json
 from app.services.detection_metrics import evaluate_detections
 
@@ -201,8 +201,12 @@ class RTDetrTrainer(BaseTrainer):
         device_req = kwargs.pop("device", None)
         device = _get_device(device_req) if device_req else self.device
 
-        # Callback support — the endpoint passes on_train_epoch_end
+        # Callback support — the endpoint passes these to drive progress and cancellation
         epoch_end_cb = kwargs.pop("on_train_epoch_end", None)
+        batch_end_cb = kwargs.pop("on_train_batch_end", None)
+        job_info = kwargs.pop("job_info", None)
+        if job_info is not None:
+            job_info["device_used"] = str(device)
 
         logger.info("RT-DETR training: checkpoint=%s, epochs=%d, lr=%s, device=%s",
                      self.checkpoint, epochs, lr, device)
@@ -287,6 +291,11 @@ class RTDetrTrainer(BaseTrainer):
                 optimizer.step()
                 epoch_loss += loss.item()
 
+                # Lets a cancel request take effect mid-epoch rather than waiting
+                # for the epoch (and its validation pass) to finish.
+                if batch_end_cb:
+                    batch_end_cb(TrainerState(epoch=epoch - 1, epochs=epochs))
+
             avg_loss = epoch_loss / max(len(train_loader), 1)
 
             def _save_best():
@@ -318,20 +327,16 @@ class RTDetrTrainer(BaseTrainer):
 
             # Epoch-end callback (mimics YOLO trainer_obj interface)
             if epoch_end_cb:
-                class _FakeTrainerObj:
-                    pass
-                obj = _FakeTrainerObj()
-                obj.epoch = epoch - 1   # 0-indexed like YOLO
-                obj.epochs = epochs
-                obj.metrics = epoch_metrics
-                obj.stop = False
+                obj = TrainerState(epoch=epoch - 1, epochs=epochs, metrics=epoch_metrics)
                 try:
                     epoch_end_cb(obj)
-                    if obj.stop:
-                        logger.info("Training cancelled by user at epoch %d", epoch)
-                        break
+                except TrainingCancelledException:
+                    raise
                 except Exception as cb_err:
                     logger.error("Epoch callback error: %s", cb_err)
+                if obj.stop:
+                    logger.info("Training cancelled by user at epoch %d", epoch)
+                    break
 
             logger.info(
                 "Epoch %d/%d — loss: %.4f, mAP50-95: %s",
