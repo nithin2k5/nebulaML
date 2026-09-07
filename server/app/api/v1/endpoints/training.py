@@ -29,6 +29,9 @@ from utils.dataset_utils import split_dataset_stratified
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+_SERVER_ROOT = Path(__file__).resolve().parents[4]  # …/server/
+_RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
+
 MAX_CONCURRENT_JOBS = 2
 
 training_jobs: Dict[str, Dict[str, Any]] = {}
@@ -421,9 +424,6 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         trainer = create_trainer(config.model_name)
         
         # Training parameters with strict configuration
-        _SERVER_ROOT = Path(__file__).resolve().parents[4]
-        _RUNS_BASE = _SERVER_ROOT / "runs" / "detect"
-        
         train_params = {
             "data_yaml": data_yaml,
             "epochs": config.epochs,
@@ -698,10 +698,8 @@ async def get_training_metrics(job_id: str, current_user: dict = Depends(get_cur
     if job_id not in training_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    # Construct path to results.csv
-    # The default YOLO project/name structure is runs/detect/{name}
-    job_name = f"job_{job_id}"
-    results_path = Path("runs/detect") / job_name / "results.csv"
+    # Must match the project dir run_training passes to the trainer.
+    results_path = _RUNS_BASE / f"job_{job_id}" / "results.csv"
     
     if not results_path.exists():
         # If training just started, results might not exist yet
@@ -751,10 +749,9 @@ async def get_confusion_matrix(job_id: str, current_user: dict = Depends(get_cur
     if job_id not in training_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job_name = f"job_{job_id}"
     # YOLO saves confusion_matrix.png and confusion_matrix_normalized.png
     for variant in ["confusion_matrix_normalized.png", "confusion_matrix.png"]:
-        cm_path = Path("runs/detect") / job_name / variant
+        cm_path = _RUNS_BASE / f"job_{job_id}" / variant
         if cm_path.exists():
             return FileResponse(str(cm_path), media_type="image/png")
     
@@ -766,23 +763,12 @@ async def get_per_class_metrics(job_id: str, current_user: dict = Depends(get_cu
     """
     Return per-class precision, recall, mAP50 from the results.
     """
-    import csv
-    
     if job_id not in training_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    job_name = f"job_{job_id}"
-    results_dir = Path("runs/detect") / job_name
-    
-    # Try to read per-class metrics from results
-    per_class = []
-    
-    # YOLO also saves results per class if available
-    # We can extract from the results.csv or from the training results
+
     job = training_jobs[job_id]
-    if "per_class_metrics" in job:
-        per_class = job["per_class_metrics"]
-    
+    per_class = job.get("per_class_metrics", [])
+
     return {
         "success": True,
         "job_id": job_id,
