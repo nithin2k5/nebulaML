@@ -29,8 +29,9 @@ try:
 except ImportError:
     logging.warning("torchvision not installed. TorchVisionTrainer will not work.")
 
-from app.services.base_trainer import BaseTrainer
+from app.services.base_trainer import BaseTrainer, TrainerState, TrainingCancelledException, set_seed
 from app.services.dataset_converter import yolo_yaml_to_coco_json
+from app.services.detection_metrics import evaluate_detections
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ class TorchVisionTrainer(BaseTrainer):
         self.checkpoint = checkpoint
         self.model_key = model_key
         self.device = _get_device()
+        self.model = None
 
     def _build_model(self, num_classes: int):
         """Load pretrained model and replace the classification head."""
@@ -154,6 +156,32 @@ class TorchVisionTrainer(BaseTrainer):
 
         return model
 
+    @staticmethod
+    @torch.no_grad()
+    def _evaluate(model, val_loader, device, class_names: Dict[int, str]) -> Dict[str, Any]:
+        """Run the model over the validation split and return COCO-style metrics."""
+        was_training = model.training
+        model.eval()
+
+        predictions, targets = [], []
+        for images, batch_targets in val_loader:
+            outputs = model([img.to(device) for img in images])
+            for output, target in zip(outputs, batch_targets):
+                predictions.append({
+                    "boxes": output["boxes"].detach().cpu().numpy(),
+                    "scores": output["scores"].detach().cpu().numpy(),
+                    # Shift back to 0-indexed dataset classes (0 is background here).
+                    "labels": output["labels"].detach().cpu().numpy() - 1,
+                })
+                targets.append({
+                    "boxes": target["boxes"].cpu().numpy(),
+                    "labels": target["labels"].cpu().numpy() - 1,
+                })
+
+        if was_training:
+            model.train()
+        return evaluate_detections(predictions, targets, class_names)
+
     # ── Accept the same **kwargs that run_training() passes ──────────
     def train(
         self,
@@ -174,6 +202,18 @@ class TorchVisionTrainer(BaseTrainer):
         device_req = kwargs.pop("device", None)
         device = _get_device(device_req) if device_req else self.device
         epoch_end_cb = kwargs.pop("on_train_epoch_end", None)
+        batch_end_cb = kwargs.pop("on_train_batch_end", None)
+        job_info = kwargs.pop("job_info", None)
+        if job_info is not None:
+            job_info["device_used"] = str(device)
+
+        set_seed(int(kwargs.pop("seed", 0)), bool(kwargs.pop("deterministic", False)))
+        workers = int(kwargs.pop("workers", 0) or 0)
+
+        if batch < 1:
+            # -1 selects ultralytics AutoBatch; these hand-rolled loops need a concrete size.
+            batch = 4
+            logger.info("Automatic batch sizing is not supported here, using batch=%d", batch)
 
         logger.info("TorchVision training: model=%s, epochs=%d, lr=%s, device=%s",
                      self.checkpoint, epochs, lr, device)
@@ -193,18 +233,60 @@ class TorchVisionTrainer(BaseTrainer):
         # 2. Model
         model = self._build_model(num_classes)
         model.to(device)
+        self.model = model
+        self.device = device
 
         # 3. Dataset + DataLoader
         train_ds = _COCODataset(train_json, transforms=_get_transforms())
         train_loader = DataLoader(
             train_ds, batch_size=batch, shuffle=True,
-            collate_fn=_collate, num_workers=0,
+            collate_fn=_collate, num_workers=workers,
         )
+
+        class_names = {c["id"]: c["name"] for c in categories}
+        val_loader = None
+        if "val" in coco_paths:
+            val_ds = _COCODataset(coco_paths["val"], transforms=_get_transforms())
+            if len(val_ds) > 0:
+                val_loader = DataLoader(
+                    val_ds, batch_size=batch, shuffle=False,
+                    collate_fn=_collate, num_workers=workers,
+                )
+        if val_loader is None:
+            logger.warning(
+                "No validation split available — checkpoint selection will fall back to "
+                "training loss and reported metrics will be empty."
+            )
 
         # 4. Optimizer
         params = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.SGD(params, lr=lr, momentum=0.9, weight_decay=0.0005)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=max(epochs // 3, 1), gamma=0.1)
+        optimizer = torch.optim.SGD(
+            params, lr=lr, momentum=0.9,
+            weight_decay=float(kwargs.pop("weight_decay", None) or 0.0005),
+        )
+
+        if bool(kwargs.pop("cos_lr", False)):
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        else:
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=max(epochs // 3, 1), gamma=0.1
+            )
+
+        # Faster R-CNN and RetinaNet routinely diverge in the first few hundred
+        # iterations at the reference LR without a warmup, so ramp it in.
+        warmup_epochs = float(kwargs.pop("warmup_epochs", 1.0) or 0.0)
+        warmup_iters = min(int(len(train_loader) * warmup_epochs), 1000)
+        warmup_scheduler = (
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.001, total_iters=warmup_iters
+            )
+            if warmup_iters > 0 else None
+        )
+
+        # AMP is a CUDA feature; enabling it elsewhere just adds overhead.
+        use_amp = bool(kwargs.pop("amp", True)) and device.type == "cuda"
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+        global_step = 0
 
         # Output directory
         run_dir = Path(project) / name
@@ -213,6 +295,8 @@ class TorchVisionTrainer(BaseTrainer):
         best_pt = weights_dir / "best.pt"
 
         best_loss = float("inf")
+        best_map = -1.0
+        best_eval: Dict[str, Any] = {}
         completed_epoch = 0
 
         # 5. Training loop
@@ -223,40 +307,75 @@ class TorchVisionTrainer(BaseTrainer):
                 images = [img.to(device) for img in images]
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-                loss_dict = model(images, targets)
-                losses = sum(loss for loss in loss_dict.values())
+                with torch.amp.autocast("cuda", enabled=use_amp):
+                    loss_dict = model(images, targets)
+                    losses = sum(loss for loss in loss_dict.values())
 
-                optimizer.zero_grad()
-                losses.backward()
-                optimizer.step()
+                if not torch.isfinite(losses):
+                    # A single bad batch shouldn't poison every weight in the model.
+                    logger.warning("Non-finite loss at epoch %d, skipping batch", epoch)
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+
+                optimizer.zero_grad(set_to_none=True)
+                scaler.scale(losses).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(params, max_norm=10.0)
+                scaler.step(optimizer)
+                scaler.update()
                 epoch_loss += losses.item()
+
+                if warmup_scheduler is not None and global_step < warmup_iters:
+                    warmup_scheduler.step()
+                global_step += 1
+
+                # Lets a cancel request take effect mid-epoch rather than waiting
+                # for the epoch (and its validation pass) to finish.
+                if batch_end_cb:
+                    batch_end_cb(TrainerState(epoch=epoch - 1, epochs=epochs))
 
             lr_scheduler.step()
             avg_loss = epoch_loss / max(len(train_loader), 1)
             completed_epoch = epoch
 
-            if avg_loss < best_loss:
+            epoch_metrics = {"train/loss": avg_loss}
+            if val_loader is not None:
+                evaluation = self._evaluate(model, val_loader, device, class_names)
+                val_metrics = evaluation["metrics"]
+                epoch_metrics.update({
+                    "metrics/mAP50(B)": val_metrics["map50"],
+                    "metrics/mAP50-95(B)": val_metrics["map50-95"],
+                    "metrics/precision(B)": val_metrics["precision"],
+                    "metrics/recall(B)": val_metrics["recall"],
+                })
+                # Select on validation mAP so the saved checkpoint is not just the
+                # one that overfit the training split hardest.
+                if val_metrics["map50-95"] > best_map:
+                    best_map = val_metrics["map50-95"]
+                    best_eval = evaluation
+                    torch.save(model.state_dict(), best_pt)
+            elif avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(model.state_dict(), best_pt)
 
-            # Epoch-end callback (same fake trainer_obj as RT-DETR)
+            # Epoch-end callback (same trainer_obj shape as RT-DETR)
             if epoch_end_cb:
-                class _Obj:
-                    pass
-                obj = _Obj()
-                obj.epoch = epoch - 1
-                obj.epochs = epochs
-                obj.metrics = {"train/loss": avg_loss}
-                obj.stop = False
+                obj = TrainerState(epoch=epoch - 1, epochs=epochs, metrics=epoch_metrics)
                 try:
                     epoch_end_cb(obj)
-                    if obj.stop:
-                        logger.info("Training cancelled at epoch %d", epoch)
-                        break
+                except TrainingCancelledException:
+                    raise
                 except Exception as cb_err:
                     logger.error("Epoch callback error: %s", cb_err)
+                if obj.stop:
+                    logger.info("Training cancelled at epoch %d", epoch)
+                    break
 
-            logger.info("Epoch %d/%d — loss: %.4f", epoch, epochs, avg_loss)
+            logger.info(
+                "Epoch %d/%d — loss: %.4f, mAP50-95: %s",
+                epoch, epochs, avg_loss,
+                f"{epoch_metrics['metrics/mAP50-95(B)']:.4f}" if val_loader is not None else "n/a",
+            )
 
         # 6. model_meta.json
         meta = {
@@ -274,18 +393,36 @@ class TorchVisionTrainer(BaseTrainer):
             "epochs_completed": completed_epoch,
             "model_path": str(best_pt),
             "results_dir": str(run_dir),
-            "metrics": {
+            "metrics": best_eval.get("metrics", {
                 "map50": 0.0,
                 "map50-95": 0.0,
                 "precision": 0.0,
                 "recall": 0.0,
-            },
-            "per_class_metrics": [],
+            }),
+            "per_class_metrics": best_eval.get("per_class_metrics", []),
             "confusion_matrix_path": None,
         }
 
-    def validate(self, data_config: str = "", **kwargs) -> Dict[str, Any]:
-        return {"metrics": {}}
+    def validate(self, data_yaml: str = "", **kwargs) -> Dict[str, Any]:
+        """Evaluate the current model against the val split of a YOLO data.yaml."""
+        coco_paths = yolo_yaml_to_coco_json(data_yaml)
+        if "val" not in coco_paths:
+            raise FileNotFoundError("Dataset has no validation split to evaluate against")
+
+        with open(coco_paths["val"], "r") as f:
+            categories = sorted(json.load(f)["categories"], key=lambda c: c["id"])
+        class_names = {c["id"]: c["name"] for c in categories}
+
+        if self.model is None:
+            raise RuntimeError("No trained model loaded — call train() first")
+        model = self.model
+
+        val_loader = DataLoader(
+            _COCODataset(coco_paths["val"], transforms=_get_transforms()),
+            batch_size=int(kwargs.get("batch", 4)), shuffle=False,
+            collate_fn=_collate, num_workers=int(kwargs.get("workers", 0) or 0),
+        )
+        return self._evaluate(model, val_loader, self.device, class_names)
 
     def export(self, format: str = "onnx", **kwargs) -> str:
         return ""

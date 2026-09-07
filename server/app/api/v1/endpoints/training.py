@@ -17,6 +17,7 @@ import sys
 import shutil
 
 # Import trainer
+from app.services.base_trainer import TrainingCancelledException
 from app.services.trainer_factory import create_trainer
 from app.services.model_registry import get_allowed_model_keys, get_backend, get_model_info, get_registry_for_api
 from app.services.dataset_analyzer import DatasetAnalyzer
@@ -27,6 +28,9 @@ from utils.dataset_utils import split_dataset_stratified
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+_SERVER_ROOT = Path(__file__).resolve().parents[4]  # …/server/
+_RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
 
 MAX_CONCURRENT_JOBS = 2
 
@@ -75,30 +79,99 @@ def _persist_job(job_id: str):
         logger.warning(f"Could not persist job {job_id}: {e}")
 
 
+def _assert_capacity():
+    """Reject the request if the training queue is full.
+
+    Counts pending as well as running: a job sits in 'pending' between
+    registration and the background task picking it up, so counting only
+    'running' lets concurrent requests slip past the limit.
+    """
+    active = sum(1 for j in training_jobs.values() if j.get("status") in ("running", "pending"))
+    if active >= MAX_CONCURRENT_JOBS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many training jobs in progress ({active}/{MAX_CONCURRENT_JOBS}). "
+                   "Wait for one to finish before starting another."
+        )
+
+
 def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
     uid = job.get("user_id")
     if uid is None:
         return True
     return uid == current_user.get("id")
 
+
+def _get_owned_job(job_id: str, current_user: dict) -> Dict[str, Any]:
+    """Fetch a job the caller is allowed to see, or raise 404/403.
+
+    Also loads persisted jobs first, so a job started before the last restart is
+    still addressable.
+    """
+    _ensure_jobs_loaded()
+    job = training_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not _job_owner_ok(job, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to access this job")
+    return job
+
 ALLOWED_MODELS = get_allowed_model_keys()
+
+ALLOWED_OPTIMIZERS = {"auto", "SGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp"}
+
 
 class TrainingConfig(BaseModel):
     epochs: int = Field(default=100, ge=1, le=1000, description="Number of training epochs (1-1000)")
-    batch_size: int = Field(default=16, ge=1, le=128, description="Batch size (1-128)")
+    batch_size: int = Field(default=16, ge=-1, le=128, description="Batch size (1-128), or -1 to size it automatically from available memory")
     img_size: int = Field(default=640, ge=320, le=1280, description="Image size (320-1280)")
     model_name: str = Field(default="yolov8n.pt", description="Base model name (yolov8, yolov9, yolov10, yolo11)")
-    learning_rate: Optional[float] = Field(default=None, ge=0.00001, le=1.0, description="Learning rate")
+    learning_rate: Optional[float] = Field(default=None, ge=0.00001, le=1.0, description="Initial learning rate (lr0)")
     patience: Optional[int] = Field(default=50, ge=1, le=200, description="Early stopping patience")
     device: Optional[str] = Field(default=None, description="Device (cpu, cuda, mps, or None for auto)")
     strict_epochs: bool = Field(default=False, description="If True, enforce exact epoch count (disable early stopping)")
     augmentations: Optional[Dict[str, Any]] = Field(default=None, description="Data augmentation parameters")
     preset: Optional[str] = Field(default=None, description="Preset name: fast, balanced, accurate")
 
+    # Reproducibility
+    seed: int = Field(default=0, ge=0, le=2_147_483_647, description="Random seed; the same seed and config reproduces a run")
+    deterministic: bool = Field(default=True, description="Force deterministic algorithms. Slower, but makes runs exactly repeatable")
+
+    # Optimisation schedule
+    optimizer: str = Field(default="auto", description=f"One of {sorted(ALLOWED_OPTIMIZERS)}")
+    lr_final: Optional[float] = Field(default=None, ge=0.0001, le=1.0, description="Final LR as a fraction of the initial LR (lrf)")
+    weight_decay: Optional[float] = Field(default=None, ge=0.0, le=0.1, description="Optimizer weight decay")
+    warmup_epochs: Optional[float] = Field(default=None, ge=0.0, le=20.0, description="Epochs of LR warmup before the main schedule")
+    cos_lr: bool = Field(default=False, description="Use a cosine LR schedule instead of linear decay")
+
+    # Throughput / memory
+    workers: Optional[int] = Field(default=None, ge=0, le=16, description="Dataloader worker processes")
+    cache: bool = Field(default=False, description="Cache images in RAM. Much faster per epoch on small datasets")
+    amp: bool = Field(default=True, description="Mixed precision training")
+
+    # Fine-tuning behaviour
+    freeze: Optional[int] = Field(default=None, ge=0, le=24, description="Freeze the first N layers; useful for small datasets")
+    dropout: Optional[float] = Field(default=None, ge=0.0, le=0.9, description="Dropout regularisation")
+    close_mosaic: int = Field(default=10, ge=0, le=100, description="Disable mosaic augmentation for the final N epochs so the model settles on real images")
+    save_period: int = Field(default=10, ge=-1, le=100, description="Checkpoint every N epochs (-1 disables), so an interrupted run can resume")
+
     @validator('model_name')
     def validate_model_name(cls, v):
         if v not in ALLOWED_MODELS:
             raise ValueError(f"Unsupported model '{v}'. Allowed: {sorted(ALLOWED_MODELS)}")
+        return v
+
+    @validator('optimizer')
+    def validate_optimizer(cls, v):
+        if v not in ALLOWED_OPTIMIZERS:
+            raise ValueError(f"Unsupported optimizer '{v}'. Allowed: {sorted(ALLOWED_OPTIMIZERS)}")
+        return v
+
+    @validator('batch_size')
+    def validate_batch_size(cls, v):
+        # -1 means AutoBatch; anything else below 1 is meaningless.
+        if v < 1 and v != -1:
+            raise ValueError("Batch size must be at least 1, or -1 for automatic sizing")
         return v
 
     def apply_preset(self):
@@ -133,22 +206,6 @@ class TrainingConfig(BaseModel):
                 if k not in set_fields:
                     setattr(self, k, v)
         return self
-    
-    @validator('epochs')
-    def validate_epochs(cls, v):
-        if v < 1:
-            raise ValueError("Epochs must be at least 1")
-        if v > 1000:
-            raise ValueError("Epochs cannot exceed 1000")
-        return v
-    
-    @validator('batch_size')
-    def validate_batch_size(cls, v):
-        if v < 1:
-            raise ValueError("Batch size must be at least 1")
-        if v > 128:
-            raise ValueError("Batch size cannot exceed 128")
-        return v
 
 class DatasetTrainingRequest(BaseModel):
     dataset_id: str
@@ -173,9 +230,7 @@ class AutoRetrainConfig(BaseModel):
     enabled: bool = False
     min_new_annotations: int = Field(default=50, ge=10, le=1000)
 
-# In-memory store for auto-retrain configs
-auto_retrain_configs: Dict[str, Dict[str, Any]] = {}
-    
+
 @router.post("/versions/generate")
 async def generate_dataset_version(
     request: GenerateVersionRequest,
@@ -224,6 +279,12 @@ async def list_dataset_versions(dataset_id: str, current_user: dict = Depends(ge
     """
     List all generated versions of a dataset
     """
+    from app.core.access import require_role
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
+
     versions = DatasetVersionService.list_dataset_versions(dataset_id)
     return {"versions": versions}
 
@@ -251,13 +312,7 @@ async def start_training(
     ):
         raise HTTPException(status_code=400, detail="Uploaded file must be a YAML file")
 
-    # Enforce concurrency limit
-    active = sum(1 for j in training_jobs.values() if j.get("status") == "running")
-    if active >= MAX_CONCURRENT_JOBS:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Too many training jobs running ({active}/{MAX_CONCURRENT_JOBS}). Wait for one to finish before starting another."
-        )
+    _assert_capacity()
 
     try:
         # Create TrainingConfig from form data
@@ -325,6 +380,7 @@ async def start_micro_training(
     Uses existing dataset from database instead of uploaded YAML.
     """
     _ensure_jobs_loaded()
+    _assert_capacity()
     try:
         # Create minimal config
         config = TrainingConfig(
@@ -372,6 +428,8 @@ async def start_micro_training(
         
         return {"job_id": job_id, "status": "started"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start micro-training: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -381,6 +439,14 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
     """
     Background task to run training with strict validation
     """
+    # Seeded before the try so the finally block is always well defined — an early
+    # return or a failure on the very first statement used to raise UnboundLocalError
+    # there, masking the real error.
+    final_status = "failed"
+    error_msg = "Training did not start"
+    results: Dict[str, Any] = {}
+    trainer = None
+
     try:
         training_jobs[job_id]["status"] = "running"
         training_jobs[job_id]["progress"] = 0
@@ -389,14 +455,10 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         _persist_job(job_id)
 
         if training_jobs[job_id].get("cancel_requested"):
-            training_jobs[job_id].update({
-                "status": "cancelled",
-                "cancelled_at": datetime.now().isoformat(),
-            })
-            _persist_job(job_id)
             logger.info(f"Training job {job_id} cancelled before start")
+            final_status = "cancelled"
             return
-        
+
         logger.info(f"Starting training job {job_id} with {config.epochs} epochs")
         
         # Validate dataset YAML exists
@@ -407,9 +469,6 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         trainer = create_trainer(config.model_name)
         
         # Training parameters with strict configuration
-        _SERVER_ROOT = Path(__file__).resolve().parents[4]
-        _RUNS_BASE = _SERVER_ROOT / "runs" / "detect"
-        
         train_params = {
             "data_yaml": data_yaml,
             "epochs": config.epochs,
@@ -421,33 +480,52 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             "strict_epochs": config.strict_epochs,  # Pass strict mode to trainer
         }
         
+        # Reproducibility and schedule settings always apply.
+        train_params.update({
+            "seed": config.seed,
+            "deterministic": config.deterministic,
+            "optimizer": config.optimizer,
+            "cos_lr": config.cos_lr,
+            "amp": config.amp,
+            "cache": config.cache,
+            # Mosaic hurts in the final epochs; turning it off lets the model settle.
+            "close_mosaic": min(config.close_mosaic, config.epochs),
+            # Checkpoint regardless of strict mode so an interrupted run can resume.
+            "save_period": config.save_period,
+        })
+
         # Add optional parameters
-        if config.learning_rate:
+        if config.learning_rate is not None:
             train_params["lr0"] = config.learning_rate
-        if config.patience and not config.strict_epochs:
-            # Only use patience if not in strict mode
-            train_params["patience"] = config.patience
-        elif config.strict_epochs:
+        if config.lr_final is not None:
+            train_params["lrf"] = config.lr_final
+        if config.weight_decay is not None:
+            train_params["weight_decay"] = config.weight_decay
+        if config.warmup_epochs is not None:
+            train_params["warmup_epochs"] = config.warmup_epochs
+        if config.workers is not None:
+            train_params["workers"] = config.workers
+        if config.freeze is not None:
+            train_params["freeze"] = config.freeze
+        if config.dropout is not None:
+            train_params["dropout"] = config.dropout
+
+        if config.strict_epochs:
             # In strict mode, disable early stopping - ensure all epochs run
             train_params["patience"] = config.epochs + 1
-            train_params["save_period"] = 10  # Save checkpoints every 10 epochs
+        elif config.patience:
+            train_params["patience"] = config.patience
+
         if config.device:
             train_params["device"] = config.device
-        
+
         # Add augmentations if present
         if config.augmentations:
             train_params["augmentations"] = config.augmentations
-            
+
         def batch_end_callback(trainer_obj):
-            try:
-                if job_id in training_jobs and training_jobs[job_id].get("cancel_requested"):
-                    from app.services.trainer import TrainingCancelledException
-                    raise TrainingCancelledException("Training cancelled by user")
-            except Exception as e:
-                from app.services.trainer import TrainingCancelledException
-                if isinstance(e, TrainingCancelledException):
-                    raise
-                logger.error(f"Error in batch_end_callback: {e}")
+            if training_jobs.get(job_id, {}).get("cancel_requested"):
+                raise TrainingCancelledException("Training cancelled by user")
 
         def epoch_end_callback(trainer_obj):
             try:
@@ -465,13 +543,11 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
                     if metrics:
                         training_jobs[job_id]["metrics"] = metrics
                     if training_jobs[job_id].get("cancel_requested"):
-                        from app.services.trainer import TrainingCancelledException
                         raise TrainingCancelledException("Training cancelled by user")
                     _persist_job(job_id)
+            except TrainingCancelledException:
+                raise
             except Exception as e:
-                from app.services.trainer import TrainingCancelledException
-                if isinstance(e, TrainingCancelledException):
-                    raise
                 logger.error(f"Error in training callback: {e}")
                 
         train_params["on_train_epoch_end"] = epoch_end_callback
@@ -484,27 +560,26 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         # Task 1: increment weights_version
         training_jobs[job_id]["weights_version"] = training_jobs[job_id].get("weights_version", 0) + 1
 
-
-
         final_status = "completed"
-        
+
+
+    except TrainingCancelledException:
+        logger.info(f"Training job {job_id} cancelled by user")
+        final_status = "cancelled"
+
     except Exception as e:
-        from app.services.trainer import TrainingCancelledException
-        if isinstance(e, TrainingCancelledException):
-            logger.info(f"Training job {job_id} cancelled by user")
-            final_status = "cancelled"
-        else:
-            logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
-            final_status = "failed"
-            error_msg = str(e)
-            
+        logger.error(f"Training job {job_id} failed: {str(e)}", exc_info=True)
+        final_status = "failed"
+        error_msg = str(e)
+
+
     finally:
         # Task 3: Ensure GPU memory is released before the job slot is freed
-        if 'trainer' in locals() and hasattr(trainer, 'model'):
-            del trainer.model
-        if 'trainer' in locals():
-            del trainer
-            
+        if trainer is not None:
+            if hasattr(trainer, "model"):
+                trainer.model = None
+            trainer = None
+
         import torch
         import gc
         gc.collect()
@@ -525,12 +600,13 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             training_jobs[job_id].update({
                 "status": "completed",
                 "progress": 100,
-                "current_epoch": config.epochs,
+                # Early stopping can finish short of config.epochs.
+                "current_epoch": results.get("epochs_completed", config.epochs),
                 "results": results,
-                "model_path": results.get("model_path", "") if isinstance(results, dict) else "",
-                "metrics": results.get("metrics", {}) if isinstance(results, dict) else {},
-                "per_class_metrics": results.get("per_class_metrics", []) if isinstance(results, dict) else [],
-                "confusion_matrix_path": results.get("confusion_matrix_path") if isinstance(results, dict) else None,
+                "model_path": results.get("model_path", ""),
+                "metrics": results.get("metrics", {}),
+                "per_class_metrics": results.get("per_class_metrics", []),
+                "confusion_matrix_path": results.get("confusion_matrix_path"),
                 "completed_at": datetime.now().isoformat(),
             })
         elif final_status == "cancelled":
@@ -556,79 +632,60 @@ async def get_training_status(job_id: str, current_user: dict = Depends(get_curr
     """
     Get training job status
     """
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    return training_jobs[job_id]
+    return _get_owned_job(job_id, current_user)
 
 
 @router.get("/job/{job_id}")
 async def get_training_job_by_id(job_id: str, current_user: dict = Depends(get_current_user)):
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized to view this job")
-        
-    return job
+    return _get_owned_job(job_id, current_user)
 
 @router.get("/job/{job_id}/stream")
 async def stream_job_details(job_id: str, current_user: dict = Depends(get_current_user)):
     from fastapi.responses import StreamingResponse
     import json
     
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-        
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized to view this job")
+    _get_owned_job(job_id, current_user)
 
     async def event_stream():
-        last_status = None
-        last_epoch = None
+        last_signature = None
         while True:
             # Re-fetch the job from the dict to get latest reference
             current_job = training_jobs.get(job_id)
             if not current_job:
                 break
-                
+
             status = current_job.get("status")
-            epoch = current_job.get("current_epoch")
-            
-            # Yield if something changed (status or epoch) or periodically to keep-alive
-            # Omit full output to prevent massive payloads
-            payload_dict = current_job.copy()
-            if "output" in payload_dict and len(payload_dict["output"]) > 1000:
-                payload_dict["output"] = payload_dict["output"][-1000:]
-            payload = json.dumps(payload_dict, default=str)
-            yield f"data: {payload}\n\n"
-            
-            if status in ("completed", "failed", "cancelled", "success"):
+            signature = (status, current_job.get("current_epoch"), current_job.get("progress"))
+
+            # Only push when something actually changed; a terminal status always
+            # gets one final frame so the client can close cleanly.
+            terminal = status in ("completed", "failed", "cancelled", "success")
+            if signature != last_signature or terminal:
+                last_signature = signature
+                # Omit full output to prevent massive payloads
+                payload_dict = current_job.copy()
+                if "output" in payload_dict and len(payload_dict["output"]) > 1000:
+                    payload_dict["output"] = payload_dict["output"][-1000:]
+                yield f"data: {json.dumps(payload_dict, default=str)}\n\n"
+            else:
+                yield ": keep-alive\n\n"
+
+            if terminal:
                 break
-                
+
             await asyncio.sleep(2.0)
-            
+
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @router.post("/cancel/{job_id}")
 async def cancel_training_job(job_id: str, current_user: dict = Depends(get_current_user)):
-    _ensure_jobs_loaded()
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized to cancel this job")
+    job = _get_owned_job(job_id, current_user)
     status = job.get("status")
     if status not in ("running", "pending"):
         raise HTTPException(status_code=400, detail=f"Cannot cancel job with status '{status}'")
     job["cancel_requested"] = True
     _persist_job(job_id)
-    return {"success": True, "message": "Cancellation requested; training stops after the current epoch completes"}
+    return {"success": True, "message": "Cancellation requested; training stops at the next batch boundary"}
 
 @router.get("/queue-status")
 async def get_queue_status(current_user: dict = Depends(get_current_user)):
@@ -648,7 +705,7 @@ async def get_queue_status(current_user: dict = Depends(get_current_user)):
         "pending": len(pending_jobs),
         "pending_jobs": pending_jobs,
         "max_concurrent": MAX_CONCURRENT_JOBS,
-        "slots_available": max(0, MAX_CONCURRENT_JOBS - running),
+        "slots_available": max(0, MAX_CONCURRENT_JOBS - running - len(pending_jobs)),
     }
 
 
@@ -672,11 +729,7 @@ async def delete_training_job(job_id: str, current_user: dict = Depends(get_curr
     """
     Remove a finished training job from the list. Use POST /cancel while running.
     """
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = training_jobs[job_id]
-    if not _job_owner_ok(job, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    job = _get_owned_job(job_id, current_user)
     if job.get("status") in ("running", "pending"):
         raise HTTPException(status_code=400, detail="Cancel the job first; training is still in progress")
     del training_jobs[job_id]
@@ -690,13 +743,10 @@ async def get_training_metrics(job_id: str, current_user: dict = Depends(get_cur
     import pandas as pd
     import io
     
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-        
-    # Construct path to results.csv
-    # The default YOLO project/name structure is runs/detect/{name}
-    job_name = f"job_{job_id}"
-    results_path = Path("runs/detect") / job_name / "results.csv"
+    _get_owned_job(job_id, current_user)
+
+    # Must match the project dir run_training passes to the trainer.
+    results_path = _RUNS_BASE / f"job_{job_id}" / "results.csv"
     
     if not results_path.exists():
         # If training just started, results might not exist yet
@@ -743,13 +793,11 @@ async def get_confusion_matrix(job_id: str, current_user: dict = Depends(get_cur
     """
     from fastapi.responses import FileResponse
     
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    job_name = f"job_{job_id}"
+    _get_owned_job(job_id, current_user)
+
     # YOLO saves confusion_matrix.png and confusion_matrix_normalized.png
     for variant in ["confusion_matrix_normalized.png", "confusion_matrix.png"]:
-        cm_path = Path("runs/detect") / job_name / variant
+        cm_path = _RUNS_BASE / f"job_{job_id}" / variant
         if cm_path.exists():
             return FileResponse(str(cm_path), media_type="image/png")
     
@@ -761,23 +809,9 @@ async def get_per_class_metrics(job_id: str, current_user: dict = Depends(get_cu
     """
     Return per-class precision, recall, mAP50 from the results.
     """
-    import csv
-    
-    if job_id not in training_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    job_name = f"job_{job_id}"
-    results_dir = Path("runs/detect") / job_name
-    
-    # Try to read per-class metrics from results
-    per_class = []
-    
-    # YOLO also saves results per class if available
-    # We can extract from the results.csv or from the training results
-    job = training_jobs[job_id]
-    if "per_class_metrics" in job:
-        per_class = job["per_class_metrics"]
-    
+    job = _get_owned_job(job_id, current_user)
+    per_class = job.get("per_class_metrics", [])
+
     return {
         "success": True,
         "job_id": job_id,
@@ -863,12 +897,7 @@ async def start_training_from_dataset(
             raise HTTPException(status_code=404, detail="Dataset not found")
         require_role(request.dataset_id, current_user["id"], dataset["user_id"], "admin")
 
-        active = sum(1 for j in training_jobs.values() if j.get("status") in ["running", "pending"])
-        if active >= MAX_CONCURRENT_JOBS:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many training jobs running ({active}/{MAX_CONCURRENT_JOBS}). Wait for one to finish before starting another."
-            )
+        _assert_capacity()
 
         # Analyze dataset first
         try:
@@ -974,6 +1003,7 @@ async def export_and_train(
     Export dataset and start training in one operation (strict training mode)
     """
     _ensure_jobs_loaded()
+    _assert_capacity()
     try:
         from app.core.access import require_role
         dataset = DatasetService.get_dataset(request.dataset_id)
@@ -1061,6 +1091,8 @@ async def export_and_train(
             "augmentations": request.config.augmentations
         })
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Export and train error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

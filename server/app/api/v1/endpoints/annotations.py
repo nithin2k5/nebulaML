@@ -29,6 +29,9 @@ from app.core.access import require_role, effective_role
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+_SERVER_ROOT = Path(__file__).resolve().parents[4]  # …/server/
+_RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
+
 # Keep in-memory storage as fallback/backup
 annotations_db: Dict[str, Dict] = {}
 datasets_db: Dict[str, Dict] = {}
@@ -1293,7 +1296,7 @@ async def auto_label_images(
 
     model_path = model_name
     if job_id:
-        weights_path = Path("runs/detect") / f"job_{job_id}" / "weights" / "best.pt"
+        weights_path = _RUNS_BASE / f"job_{job_id}" / "weights" / "best.pt"
         if weights_path.exists():
             model_path = str(weights_path)
             

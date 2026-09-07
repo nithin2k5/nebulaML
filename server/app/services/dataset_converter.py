@@ -54,8 +54,11 @@ def yolo_yaml_to_coco_json(
     for split in ("train", "val"):
         split_rel = data.get(split, f"{split}/images")
         images_dir = (base_path / split_rel).resolve()
-        # Labels dir mirrors images dir with 'labels' instead of 'images'
-        labels_dir = Path(str(images_dir).replace("/images", "/labels"))
+        # Labels dir mirrors images dir with 'labels' instead of 'images'. Rebuild it from
+        # path parts rather than string replacement so it works with Windows separators.
+        labels_dir = Path(*[
+            "labels" if part == "images" else part for part in images_dir.parts
+        ])
 
         if not images_dir.exists():
             logger.warning("Images dir not found for split '%s': %s", split, images_dir)

@@ -13,8 +13,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 
-from app.services.base_trainer import BaseTrainer
+from app.services.base_trainer import BaseTrainer, TrainerState, TrainingCancelledException, set_seed
 from app.services.dataset_converter import yolo_yaml_to_coco_json
+from app.services.detection_metrics import evaluate_detections
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +83,95 @@ def _collate(batch):
     return {"pixel_values": pixel_values, "labels": labels}
 
 
+class _COCOValDataset(Dataset):
+    """Validation view of a COCO split.
+
+    Unlike the training dataset this keeps the original image size and absolute
+    xyxy ground-truth boxes, which post-processing needs to map predictions back
+    into image coordinates.
+    """
+
+    def __init__(self, json_path: str, processor):
+        with open(json_path, "r") as f:
+            coco = json.load(f)
+        self.processor = processor
+        self.images = {img["id"]: img for img in coco["images"]}
+        self.ann_by_img = {}
+        for ann in coco["annotations"]:
+            self.ann_by_img.setdefault(ann["image_id"], []).append(ann)
+        self.image_ids = list(self.images.keys())
+
+    def __len__(self):
+        return len(self.image_ids)
+
+    def __getitem__(self, idx):
+        img_id = self.image_ids[idx]
+        img_info = self.images[img_id]
+        image = Image.open(img_info["file_name"]).convert("RGB")
+
+        encoding = self.processor(images=image, return_tensors="pt")
+
+        boxes, labels = [], []
+        for ann in self.ann_by_img.get(img_id, []):
+            x, y, w, h = ann["bbox"]
+            boxes.append([x, y, x + w, y + h])
+            labels.append(ann["category_id"])
+
+        return {
+            "pixel_values": encoding["pixel_values"].squeeze(0),
+            "size": (img_info["height"], img_info["width"]),
+            "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
+            "labels": torch.tensor(labels, dtype=torch.int64).reshape(-1),
+        }
+
+
+def _collate_val(batch):
+    return {
+        "pixel_values": torch.stack([b["pixel_values"] for b in batch]),
+        "sizes": [b["size"] for b in batch],
+        "targets": [{"boxes": b["boxes"], "labels": b["labels"]} for b in batch],
+    }
+
+
 class RTDetrTrainer(BaseTrainer):
     """Fine-tune RT-DETR via HuggingFace transformers."""
 
     def __init__(self, checkpoint: str = "PekingU/rtdetr_r50vd"):
         self.checkpoint = checkpoint
         self.device = _get_device()
+        self.model = None
+        self.processor = None
+
+    @staticmethod
+    @torch.no_grad()
+    def _evaluate(model, processor, val_loader, device, class_names: Dict[int, str]) -> Dict[str, Any]:
+        """Run the model over the validation split and return COCO-style metrics."""
+        was_training = model.training
+        model.eval()
+
+        predictions, targets = [], []
+        for batch_data in val_loader:
+            outputs = model(pixel_values=batch_data["pixel_values"].to(device))
+            # A low threshold keeps the tail of the PR curve intact for AP.
+            processed = processor.post_process_object_detection(
+                outputs,
+                threshold=0.001,
+                target_sizes=torch.tensor(batch_data["sizes"], device=device),
+            )
+            for result, target in zip(processed, batch_data["targets"]):
+                predictions.append({
+                    "boxes": result["boxes"].detach().cpu().numpy(),
+                    "scores": result["scores"].detach().cpu().numpy(),
+                    "labels": result["labels"].detach().cpu().numpy(),
+                })
+                targets.append({
+                    "boxes": target["boxes"].numpy(),
+                    "labels": target["labels"].numpy(),
+                })
+
+        if was_training:
+            model.train()
+        return evaluate_detections(predictions, targets, class_names)
 
     # ── Accept the same **kwargs that run_training() passes ───────────
     def train(
@@ -117,8 +201,20 @@ class RTDetrTrainer(BaseTrainer):
         device_req = kwargs.pop("device", None)
         device = _get_device(device_req) if device_req else self.device
 
-        # Callback support — the endpoint passes on_train_epoch_end
+        # Callback support — the endpoint passes these to drive progress and cancellation
         epoch_end_cb = kwargs.pop("on_train_epoch_end", None)
+        batch_end_cb = kwargs.pop("on_train_batch_end", None)
+        job_info = kwargs.pop("job_info", None)
+        if job_info is not None:
+            job_info["device_used"] = str(device)
+
+        set_seed(int(kwargs.pop("seed", 0)), bool(kwargs.pop("deterministic", False)))
+        workers = int(kwargs.pop("workers", 0) or 0)
+
+        if batch < 1:
+            # -1 selects ultralytics AutoBatch; these hand-rolled loops need a concrete size.
+            batch = 4
+            logger.info("Automatic batch sizing is not supported here, using batch=%d", batch)
 
         logger.info("RT-DETR training: checkpoint=%s, epochs=%d, lr=%s, device=%s",
                      self.checkpoint, epochs, lr, device)
@@ -147,16 +243,47 @@ class RTDetrTrainer(BaseTrainer):
             ignore_mismatched_sizes=True,
         )
         model.to(device)
+        self.model = model
+        self.processor = processor
+        self.device = device
 
         # 3. Dataset + DataLoader
         train_ds = _COCODataset(train_json, processor)
         train_loader = DataLoader(
             train_ds, batch_size=batch, shuffle=True,
-            collate_fn=_collate, num_workers=0,
+            collate_fn=_collate, num_workers=workers,
         )
 
+        class_names = {c["id"]: c["name"] for c in categories}
+        val_loader = None
+        if "val" in coco_paths:
+            val_ds = _COCOValDataset(coco_paths["val"], processor)
+            if len(val_ds) > 0:
+                val_loader = DataLoader(
+                    val_ds, batch_size=batch, shuffle=False,
+                    collate_fn=_collate_val, num_workers=workers,
+                )
+        if val_loader is None:
+            logger.warning(
+                "No validation split available — checkpoint selection will fall back to "
+                "training loss and reported metrics will be empty."
+            )
+
         # 4. Optimizer
-        optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr))
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=float(lr),
+            weight_decay=float(kwargs.pop("weight_decay", None) or 1e-4),
+        )
+        # There was previously no schedule at all — a flat LR for the whole run.
+        if bool(kwargs.pop("cos_lr", True)):
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        else:
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=max(epochs // 3, 1), gamma=0.1
+            )
+
+        use_amp = bool(kwargs.pop("amp", True)) and device.type == "cuda"
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
         # Prepare output directory
         run_dir = Path(project) / name
@@ -165,6 +292,8 @@ class RTDetrTrainer(BaseTrainer):
         best_pt = weights_dir / "best.pt"
 
         best_loss = float("inf")
+        best_map = -1.0
+        best_eval: Dict[str, Any] = {}
 
         # 5. Training loop
         model.train()
@@ -175,42 +304,78 @@ class RTDetrTrainer(BaseTrainer):
                 labels = [
                     {k: v.to(device) for k, v in t.items()} for t in batch_data["labels"]
                 ]
-                outputs = model(pixel_values=pixel_values, labels=labels)
-                loss = outputs.loss
+                with torch.amp.autocast("cuda", enabled=use_amp):
+                    outputs = model(pixel_values=pixel_values, labels=labels)
+                    loss = outputs.loss
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                if not torch.isfinite(loss):
+                    # A single bad batch shouldn't poison every weight in the model.
+                    logger.warning("Non-finite loss at epoch %d, skipping batch", epoch)
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+
+                optimizer.zero_grad(set_to_none=True)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                # DETR-family training is unstable without tight gradient clipping.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
+                scaler.step(optimizer)
+                scaler.update()
                 epoch_loss += loss.item()
 
+                # Lets a cancel request take effect mid-epoch rather than waiting
+                # for the epoch (and its validation pass) to finish.
+                if batch_end_cb:
+                    batch_end_cb(TrainerState(epoch=epoch - 1, epochs=epochs))
+
+            lr_scheduler.step()
             avg_loss = epoch_loss / max(len(train_loader), 1)
 
-            if avg_loss < best_loss:
-                best_loss = avg_loss
+            def _save_best():
                 torch.save(model.state_dict(), best_pt)
                 # Also save HF format for easy reloading
                 hf_dir = weights_dir / "hf_model"
                 model.save_pretrained(hf_dir)
                 processor.save_pretrained(hf_dir)
 
+            epoch_metrics = {"train/loss": avg_loss}
+            if val_loader is not None:
+                evaluation = self._evaluate(model, processor, val_loader, device, class_names)
+                val_metrics = evaluation["metrics"]
+                epoch_metrics.update({
+                    "metrics/mAP50(B)": val_metrics["map50"],
+                    "metrics/mAP50-95(B)": val_metrics["map50-95"],
+                    "metrics/precision(B)": val_metrics["precision"],
+                    "metrics/recall(B)": val_metrics["recall"],
+                })
+                # Select on validation mAP so the saved checkpoint is not just the
+                # one that overfit the training split hardest.
+                if val_metrics["map50-95"] > best_map:
+                    best_map = val_metrics["map50-95"]
+                    best_eval = evaluation
+                    _save_best()
+            elif avg_loss < best_loss:
+                best_loss = avg_loss
+                _save_best()
+
             # Epoch-end callback (mimics YOLO trainer_obj interface)
             if epoch_end_cb:
-                class _FakeTrainerObj:
-                    pass
-                obj = _FakeTrainerObj()
-                obj.epoch = epoch - 1   # 0-indexed like YOLO
-                obj.epochs = epochs
-                obj.metrics = {"train/loss": avg_loss}
-                obj.stop = False
+                obj = TrainerState(epoch=epoch - 1, epochs=epochs, metrics=epoch_metrics)
                 try:
                     epoch_end_cb(obj)
-                    if obj.stop:
-                        logger.info("Training cancelled by user at epoch %d", epoch)
-                        break
+                except TrainingCancelledException:
+                    raise
                 except Exception as cb_err:
                     logger.error("Epoch callback error: %s", cb_err)
+                if obj.stop:
+                    logger.info("Training cancelled by user at epoch %d", epoch)
+                    break
 
-            logger.info("Epoch %d/%d — loss: %.4f", epoch, epochs, avg_loss)
+            logger.info(
+                "Epoch %d/%d — loss: %.4f, mAP50-95: %s",
+                epoch, epochs, avg_loss,
+                f"{epoch_metrics['metrics/mAP50-95(B)']:.4f}" if val_loader is not None else "n/a",
+            )
 
         # 6. Save model_meta.json
         meta = {
@@ -228,18 +393,35 @@ class RTDetrTrainer(BaseTrainer):
             "epochs_completed": epoch,
             "model_path": str(best_pt),
             "results_dir": str(run_dir),
-            "metrics": {
+            "metrics": best_eval.get("metrics", {
                 "map50": 0.0,
                 "map50-95": 0.0,
                 "precision": 0.0,
                 "recall": 0.0,
-            },
-            "per_class_metrics": [],
+            }),
+            "per_class_metrics": best_eval.get("per_class_metrics", []),
             "confusion_matrix_path": None,
         }
 
-    def validate(self, data_config: str = "", **kwargs) -> Dict[str, Any]:
-        return {"metrics": {}}
+    def validate(self, data_yaml: str = "", **kwargs) -> Dict[str, Any]:
+        """Evaluate the current model against the val split of a YOLO data.yaml."""
+        if self.model is None or self.processor is None:
+            raise RuntimeError("No trained model loaded — call train() first")
+
+        coco_paths = yolo_yaml_to_coco_json(data_yaml)
+        if "val" not in coco_paths:
+            raise FileNotFoundError("Dataset has no validation split to evaluate against")
+
+        with open(coco_paths["val"], "r") as f:
+            categories = sorted(json.load(f)["categories"], key=lambda c: c["id"])
+        class_names = {c["id"]: c["name"] for c in categories}
+
+        val_loader = DataLoader(
+            _COCOValDataset(coco_paths["val"], self.processor),
+            batch_size=int(kwargs.get("batch", 4)), shuffle=False,
+            collate_fn=_collate_val, num_workers=int(kwargs.get("workers", 0) or 0),
+        )
+        return self._evaluate(self.model, self.processor, val_loader, self.device, class_names)
 
     def export(self, format: str = "onnx", **kwargs) -> str:
         return ""

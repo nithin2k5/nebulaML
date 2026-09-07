@@ -5,10 +5,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import torch
 
-class TrainingCancelledException(Exception):
-    pass
+from app.services.base_trainer import BaseTrainer, TrainingCancelledException
 
-class YOLOTrainer:
+class YOLOTrainer(BaseTrainer):
     """YOLO model training handler"""
     
     def __init__(self, model_name: str = "yolov8n.pt"):
@@ -194,7 +193,7 @@ class YOLOTrainer:
             "recall": float(metrics.box.mr)
         }
     
-    def export_model(self, format: str = "onnx") -> str:
+    def export(self, format: str = "onnx") -> str:
         """
         Export model to different format
         
