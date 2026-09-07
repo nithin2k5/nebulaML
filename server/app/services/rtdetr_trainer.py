@@ -15,6 +15,7 @@ from PIL import Image
 
 from app.services.base_trainer import BaseTrainer
 from app.services.dataset_converter import yolo_yaml_to_coco_json
+from app.services.detection_metrics import evaluate_detections
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +83,95 @@ def _collate(batch):
     return {"pixel_values": pixel_values, "labels": labels}
 
 
+class _COCOValDataset(Dataset):
+    """Validation view of a COCO split.
+
+    Unlike the training dataset this keeps the original image size and absolute
+    xyxy ground-truth boxes, which post-processing needs to map predictions back
+    into image coordinates.
+    """
+
+    def __init__(self, json_path: str, processor):
+        with open(json_path, "r") as f:
+            coco = json.load(f)
+        self.processor = processor
+        self.images = {img["id"]: img for img in coco["images"]}
+        self.ann_by_img = {}
+        for ann in coco["annotations"]:
+            self.ann_by_img.setdefault(ann["image_id"], []).append(ann)
+        self.image_ids = list(self.images.keys())
+
+    def __len__(self):
+        return len(self.image_ids)
+
+    def __getitem__(self, idx):
+        img_id = self.image_ids[idx]
+        img_info = self.images[img_id]
+        image = Image.open(img_info["file_name"]).convert("RGB")
+
+        encoding = self.processor(images=image, return_tensors="pt")
+
+        boxes, labels = [], []
+        for ann in self.ann_by_img.get(img_id, []):
+            x, y, w, h = ann["bbox"]
+            boxes.append([x, y, x + w, y + h])
+            labels.append(ann["category_id"])
+
+        return {
+            "pixel_values": encoding["pixel_values"].squeeze(0),
+            "size": (img_info["height"], img_info["width"]),
+            "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
+            "labels": torch.tensor(labels, dtype=torch.int64).reshape(-1),
+        }
+
+
+def _collate_val(batch):
+    return {
+        "pixel_values": torch.stack([b["pixel_values"] for b in batch]),
+        "sizes": [b["size"] for b in batch],
+        "targets": [{"boxes": b["boxes"], "labels": b["labels"]} for b in batch],
+    }
+
+
 class RTDetrTrainer(BaseTrainer):
     """Fine-tune RT-DETR via HuggingFace transformers."""
 
     def __init__(self, checkpoint: str = "PekingU/rtdetr_r50vd"):
         self.checkpoint = checkpoint
         self.device = _get_device()
+        self.model = None
+        self.processor = None
+
+    @staticmethod
+    @torch.no_grad()
+    def _evaluate(model, processor, val_loader, device, class_names: Dict[int, str]) -> Dict[str, Any]:
+        """Run the model over the validation split and return COCO-style metrics."""
+        was_training = model.training
+        model.eval()
+
+        predictions, targets = [], []
+        for batch_data in val_loader:
+            outputs = model(pixel_values=batch_data["pixel_values"].to(device))
+            # A low threshold keeps the tail of the PR curve intact for AP.
+            processed = processor.post_process_object_detection(
+                outputs,
+                threshold=0.001,
+                target_sizes=torch.tensor(batch_data["sizes"], device=device),
+            )
+            for result, target in zip(processed, batch_data["targets"]):
+                predictions.append({
+                    "boxes": result["boxes"].detach().cpu().numpy(),
+                    "scores": result["scores"].detach().cpu().numpy(),
+                    "labels": result["labels"].detach().cpu().numpy(),
+                })
+                targets.append({
+                    "boxes": target["boxes"].numpy(),
+                    "labels": target["labels"].numpy(),
+                })
+
+        if was_training:
+            model.train()
+        return evaluate_detections(predictions, targets, class_names)
 
     # ── Accept the same **kwargs that run_training() passes ───────────
     def train(
@@ -147,6 +231,9 @@ class RTDetrTrainer(BaseTrainer):
             ignore_mismatched_sizes=True,
         )
         model.to(device)
+        self.model = model
+        self.processor = processor
+        self.device = device
 
         # 3. Dataset + DataLoader
         train_ds = _COCODataset(train_json, processor)
@@ -154,6 +241,21 @@ class RTDetrTrainer(BaseTrainer):
             train_ds, batch_size=batch, shuffle=True,
             collate_fn=_collate, num_workers=0,
         )
+
+        class_names = {c["id"]: c["name"] for c in categories}
+        val_loader = None
+        if "val" in coco_paths:
+            val_ds = _COCOValDataset(coco_paths["val"], processor)
+            if len(val_ds) > 0:
+                val_loader = DataLoader(
+                    val_ds, batch_size=batch, shuffle=False,
+                    collate_fn=_collate_val, num_workers=0,
+                )
+        if val_loader is None:
+            logger.warning(
+                "No validation split available — checkpoint selection will fall back to "
+                "training loss and reported metrics will be empty."
+            )
 
         # 4. Optimizer
         optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr))
@@ -165,6 +267,8 @@ class RTDetrTrainer(BaseTrainer):
         best_pt = weights_dir / "best.pt"
 
         best_loss = float("inf")
+        best_map = -1.0
+        best_eval: Dict[str, Any] = {}
 
         # 5. Training loop
         model.train()
@@ -185,13 +289,32 @@ class RTDetrTrainer(BaseTrainer):
 
             avg_loss = epoch_loss / max(len(train_loader), 1)
 
-            if avg_loss < best_loss:
-                best_loss = avg_loss
+            def _save_best():
                 torch.save(model.state_dict(), best_pt)
                 # Also save HF format for easy reloading
                 hf_dir = weights_dir / "hf_model"
                 model.save_pretrained(hf_dir)
                 processor.save_pretrained(hf_dir)
+
+            epoch_metrics = {"train/loss": avg_loss}
+            if val_loader is not None:
+                evaluation = self._evaluate(model, processor, val_loader, device, class_names)
+                val_metrics = evaluation["metrics"]
+                epoch_metrics.update({
+                    "metrics/mAP50(B)": val_metrics["map50"],
+                    "metrics/mAP50-95(B)": val_metrics["map50-95"],
+                    "metrics/precision(B)": val_metrics["precision"],
+                    "metrics/recall(B)": val_metrics["recall"],
+                })
+                # Select on validation mAP so the saved checkpoint is not just the
+                # one that overfit the training split hardest.
+                if val_metrics["map50-95"] > best_map:
+                    best_map = val_metrics["map50-95"]
+                    best_eval = evaluation
+                    _save_best()
+            elif avg_loss < best_loss:
+                best_loss = avg_loss
+                _save_best()
 
             # Epoch-end callback (mimics YOLO trainer_obj interface)
             if epoch_end_cb:
@@ -200,7 +323,7 @@ class RTDetrTrainer(BaseTrainer):
                 obj = _FakeTrainerObj()
                 obj.epoch = epoch - 1   # 0-indexed like YOLO
                 obj.epochs = epochs
-                obj.metrics = {"train/loss": avg_loss}
+                obj.metrics = epoch_metrics
                 obj.stop = False
                 try:
                     epoch_end_cb(obj)
@@ -210,7 +333,11 @@ class RTDetrTrainer(BaseTrainer):
                 except Exception as cb_err:
                     logger.error("Epoch callback error: %s", cb_err)
 
-            logger.info("Epoch %d/%d — loss: %.4f", epoch, epochs, avg_loss)
+            logger.info(
+                "Epoch %d/%d — loss: %.4f, mAP50-95: %s",
+                epoch, epochs, avg_loss,
+                f"{epoch_metrics['metrics/mAP50-95(B)']:.4f}" if val_loader is not None else "n/a",
+            )
 
         # 6. Save model_meta.json
         meta = {
@@ -228,18 +355,35 @@ class RTDetrTrainer(BaseTrainer):
             "epochs_completed": epoch,
             "model_path": str(best_pt),
             "results_dir": str(run_dir),
-            "metrics": {
+            "metrics": best_eval.get("metrics", {
                 "map50": 0.0,
                 "map50-95": 0.0,
                 "precision": 0.0,
                 "recall": 0.0,
-            },
-            "per_class_metrics": [],
+            }),
+            "per_class_metrics": best_eval.get("per_class_metrics", []),
             "confusion_matrix_path": None,
         }
 
     def validate(self, data_config: str = "", **kwargs) -> Dict[str, Any]:
-        return {"metrics": {}}
+        """Evaluate the current model against the val split of a YOLO data.yaml."""
+        if self.model is None or self.processor is None:
+            raise RuntimeError("No trained model loaded — call train() first")
+
+        coco_paths = yolo_yaml_to_coco_json(data_config)
+        if "val" not in coco_paths:
+            raise FileNotFoundError("Dataset has no validation split to evaluate against")
+
+        with open(coco_paths["val"], "r") as f:
+            categories = sorted(json.load(f)["categories"], key=lambda c: c["id"])
+        class_names = {c["id"]: c["name"] for c in categories}
+
+        val_loader = DataLoader(
+            _COCOValDataset(coco_paths["val"], self.processor),
+            batch_size=int(kwargs.get("batch", 4)), shuffle=False,
+            collate_fn=_collate_val, num_workers=0,
+        )
+        return self._evaluate(self.model, self.processor, val_loader, self.device, class_names)
 
     def export(self, format: str = "onnx", **kwargs) -> str:
         return ""
