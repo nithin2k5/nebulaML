@@ -82,6 +82,7 @@ export default function GamifiedTerminal({ output, onCommand, isRunning = false 
                     <Button
                         variant="ghost"
                         size="icon"
+                        aria-label={isMaximized ? "Restore terminal" : "Maximize terminal"}
                         className="h-6 w-6 text-gray-400 hover:text-white"
                         onClick={() => setIsMaximized(!isMaximized)}
                     >

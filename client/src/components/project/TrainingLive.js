@@ -8,8 +8,10 @@ import { ArrowLeft, Activity, TrendingUp, CheckCircle2, XCircle, Loader2, BarCha
 import { API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function TrainingLive({ jobId, dataset, onBack }) {
+    const confirm = useConfirm();
     const { token } = useAuth();
     const [job, setJob] = useState(null);
     const [metrics, setMetrics] = useState([]);
@@ -111,7 +113,11 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
     }, []);
 
     const handleCancelTraining = async () => {
-        if (!window.confirm("Stop training? The run ends after the current epoch finishes.")) return;
+        if (!(await confirm({
+          title: "Stop training",
+          description: "The run stops at the next batch boundary. Checkpoints already saved are kept.",
+          confirmLabel: "Stop run",
+        }))) return;
         setCancelling(true);
         try {
             const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
@@ -279,12 +285,26 @@ export default function TrainingLive({ jobId, dataset, onBack }) {
                         <span>Epoch {currentEpoch} / {totalEpochs}</span>
                         <span>{progress.toFixed(1)}%</span>
                     </div>
-                    <div className="h-3 bg-muted rounded-none overflow-hidden">
-                        <div 
+                    {/* Progress arrives asynchronously, so announce it rather than
+                        leaving screen-reader users with a silent bar. */}
+                    <div
+                        role="progressbar"
+                        aria-valuenow={Math.round(progress)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`Training progress, epoch ${currentEpoch} of ${totalEpochs}`}
+                        className="h-3 bg-muted rounded-none overflow-hidden"
+                    >
+                        <div
                             className="h-full bg-primary rounded-none transition-all duration-500"
                             style={{ width: `${progress}%` }}
                         />
                     </div>
+                    <p aria-live="polite" className="sr-only">
+                        {isRunning
+                            ? `Training epoch ${currentEpoch} of ${totalEpochs}, ${progress.toFixed(0)} percent complete.`
+                            : `Training ${job?.status || "status unknown"}.`}
+                    </p>
                     {flatMetrics && (
                         <div className="grid grid-cols-4 gap-3 mt-4 text-center">
                             <div>

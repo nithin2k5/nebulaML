@@ -11,6 +11,7 @@ import { Shield, ShieldAlert, ShieldCheck, Mail, UserPlus, Trash2, Activity, Clo
 import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 function formatDistanceToNow(isoOrDate) {
     const diffSec = (new Date(isoOrDate).getTime() - Date.now()) / 1000;
@@ -31,6 +32,7 @@ function formatDistanceToNow(isoOrDate) {
 }
 
 export default function ProjectTeam({ dataset }) {
+    const confirm = useConfirm();
     const { token } = useAuth();
     const [members, setMembers] = useState([]);
     const [activities, setActivities] = useState([]);
@@ -98,7 +100,11 @@ export default function ProjectTeam({ dataset }) {
     };
 
     const handleRemoveMember = async (userId) => {
-        if (!confirm("Are you sure you want to remove this member?")) return;
+        if (!(await confirm({
+          title: "Remove member",
+          description: "They lose access to this project immediately.",
+          confirmLabel: "Remove",
+        }))) return;
 
         try {
             const res = await fetch(API_ENDPOINTS.DATASETS.MEMBER_REMOVE(dataset.id, userId), {
@@ -205,7 +211,7 @@ export default function ProjectTeam({ dataset }) {
                                             {member.role}
                                         </Badge>
                                         {member.role !== 'owner' && (
-                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleRemoveMember(member.user_id)}>
+                                            <Button variant="ghost" size="icon" aria-label="Remove member" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleRemoveMember(member.user_id)}>
                                                 <Trash2 className="w-4 h-4" />
                                             </Button>
                                         )}

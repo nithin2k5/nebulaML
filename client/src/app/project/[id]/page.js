@@ -265,7 +265,7 @@ export default function ProjectPage() {
             {/* Project Header */}
             <header className="h-12 border-b border-white/20 bg-black/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
                 <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard")} className="border border-white/20 hover:border-white/50 rounded-none h-8 w-8">
+                    <Button variant="ghost" size="icon" aria-label="Back to dashboard" onClick={() => router.push("/dashboard")} className="border border-white/20 hover:border-white/50 rounded-none h-8 w-8">
                         <ArrowLeft className="w-4 h-4" />
                     </Button>
                     <div className="flex items-center gap-3">
@@ -357,7 +357,7 @@ export default function ProjectPage() {
                             <Button size="sm" className="bg-emerald-500 text-black hover:bg-emerald-400" onClick={() => { setCompletionBanner(null); handleTabChange('deploy'); }}>
                                 [ DEPLOY_MODEL ]
                             </Button>
-                            <Button size="icon" variant="ghost" className="w-8 h-8 rounded-none border border-transparent hover:border-emerald-500/50 text-emerald-500" onClick={() => setCompletionBanner(null)}>
+                            <Button size="icon" aria-label="Dismiss notification" variant="ghost" className="w-8 h-8 rounded-none border border-transparent hover:border-emerald-500/50 text-emerald-500" onClick={() => setCompletionBanner(null)}>
                                 <X className="w-4 h-4" />
                             </Button>
                         </div>

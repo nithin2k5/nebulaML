@@ -1,20 +1,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardStats from "@/components/DashboardStats";
-import DatasetsTab from "@/components/DatasetsTab";
-import TrainingTab from "@/components/TrainingTab";
-import TestTab from "@/components/TestTab";
-import ModelsTab from "@/components/ModelsTab";
-import SettingsTab from "@/components/SettingsTab";
-import ProfileTab from "@/components/ProfileTab";
-import ChatbotTab from "@/components/ChatbotTab";
-import HelpContactTab from "@/components/HelpContactTab";
-import OnboardingTour from "@/components/OnboardingTour";
+import { PanelSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+
+// Only one tab is on screen at a time, so load each on demand rather than
+// shipping all of them (recharts, jszip, webcam) in the dashboard bundle.
+const lazyTab = (loader) => dynamic(loader, { loading: () => <PanelSkeleton /> });
+
+const DatasetsTab = lazyTab(() => import("@/components/DatasetsTab"));
+const TrainingTab = lazyTab(() => import("@/components/TrainingTab"));
+const TestTab = lazyTab(() => import("@/components/TestTab"));
+const ModelsTab = lazyTab(() => import("@/components/ModelsTab"));
+const SettingsTab = lazyTab(() => import("@/components/SettingsTab"));
+const ProfileTab = lazyTab(() => import("@/components/ProfileTab"));
+const ChatbotTab = lazyTab(() => import("@/components/ChatbotTab"));
+const HelpContactTab = lazyTab(() => import("@/components/HelpContactTab"));
+const OnboardingTour = dynamic(() => import("@/components/OnboardingTour"), { ssr: false });
 import {
   Activity, Database, Zap, Cpu, Box,
   Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, UserCircle, MessageSquare, LifeBuoy
@@ -37,9 +44,10 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const updateTime = () => setTime(new Date().toISOString().split('T')[1].slice(0, 12));
+    const updateTime = () => setTime(new Date().toISOString().split('T')[1].slice(0, 8));
     updateTime();
-    const interval = setInterval(updateTime, 100);
+    // Second precision: a millisecond readout would cost 10 re-renders a second.
+    const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
 

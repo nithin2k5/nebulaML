@@ -10,8 +10,10 @@ import { Layers, RefreshCw, Eye, Download, ShieldCheck, AlertTriangle, XCircle, 
 import { toast } from 'sonner';
 import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function ProjectGenerate({ dataset, stats, onGenerate }) {
+    const confirm = useConfirm();
     const { token } = useAuth();
     const [augmentations, setAugmentations] = useState({
         flipHorizontal: false,
@@ -134,7 +136,12 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
             return;
         }
 
-        if (!window.confirm("Generate a new dataset version? This action creates an immutable snapshot and cannot be undone.")) return;
+        if (!(await confirm({
+          title: "Generate dataset version",
+          description: "This creates an immutable snapshot of the dataset as it stands now.",
+          confirmLabel: "Generate",
+          variant: "default",
+        }))) return;
 
         setGenerating(true);
         try {

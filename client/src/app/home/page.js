@@ -92,10 +92,11 @@ export default function HomePage() {
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setTime(now.toISOString().split('T')[1].slice(0, 12));
+      setTime(now.toISOString().split('T')[1].slice(0, 8));
     };
     updateTime();
-    const interval = setInterval(updateTime, 100);
+    // Second precision: a millisecond readout would cost 10 re-renders a second.
+    const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
 

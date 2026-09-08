@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { API_ENDPOINTS } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import { toast } from 'sonner';
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   Plus, Image, Box, Trash2, Download, Cpu,
   Database, ChevronRight, Upload, Folder, Check,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 
 export default function DatasetsTab() {
+  const confirm = useConfirm();
   const [datasets, setDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newDataset, setNewDataset] = useState({ name: "", description: "", classes: "" });
@@ -119,7 +121,11 @@ export default function DatasetsTab() {
   };
 
   const handleDelete = async (id, name) => {
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    if (!(await confirm({
+      title: "Delete dataset",
+      description: `"${name}" and all of its images and annotations will be permanently removed.`,
+      confirmLabel: "Delete",
+    }))) return;
     try {
       const response = await fetch(API_ENDPOINTS.DATASETS.DELETE(id), {
         method: "DELETE",
@@ -404,14 +410,14 @@ export default function DatasetsTab() {
                   </Button>
                   <div className="flex gap-2">
                     <Button
-                      variant="outline" size="icon"
+                      variant="outline" size="icon" aria-label="Export dataset"
                       onClick={() => handleExport(dataset.id)}
                       title="EXPORT"
                     >
                       <Download className="w-4 h-4" />
                     </Button>
                     <Button
-                      variant="destructive" size="icon"
+                      variant="destructive" size="icon" aria-label="Delete dataset"
                       onClick={() => handleDelete(dataset.id, dataset.name)}
                       title="DELETE"
                     >

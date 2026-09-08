@@ -7,8 +7,10 @@ import { Trash2, Image as ImageIcon, CheckSquare, Download } from "lucide-react"
 import JSZip from "jszip";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 export default function ProjectImages({ dataset, onRefresh }) {
+    const confirm = useConfirm();
     const { token } = useAuth();
     const [deletingId, setDeletingId] = useState(null);
     const [isDeletingBulk, setIsDeletingBulk] = useState(false);
@@ -51,7 +53,11 @@ export default function ProjectImages({ dataset, onRefresh }) {
     };
 
     const handleDelete = async (imageId) => {
-        if (!confirm("Are you sure you want to delete this image?")) return;
+        if (!(await confirm({
+          title: "Delete image",
+          description: "The image and its annotations will be permanently removed.",
+          confirmLabel: "Delete",
+        }))) return;
         
         setDeletingId(imageId);
         try {
@@ -81,7 +87,11 @@ export default function ProjectImages({ dataset, onRefresh }) {
 
     const handleBulkDelete = async () => {
         if (selectedImages.size === 0) return;
-        if (!confirm(`Are you sure you want to delete ${selectedImages.size} images?`)) return;
+        if (!(await confirm({
+          title: "Delete images",
+          description: `${selectedImages.size} images and their annotations will be permanently removed.`,
+          confirmLabel: "Delete",
+        }))) return;
 
         setIsDeletingBulk(true);
         let successCount = 0;
@@ -266,6 +276,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
                                     <Button 
                                         variant="destructive" 
                                         size="icon"
+                                        aria-label="Delete image"
                                         className={`h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""}`}
                                         disabled={deletingId === img.id}
                                         onClick={(e) => {

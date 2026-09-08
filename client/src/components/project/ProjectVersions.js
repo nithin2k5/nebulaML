@@ -12,6 +12,7 @@ import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 import { formatMetricValue } from "@/lib/utils";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
                 <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
                     {/* back + title */}
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <Button variant="ghost" size="icon" onClick={onBack}
+                        <Button variant="ghost" size="icon" aria-label="Back to versions" onClick={onBack}
                             className="shrink-0 h-8 w-8 rounded-none hover:bg-muted">
                             <ArrowLeft className="h-4 w-4" />
                         </Button>
@@ -325,6 +326,7 @@ function JobDetail({ job, token, dataset, versions, onBack, onDeploy, onCancel, 
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function ProjectVersions({ dataset, onDeploy }) {
+    const confirm = useConfirm();
     const [jobs, setJobs] = useState([]);
     const [versions, setVersions] = useState([]);
     const [selectedJob, setSelectedJob] = useState(null);
@@ -376,7 +378,11 @@ export default function ProjectVersions({ dataset, onDeploy }) {
     }, [token, dataset?.id]);
 
     const cancelJob = async (jobId) => {
-        if (!window.confirm("Stop training? The run ends after the current epoch.")) return;
+        if (!(await confirm({
+          title: "Stop training",
+          description: "The run stops at the next batch boundary. Checkpoints already saved are kept.",
+          confirmLabel: "Stop run",
+        }))) return;
         try {
             const res = await fetch(API_ENDPOINTS.TRAINING.CANCEL(jobId), {
                 method: "POST",
@@ -395,7 +401,11 @@ export default function ProjectVersions({ dataset, onDeploy }) {
     };
 
     const deleteJob = async (jobId) => {
-        if (!window.confirm("Delete this training job record? This cannot be undone.")) return;
+        if (!(await confirm({
+          title: "Delete training job",
+          description: "The job record and its metrics are removed from the list.",
+          confirmLabel: "Delete",
+        }))) return;
         try {
             const res = await fetch(`${API_BASE_URL}/api/training/job/${jobId}`, {
                 method: "DELETE",

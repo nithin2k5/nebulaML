@@ -2634,13 +2634,13 @@ function AnnotationToolContent() {
 
             {/* Zoom Controls */}
             <div className="absolute bottom-20 right-4 flex flex-col gap-1 z-20">
-              <Button variant="ghost" size="icon" onClick={() => handleZoom(0.25)} className="h-8 w-8 bg-black/60 backdrop-blur-sm border border-white/10 text-white hover:bg-white/10">
+              <Button variant="ghost" size="icon" aria-label="Zoom in" onClick={() => handleZoom(0.25)} className="h-8 w-8 bg-black/60 backdrop-blur-sm border border-white/10 text-white hover:bg-white/10">
                 <ZoomIn className="w-3.5 h-3.5" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => handleZoom(-0.25)} className="h-8 w-8 bg-black/60 backdrop-blur-sm border border-white/10 text-white hover:bg-white/10">
+              <Button variant="ghost" size="icon" aria-label="Zoom out" onClick={() => handleZoom(-0.25)} className="h-8 w-8 bg-black/60 backdrop-blur-sm border border-white/10 text-white hover:bg-white/10">
                 <ZoomOut className="w-3.5 h-3.5" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setZoom(1)} className="h-8 w-8 bg-black/60 backdrop-blur-sm border border-white/10 text-white hover:bg-white/10">
+              <Button variant="ghost" size="icon" aria-label="Reset zoom" onClick={() => setZoom(1)} className="h-8 w-8 bg-black/60 backdrop-blur-sm border border-white/10 text-white hover:bg-white/10">
                 <Maximize className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -2855,6 +2855,7 @@ function AnnotationToolContent() {
                           onClick={() => handleDeleteBox(index)}
                           variant="ghost"
                           size="icon"
+                          aria-label="Delete annotation"
                           className="h-6 w-6 text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
                         >
                           <Trash2 className="w-3 h-3" />
