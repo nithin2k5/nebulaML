@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     db_user: str = "root"
     db_password: str = ""
     db_name: str = "yolo_generator"
+    # Pooled connections held open per process. MySQL's connector caps a pool at
+    # 32; keep this at or below the server's max_connections divided by the
+    # number of API processes.
+    db_pool_size: int = 10
 
     # API Configuration
     api_v1_str: str = "/api/v1"
@@ -31,6 +35,11 @@ class Settings(BaseSettings):
 
     # Frontend URL (for invites/password resets)
     frontend_url: str = "http://localhost:3000"
+
+    # Send Strict-Transport-Security. Off by default: over plain HTTP in local
+    # development it pins the browser to https://localhost, which then refuses
+    # to connect. Turn it on wherever the API is served over TLS.
+    enable_hsts: bool = False
 
     # Will look for .env in the /server dir
     model_config = SettingsConfigDict(

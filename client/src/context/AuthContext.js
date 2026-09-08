@@ -41,6 +41,49 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Access and refresh tokens are stored together so a single place decides
+  // what is persisted. The access token is now short-lived (an hour), and the
+  // refresh token is rotated on every use — replaying an old one server-side
+  // revokes the whole family.
+  const storeTokens = (accessToken, refreshToken) => {
+    if (accessToken) {
+      localStorage.setItem("token", accessToken);
+      setToken(accessToken);
+    }
+    if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+  };
+
+  const clearTokens = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("refresh_token");
+    setToken(null);
+  };
+
+  // Exchange the refresh token for a new pair. Returns the new access token,
+  // or null when the session is genuinely over and the user must sign in.
+  const refreshSession = async () => {
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (!refreshToken) return null;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!response.ok) {
+        // 401 means rotated, revoked or expired — none of it recoverable here.
+        if (response.status === 401) clearTokens();
+        return null;
+      }
+      const data = await response.json();
+      storeTokens(data.access_token, data.refresh_token);
+      setUser(data.user || null);
+      return data.access_token || null;
+    } catch {
+      return null;
+    }
+  };
+
   const refreshUserPermissions = async (newToken) => {
     try {
       const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
@@ -69,10 +112,7 @@ export function AuthProvider({ children }) {
       }
 
       const data = await response.json();
-      if (data.access_token) {
-        localStorage.setItem("token", data.access_token);
-        setToken(data.access_token);
-      }
+      storeTokens(data.access_token, data.refresh_token);
       setUser(data.user || null);
       if (data.access_token) await refreshUserPermissions(data.access_token);
       return { success: true };
@@ -108,12 +148,15 @@ export function AuthProvider({ children }) {
             setUser(prev => ({ ...prev, permissions: permData.permissions }));
           }
         } else {
-          localStorage.removeItem("token");
+          // The access token is stale. It is short-lived now, so this is the
+          // normal path on any page load more than an hour after sign-in —
+          // try the refresh token before bouncing the user to /login.
+          const renewed = await refreshSession();
+          if (!renewed) clearTokens();
         }
       } catch (error) {
         console.error("Auth check failed:", error);
-        localStorage.removeItem("token");
-        setToken(null);
+        clearTokens();
       }
     } else {
       setToken(null);
@@ -125,31 +168,36 @@ export function AuthProvider({ children }) {
     if (!token) return;
     if (loading) return;
 
-    const thresholdSeconds = Number(process.env.NEXT_PUBLIC_SESSION_EXTEND_THRESHOLD_SECONDS || (10 * 60));
+    const thresholdSeconds = Number(process.env.NEXT_PUBLIC_SESSION_EXTEND_THRESHOLD_SECONDS || (5 * 60));
     const pollMs = 30000;
     const interval = setInterval(async () => {
       const exp = getJwtExpSeconds(token);
       if (!exp) return;
       const nowSec = Math.floor(Date.now() / 1000);
       const remaining = exp - nowSec;
-      if (remaining <= thresholdSeconds && remaining > 0) {
-        if (Date.now() - promptRef.current < pollMs) return;
-        promptRef.current = Date.now();
-        const ok = await confirm({
-          title: "Session expiring",
-          description: "Your session expires shortly. Extend it to stay signed in.",
-          confirmLabel: "Extend session",
-          cancelLabel: "Sign out",
-          variant: "default",
-        });
-        if (ok) {
-          await extendSession();
-        } else {
-          localStorage.removeItem("token");
-          setToken(null);
-          setUser(null);
-          router.push("/login");
-        }
+      if (remaining > thresholdSeconds || remaining <= 0) return;
+      if (Date.now() - promptRef.current < pollMs) return;
+      promptRef.current = Date.now();
+
+      // Access tokens now expire hourly rather than weekly, so prompting on
+      // every expiry would nag. Renew silently while the refresh token is
+      // still good; only fall back to the prompt when it is not.
+      const renewed = await refreshSession();
+      if (renewed) return;
+
+      const ok = await confirm({
+        title: "Session expiring",
+        description: "Your session expires shortly. Extend it to stay signed in.",
+        confirmLabel: "Extend session",
+        cancelLabel: "Sign out",
+        variant: "default",
+      });
+      if (ok) {
+        await extendSession();
+      } else {
+        clearTokens();
+        setUser(null);
+        router.push("/login");
       }
     }, pollMs);
 
@@ -174,8 +222,7 @@ export function AuthProvider({ children }) {
       const data = await response.json();
       
       if (data.access_token) {
-        localStorage.setItem("token", data.access_token);
-        setToken(data.access_token);
+        storeTokens(data.access_token, data.refresh_token);
 
         // Fetch permissions
         const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
@@ -237,8 +284,7 @@ export function AuthProvider({ children }) {
       }
 
       const data = await response.json();
-      localStorage.setItem("token", data.access_token);
-      setToken(data.access_token);
+      storeTokens(data.access_token, data.refresh_token);
 
       const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
         headers: {
@@ -280,9 +326,26 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem("token");
-    setToken(null);
+  const logout = async () => {
+    // Revoke the refresh token server-side; without this it stays usable for
+    // its full lifetime even after the client forgets it.
+    const refreshToken = localStorage.getItem("refresh_token");
+    const accessToken = localStorage.getItem("token");
+    if (accessToken) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
+        });
+      } catch {
+        // Sign the user out locally regardless of whether the call lands.
+      }
+    }
+    clearTokens();
     setUser(null);
     router.push("/login");
   };
@@ -305,6 +368,7 @@ export function AuthProvider({ children }) {
     verifyOtp,
     resendOtp,
     extendSession,
+    refreshSession,
     logout,
     hasPermission,
     isAdmin,

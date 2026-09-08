@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR cancels the run still going for the previous commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install dependencies
+        # CPU-only torch: the default wheel pulls ~2.5GB of CUDA libraries that
+        # a lint-and-unit-test run never uses.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu -r server/requirements.txt
+
+      # Correctness rules only, and these are enforced: undefined names (F821),
+      # duplicate definitions (F811), broken f-strings and syntax (E9/F63/F7).
+      # An F821 is what let the auto-retrain block ship dead for months.
+      - name: Ruff (correctness)
+        run: ruff check server --select E9,F63,F7,F82,F811
+
+      # The full rule set still reports ~1200 style findings (mostly trailing
+      # whitespace and unsorted imports) that predate this workflow. Reported,
+      # not enforced, so the gate above stays meaningful.
+      # TODO: run `ruff check server --fix` + `ruff format server`, then make
+      # this blocking and delete this comment.
+      - name: Ruff (full, advisory)
+        run: ruff check server --output-format concise
+        continue-on-error: true
+
+      - name: Unit tests
+        run: pytest -v
+
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import List, Dict
 
 from app.api.v1.endpoints.auth import get_current_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -145,7 +148,7 @@ async def get_model_info(model_name: str, current_user: dict = Depends(get_curre
                     "best_epoch": int(best_row.get('epoch', best_idx + 1))
                 }
         except Exception as e:
-            print(f"Error parsing metrics: {e}")
+            logger.error(f"Error parsing metrics: {e}")
             metrics = {"error": "Failed to parse metrics file"}
             
     # Try to load args.yaml for config details

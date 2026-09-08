@@ -11,6 +11,9 @@ import albumentations as A
 import shutil
 
 from app.services.database import DatasetService, DatasetVersionService, AnnotationService
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DatasetDriftError(Exception):
     def __init__(self, message: str, diff_summary: Dict[str, Any]):
@@ -241,7 +244,7 @@ class VersioningEngine:
                 aug_data["annotations"][unique_img_id] = pixel_boxes
                         
             except Exception as e:
-                print(f"Error processing image {img_data['id']}: {e}")
+                logger.error(f"Error processing image {img_data['id']}: {e}")
                 continue
 
         # Post-augmentation re-validation (Stage A)

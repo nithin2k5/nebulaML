@@ -10,6 +10,10 @@ from app.services.versioning import VersioningEngine, DatasetDriftError
 from app.services.dataset_manifest import compute_manifest, PreflightResultService, prepare_splits
 from app.services.preflight import PreflightPipeline
 
+# Every test here writes through DatasetService to a real MySQL instance, so the
+# whole module is opt-in: `pytest -m integration`.
+pytestmark = pytest.mark.integration
+
 @pytest.fixture
 def mock_dataset():
     dataset_id = str(uuid.uuid4())

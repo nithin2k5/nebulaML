@@ -29,6 +29,7 @@ from app.api.v1.endpoints import inference, training, models as model_routes, an
 from app.db.session import initialize_database
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.security_headers import SecurityHeadersMiddleware
 
 # Rate limiter — keyed by client IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
@@ -56,6 +57,10 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+# Security headers (CSP, nosniff, frame-deny). Added before CORS so it runs
+# outermost and stamps every response, including CORS preflights and errors.
+app.add_middleware(SecurityHeadersMiddleware, hsts=settings.enable_hsts)
 
 # CORS configuration
 app.add_middleware(

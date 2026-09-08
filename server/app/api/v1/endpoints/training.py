@@ -2,7 +2,7 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks,
 from typing import Optional
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 from datetime import datetime
 import asyncio
 import json
@@ -33,6 +33,34 @@ _SERVER_ROOT = Path(__file__).resolve().parents[4]  # …/server/
 _RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
 
 MAX_CONCURRENT_JOBS = 2
+
+# ── Single-process invariant ─────────────────────────────────────────────────
+# `training_jobs` is an in-process dict and MAX_CONCURRENT_JOBS is enforced by
+# counting it, so the limit only holds while exactly one process serves the API.
+# Run uvicorn with --workers 2 and each worker keeps its own registry: the cap
+# silently becomes 2 per worker, cancellation reaches only the worker that owns
+# the job, and a status poll routed to the other worker reports 404.
+#
+# Both start scripts are single-worker today. This check makes a future
+# --workers flag fail loudly at import instead of corrupting job bookkeeping.
+# Lifting it means moving job state to the DB (rows already exist via
+# TrainingJobService) or to a real queue, and taking the capacity check with it.
+def _assert_single_worker() -> None:
+    workers = os.environ.get("WEB_CONCURRENCY") or os.environ.get("UVICORN_WORKERS")
+    try:
+        count = int(workers) if workers else 1
+    except ValueError:
+        return
+    if count > 1:
+        raise RuntimeError(
+            f"NebulaML is configured for {count} workers, but training job state "
+            "is per-process: the concurrency limit, cancellation and status polling "
+            "all break across workers. Run a single worker, or move job state to the "
+            "database before scaling out."
+        )
+
+
+_assert_single_worker()
 
 training_jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_loaded = False
@@ -642,7 +670,6 @@ async def get_training_job_by_id(job_id: str, current_user: dict = Depends(get_c
 @router.get("/job/{job_id}/stream")
 async def stream_job_details(job_id: str, current_user: dict = Depends(get_current_user)):
     from fastapi.responses import StreamingResponse
-    import json
     
     _get_owned_job(job_id, current_user)
 
