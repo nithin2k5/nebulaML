@@ -52,7 +52,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error creating dataset: {e}")
+            logger.error(f"Error creating dataset: {e}")
             if connection:
                 connection.close()
             return False
@@ -181,7 +181,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error updating dataset: {e}")
+            logger.error(f"Error updating dataset: {e}")
             if connection:
                 connection.close()
             return False
@@ -201,7 +201,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error deleting dataset: {e}")
+            logger.error(f"Error deleting dataset: {e}")
             if connection:
                 connection.close()
             return False
@@ -235,7 +235,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error adding image: {e}")
+            logger.error(f"Error adding image: {e}")
             if connection:
                 connection.close()
             return False
@@ -278,7 +278,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error deleting image: {e}")
+            logger.error(f"Error deleting image: {e}")
             if connection:
                 connection.close()
             return False
@@ -311,7 +311,7 @@ class DatasetService:
             connection.close()
             return images
         except Error as e:
-            print(f"Error getting unannotated images: {e}")
+            logger.error(f"Error getting unannotated images: {e}")
             if connection:
                 connection.close()
             return []
@@ -341,7 +341,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error updating image split: {e}")
+            logger.error(f"Error updating image split: {e}")
             if connection:
                 connection.close()
             return False
@@ -375,7 +375,7 @@ class DatasetService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error marking image annotated: {e}")
+            logger.error(f"Error marking image annotated: {e}")
             if connection:
                 connection.close()
             return False
@@ -428,7 +428,7 @@ class AnnotationService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error saving annotation: {e}")
+            logger.error(f"Error saving annotation: {e}")
             if connection:
                 connection.close()
             return False
@@ -456,7 +456,7 @@ class AnnotationService:
                 annotation['boxes'] = json.loads(annotation['boxes'])
             return annotation
         except Error as e:
-            print(f"Error getting annotation: {e}")
+            logger.error(f"Error getting annotation: {e}")
             if connection:
                 connection.close()
             return None
@@ -483,7 +483,7 @@ class AnnotationService:
                 ann['boxes'] = json.loads(ann['boxes']) if ann['boxes'] else []
             return annotations
         except Error as e:
-            print(f"Error getting all dataset annotations: {e}")
+            logger.error(f"Error getting all dataset annotations: {e}")
             if connection:
                 connection.close()
             return []
@@ -561,7 +561,7 @@ class AnnotationService:
                 )
             }
         except Error as e:
-            print(f"Error getting dataset stats: {e}")
+            logger.error(f"Error getting dataset stats: {e}")
             if connection:
                 connection.close()
             return {}
@@ -591,7 +591,7 @@ class DatasetVersionService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error creating dataset version: {e}")
+            logger.error(f"Error creating dataset version: {e}")
             if connection: connection.close()
             return False
 
@@ -623,7 +623,7 @@ class DatasetVersionService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error adding version image: {e}")
+            logger.error(f"Error adding version image: {e}")
             if connection: connection.close()
             return False
             
@@ -658,7 +658,7 @@ class DatasetVersionService:
             connection.close()
             return version
         except Error as e:
-            print(f"Error getting dataset version: {e}")
+            logger.error(f"Error getting dataset version: {e}")
             if connection: connection.close()
             return None
             
@@ -683,7 +683,7 @@ class DatasetVersionService:
                 v['augmentations'] = json.loads(v['augmentations']) if v['augmentations'] else {}
             return versions
         except Error as e:
-            print(f"Error listing dataset versions: {e}")
+            logger.error(f"Error listing dataset versions: {e}")
             if connection: connection.close()
             return []
 
@@ -727,7 +727,7 @@ class TrainingJobService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error upserting training job: {e}")
+            logger.error(f"Error upserting training job: {e}")
             if connection:
                 connection.close()
             return False
@@ -777,7 +777,7 @@ class TrainingJobService:
                 jobs[row["id"]] = job
             return jobs
         except Error as e:
-            print(f"Error loading training jobs: {e}")
+            logger.error(f"Error loading training jobs: {e}")
             if connection:
                 connection.close()
             return {}
@@ -846,7 +846,7 @@ class QualitySnapshotService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error saving quality snapshot: {e}")
+            logger.error(f"Error saving quality snapshot: {e}")
             if connection:
                 connection.close()
             return False
@@ -882,7 +882,7 @@ class QualitySnapshotService:
                 result.append(dict(row))
             return result
         except Error as e:
-            print(f"Error fetching quality history: {e}")
+            logger.error(f"Error fetching quality history: {e}")
             if connection:
                 connection.close()
             return []
@@ -912,7 +912,7 @@ class QualitySnapshotService:
                 return json.loads(row["full_snapshot"])
             return None
         except Error as e:
-            print(f"Error fetching latest quality snapshot: {e}")
+            logger.error(f"Error fetching latest quality snapshot: {e}")
             if connection:
                 connection.close()
             return None
@@ -945,7 +945,7 @@ class AutoRetrainConfigService:
                 }
             return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
         except Error as e:
-            print(f"Error fetching auto-retrain config: {e}")
+            logger.error(f"Error fetching auto-retrain config: {e}")
             if connection:
                 connection.close()
             return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
@@ -973,7 +973,7 @@ class AutoRetrainConfigService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error upserting auto-retrain config: {e}")
+            logger.error(f"Error upserting auto-retrain config: {e}")
             if connection:
                 connection.close()
             return False
@@ -1011,7 +1011,7 @@ class AutoRetrainConfigService:
             connection.close()
             return row["annotations_since_last_train"] if row else -1
         except Error as e:
-            print(f"Error incrementing annotation count: {e}")
+            logger.error(f"Error incrementing annotation count: {e}")
             if connection:
                 connection.close()
             return -1
@@ -1037,7 +1037,7 @@ class AutoRetrainConfigService:
             connection.close()
             return True
         except Error as e:
-            print(f"Error resetting annotation count: {e}")
+            logger.error(f"Error resetting annotation count: {e}")
             if connection:
                 connection.close()
             return False
@@ -1062,7 +1062,7 @@ class ApiKeyService:
             connection.close()
             return True
         except Exception as e:
-            print(f"Error creating API key: {e}")
+            logger.error(f"Error creating API key: {e}")
             if connection:
                 connection.close()
             return False
@@ -1086,7 +1086,7 @@ class ApiKeyService:
             connection.close()
             return keys
         except Exception as e:
-            print(f"Error getting API keys: {e}")
+            logger.error(f"Error getting API keys: {e}")
             if connection:
                 connection.close()
             return []
@@ -1117,7 +1117,7 @@ class ApiKeyService:
             connection.close()
             return key
         except Exception as e:
-            print(f"Error fetching API key by hash: {e}")
+            logger.error(f"Error fetching API key by hash: {e}")
             if connection:
                 connection.close()
             return None
@@ -1139,7 +1139,7 @@ class ApiKeyService:
             connection.close()
             return affected > 0
         except Exception as e:
-            print(f"Error deleting API key: {e}")
+            logger.error(f"Error deleting API key: {e}")
             if connection:
                 connection.close()
             return False

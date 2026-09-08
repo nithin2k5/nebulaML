@@ -390,11 +390,10 @@ async def upload_images_to_dataset(
             uploaded_files.append(image_info)
             
         except Exception as e:
-            import traceback
             error_msg = f"{file.filename if file.filename else 'Unknown file'}: {str(e)}"
             errors.append(error_msg)
-            print(f"Error uploading file: {error_msg}")
-            print(traceback.format_exc())
+            # logger.exception records the traceback itself; no manual format_exc.
+            logger.exception(f"Error uploading file: {error_msg}")
             continue
     
     datasets_db[dataset_id]["updated_at"] = datetime.now().isoformat()
@@ -803,7 +802,7 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
                                     else:
                                         aug_label_path.write_text("")
                         except Exception as e:
-                            print(f"Augmentation failed for {img['filename']}: {e}")
+                            logger.error(f"Augmentation failed for {img['filename']}: {e}")
                     
                     current_step += 1
                     export_jobs[job_id]["progress"] = int((current_step / total_steps) * 80)

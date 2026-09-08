@@ -6,6 +6,9 @@ from typing import Dict, Any, Optional
 import torch
 
 from app.services.base_trainer import BaseTrainer, TrainingCancelledException
+import logging
+
+logger = logging.getLogger(__name__)
 
 class YOLOTrainer(BaseTrainer):
     """YOLO model training handler"""
@@ -115,7 +118,7 @@ class YOLOTrainer(BaseTrainer):
                 best_model.export(format="onnx")
                 onnx_export_status = "success"
             except Exception as e:
-                print(f"ONNX export failed: {e}")
+                logger.error(f"ONNX export failed: {e}")
                 onnx_export_status = "failed"
                 
         # Extract per-class metrics if available
@@ -138,7 +141,7 @@ class YOLOTrainer(BaseTrainer):
                             "mAP50_95": float(box.ap[i]) if hasattr(box, 'ap') and i < len(box.ap) else 0,
                         })
         except Exception as e:
-            print(f"Could not extract per-class metrics: {e}")
+            logger.error(f"Could not extract per-class metrics: {e}")
         
         # Check for confusion matrix
         confusion_matrix_path = None

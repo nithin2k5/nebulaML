@@ -211,3 +211,23 @@ def test_db_cursor_raises_when_database_unavailable(monkeypatch):
     with pytest.raises(RuntimeError, match="Database connection unavailable"):
         with db_session.db_cursor():
             pass
+
+
+def test_single_worker_guard_rejects_multiple_workers(monkeypatch):
+    """Job state is per-process, so a multi-worker config must fail loudly."""
+    from app.api.v1.endpoints import training
+
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
+    with pytest.raises(RuntimeError, match="per-process"):
+        training._assert_single_worker()
+
+
+def test_single_worker_guard_allows_one_worker(monkeypatch):
+    from app.api.v1.endpoints import training
+
+    monkeypatch.setenv("WEB_CONCURRENCY", "1")
+    training._assert_single_worker()  # does not raise
+
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    training._assert_single_worker()  # unset means one worker
