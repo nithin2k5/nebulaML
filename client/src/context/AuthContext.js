@@ -24,7 +24,13 @@ export function AuthProvider({ children }) {
     return null;
   };
 
+  const authCheckStarted = useRef(false);
+
   useEffect(() => {
+    // StrictMode runs effects twice in development; without this the auth
+    // check fires two overlapping requests on every mount.
+    if (authCheckStarted.current) return;
+    authCheckStarted.current = true;
     checkAuth();
   }, []);
 
@@ -45,27 +51,71 @@ export function AuthProvider({ children }) {
   // what is persisted. The access token is now short-lived (an hour), and the
   // refresh token is rotated on every use — replaying an old one server-side
   // revokes the whole family.
+  //
+  // Every localStorage access goes through these helpers. Touching
+  // localStorage *throws* — it does not return null — in Safari Private
+  // Browsing and wherever site data is blocked. An unguarded read at the top
+  // of checkAuth was enough to abort the whole auth check and leave the app on
+  // its loading spinner forever for those users.
+  const readStored = (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  const writeStored = (key, value) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // Session still works for this tab; it just will not survive a reload.
+    }
+  };
+
+  const removeStored = (key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* nothing to clean up */
+    }
+  };
+
   const storeTokens = (accessToken, refreshToken) => {
     if (accessToken) {
-      localStorage.setItem("token", accessToken);
+      writeStored("token", accessToken);
       setToken(accessToken);
     }
-    if (refreshToken) localStorage.setItem("refresh_token", refreshToken);
+    if (refreshToken) writeStored("refresh_token", refreshToken);
   };
 
   const clearTokens = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("refresh_token");
+    removeStored("token");
+    removeStored("refresh_token");
     setToken(null);
+  };
+
+  // fetch() has no timeout of its own: if the server accepts the connection
+  // but never answers — uvicorn mid-reload, or the API blocked on a slow MySQL
+  // connect during startup — the promise simply never settles. Anything the
+  // loading screen waits on therefore needs a deadline.
+  const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   // Exchange the refresh token for a new pair. Returns the new access token,
   // or null when the session is genuinely over and the user must sign in.
   const refreshSession = async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
+    const refreshToken = readStored("refresh_token");
     if (!refreshToken) return null;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -121,47 +171,57 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Resolving this is what takes the app off its loading screen, so every path
+  // through it — including a thrown storage error or a request that never
+  // answers — has to reach the finally block. It previously did not: the
+  // localStorage read sat outside the try, and neither fetch had a timeout, so
+  // the app could sit on the spinner indefinitely.
   const checkAuth = async () => {
-    const defaultToken = localStorage.getItem("token");
-    if (defaultToken) {
+    try {
+      const defaultToken = readStored("token");
+      if (!defaultToken) {
+        setToken(null);
+        return;
+      }
+
       setToken(defaultToken);
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-          headers: {
-            "Authorization": `Bearer ${defaultToken}`
-          }
-        });
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${defaultToken}` },
+      });
 
-        if (response.ok) {
-          const userData = await response.json();
-          setUser(userData);
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData);
 
-          // Fetch permissions
-          const permResponse = await fetch(`${API_BASE_URL}/api/auth/permissions`, {
-            headers: {
-              "Authorization": `Bearer ${defaultToken}`
-            }
-          });
-
+        // Permissions are supplementary — a failure here must not decide
+        // whether the user is considered signed in.
+        try {
+          const permResponse = await fetchWithTimeout(
+            `${API_BASE_URL}/api/auth/permissions`,
+            { headers: { Authorization: `Bearer ${defaultToken}` } }
+          );
           if (permResponse.ok) {
             const permData = await permResponse.json();
-            setUser(prev => ({ ...prev, permissions: permData.permissions }));
+            setUser((prev) => ({ ...prev, permissions: permData.permissions }));
           }
-        } else {
-          // The access token is stale. It is short-lived now, so this is the
-          // normal path on any page load more than an hour after sign-in —
-          // try the refresh token before bouncing the user to /login.
-          const renewed = await refreshSession();
-          if (!renewed) clearTokens();
+        } catch (permError) {
+          console.error("Could not load permissions:", permError);
         }
-      } catch (error) {
-        console.error("Auth check failed:", error);
-        clearTokens();
+      } else {
+        // The access token is stale. It is short-lived now, so this is the
+        // normal path on any page load more than an hour after sign-in —
+        // try the refresh token before bouncing the user to /login.
+        const renewed = await refreshSession();
+        if (!renewed) clearTokens();
       }
-    } else {
-      setToken(null);
+    } catch (error) {
+      // AbortError (the timeout) lands here too, and is the common case when
+      // the backend is down or still starting.
+      console.error("Auth check failed:", error);
+      clearTokens();
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -329,11 +389,11 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     // Revoke the refresh token server-side; without this it stays usable for
     // its full lifetime even after the client forgets it.
-    const refreshToken = localStorage.getItem("refresh_token");
-    const accessToken = localStorage.getItem("token");
+    const refreshToken = readStored("refresh_token");
+    const accessToken = readStored("token");
     if (accessToken) {
       try {
-        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        await fetchWithTimeout(`${API_BASE_URL}/api/auth/logout`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
