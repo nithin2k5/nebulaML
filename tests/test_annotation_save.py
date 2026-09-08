@@ -10,7 +10,7 @@ database.
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.api.v1.endpoints import annotations as ann
 
@@ -67,7 +67,7 @@ def _request(**overrides):
 
 @pytest.mark.asyncio
 async def test_save_writes_normalised_yolo_label(patched, tmp_path):
-    await ann.save_annotation(_request(), current_user=USER)
+    await ann.save_annotation(BackgroundTasks(), _request(), current_user=USER)
 
     label_file = tmp_path / "datasets" / DATASET_ID / "labels" / "test.txt"
     assert label_file.exists(), "handler did not write a YOLO label file"
@@ -85,6 +85,7 @@ async def test_save_writes_normalised_yolo_label(patched, tmp_path):
 async def test_save_rejects_class_id_outside_dataset_range(patched):
     with pytest.raises(HTTPException) as exc:
         await ann.save_annotation(
+            BackgroundTasks(),
             _request(boxes=[{"x": 1, "y": 1, "width": 2, "height": 2, "class_id": 9}]),
             current_user=USER,
         )
@@ -95,29 +96,52 @@ async def test_save_rejects_class_id_outside_dataset_range(patched):
 @pytest.mark.asyncio
 async def test_save_rejects_unknown_split(patched):
     with pytest.raises(HTTPException) as exc:
-        await ann.save_annotation(_request(split="holdout"), current_user=USER)
+        await ann.save_annotation(BackgroundTasks(), _request(split="holdout"), current_user=USER)
     assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_save_rejects_image_not_in_dataset(patched):
     with pytest.raises(HTTPException) as exc:
-        await ann.save_annotation(_request(image_id="not-mine"), current_user=USER)
+        await ann.save_annotation(BackgroundTasks(), _request(image_id="not-mine"), current_user=USER)
     assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_save_requires_dataset_and_image_ids(patched):
     with pytest.raises(HTTPException) as exc:
-        await ann.save_annotation(_request(dataset_id=None), current_user=USER)
+        await ann.save_annotation(BackgroundTasks(), _request(dataset_id=None), current_user=USER)
     assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_save_writes_classification_label_without_coordinates(patched, tmp_path):
     await ann.save_annotation(
+        BackgroundTasks(),
         _request(annotation_type="classification", boxes=[{"class_id": 1}]),
         current_user=USER,
     )
     label_file = tmp_path / "datasets" / DATASET_ID / "labels" / "test.txt"
     assert label_file.read_text().strip() == "1"
+
+
+async def test_save_annotation_declares_background_tasks(patched):
+    """The auto-retrain path calls background_tasks.add_task().
+
+    It used to reference a `background_tasks` name the handler never declared
+    and a `get_backend` never imported, so the moment auto-retrain fired it
+    raised NameError into a bare `except Exception` and the feature silently
+    did nothing.
+    """
+    import inspect
+
+    sig = inspect.signature(ann.save_annotation)
+    assert "background_tasks" in sig.parameters
+    assert sig.parameters["background_tasks"].annotation is BackgroundTasks
+
+
+async def test_auto_retrain_helpers_are_importable():
+    """get_backend must resolve in this module's namespace at call time."""
+    from app.services.model_registry import get_backend
+
+    assert callable(get_backend)

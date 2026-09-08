@@ -414,7 +414,11 @@ async def upload_images_to_dataset(
 
 @router.post("/save")
 @router.post("/annotations/save")
-async def save_annotation(request: dict = Body(...), current_user: dict = Depends(get_current_user)):
+async def save_annotation(
+    background_tasks: BackgroundTasks,
+    request: dict = Body(...),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Save image annotations
     """
@@ -577,6 +581,7 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
                     ExportAndTrainRequest, TrainingConfig, run_training,
                     training_jobs, _persist_job, MAX_CONCURRENT_JOBS
                 )
+                from app.services.model_registry import get_backend
                 active_count = sum(
                     1 for j in training_jobs.values()
                     if j.get("status") in ("running", "pending")
@@ -620,8 +625,17 @@ async def save_annotation(request: dict = Body(...), current_user: dict = Depend
                                         "model_type": get_backend(auto_config.model_name)
                                     }
                                     _persist_job(job_id)
-                                    background_tasks.add_task(run_training, job_id, version["yaml_path"], auto_config)
-                                logger.info(f"Auto-retrain job {job_id} queued for dataset {dataset_id}")
+                                    background_tasks.add_task(
+                                        run_training, job_id, version["yaml_path"], auto_config
+                                    )
+                                    logger.info(
+                                        f"Auto-retrain job {job_id} queued for dataset {dataset_id}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"Auto-retrain for {dataset_id}: version {new_version_id} "
+                                        "has no yaml_path; nothing queued"
+                                    )
                     except Exception as train_err:
                         logger.error(f"Auto-retrain setup failed: {train_err}")
                 else:

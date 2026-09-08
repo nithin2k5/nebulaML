@@ -2,7 +2,7 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks,
 from typing import Optional
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 from datetime import datetime
 import asyncio
 import json
@@ -642,7 +642,6 @@ async def get_training_job_by_id(job_id: str, current_user: dict = Depends(get_c
 @router.get("/job/{job_id}/stream")
 async def stream_job_details(job_id: str, current_user: dict = Depends(get_current_user)):
     from fastapi.responses import StreamingResponse
-    import json
     
     _get_owned_job(job_id, current_user)
 
