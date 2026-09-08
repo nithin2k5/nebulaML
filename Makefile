@@ -1,7 +1,7 @@
 # NebulaML Makefile
 # Shortcuts for common development tasks
 
-.PHONY: help install dev start-backend start-frontend test lint format clean check
+.PHONY: help install dev start-backend start-frontend test test-integration lint format clean check
 
 # Default target
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  make lint          - Run linters (ruff, eslint)"
 	@echo "  make format        - Format code (black, ruff, prettier)"
 	@echo "  make test          - Run Python unit tests"
+	@echo "  make test-integration - Run integration tests (needs live MySQL)"
 	@echo "  make clean         - Remove pycache and build artifacts"
 	@echo "  make check         - Run format, lint, and tests (CI prep)"
 
@@ -47,8 +48,12 @@ format:
 	cd client && npm run format || echo "Prettier format task missing, skipping."
 
 test:
-	@echo "Running tests..."
-	cd server && pytest ../tests/ -v
+	@echo "Running unit tests..."
+	pytest -v
+
+test-integration:
+	@echo "Running integration tests (needs a live MySQL)..."
+	pytest -v -m integration
 
 clean:
 	@echo "Cleaning up..."
