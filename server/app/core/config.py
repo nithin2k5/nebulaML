@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Frontend URL (for invites/password resets)
     frontend_url: str = "http://localhost:3000"
 
+    # Send Strict-Transport-Security. Off by default: over plain HTTP in local
+    # development it pins the browser to https://localhost, which then refuses
+    # to connect. Turn it on wherever the API is served over TLS.
+    enable_hsts: bool = False
+
     # Will look for .env in the /server dir
     model_config = SettingsConfigDict(
         env_file=".env",

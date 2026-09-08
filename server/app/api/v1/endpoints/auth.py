@@ -15,12 +15,16 @@ from app.core.rbac import (
     hash_password,
     verify_password,
     create_access_token,
+    create_refresh_token,
     decode_access_token,
+    decode_refresh_token,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     Role,
     Permission,
     has_permission,
     get_role_permissions
 )
+from app.services.refresh_tokens import RefreshTokenService
 import uuid
 import random
 from datetime import datetime, timedelta
@@ -78,6 +82,39 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     user: dict
+    # Optional so the model still validates for callers that do not mint a
+    # refresh token (the API-key path, for one).
+    refresh_token: Optional[str] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+def _issue_token_pair(user: dict) -> dict:
+    """Build the standard login response: a short access token plus a rotating
+    refresh token recorded server-side."""
+    access_token = create_access_token(
+        data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
+    )
+    payload = {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "email": user.get("email"),
+            "role": user["role"],
+        },
+    }
+    try:
+        jti = RefreshTokenService.issue(user["id"], REFRESH_TOKEN_EXPIRE_DAYS)
+        payload["refresh_token"] = create_refresh_token(user["id"], jti)
+    except Exception as e:
+        # A failure here must not block sign-in; the client falls back to
+        # prompting for re-login when the access token expires.
+        logger.error(f"Could not issue refresh token for user {user['id']}: {e}")
+    return payload
 
 
 # Dependency to get current user from token or API key
@@ -357,20 +394,7 @@ async def verify_otp(verify_data: UserVerify):
             )
             connection.commit()
         
-        access_token = create_access_token(
-            data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
-        )
-        
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": {
-                "id": user["id"],
-                "username": user["username"],
-                "email": user["email"],
-                "role": user["role"]
-            }
-        }
+        return _issue_token_pair(user)
     except HTTPException:
         raise
     except Exception as e:
@@ -682,20 +706,103 @@ async def get_my_permissions(current_user: dict = Depends(get_current_user)):
 
 @router.post("/extend-session", response_model=TokenResponse)
 async def extend_session(current_user: dict = Depends(get_current_user)):
-    access_token = create_access_token(
-        data={"user_id": current_user["id"], "username": current_user["username"], "role": current_user["role"]}
-    )
+    """Mint a fresh pair from a still-valid access token.
 
+    Kept for the existing "extend session?" prompt in the UI. Note this cannot
+    outlive a stolen access token the way it used to: the access token it
+    requires now expires in an hour rather than a week.
+    """
+    return _issue_token_pair(current_user)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("30/minute")
+async def refresh_tokens(request: Request, body: RefreshRequest):
+    """Exchange a refresh token for a new access + refresh pair.
+
+    The presented refresh token is consumed. Replaying one that has already
+    been rotated is treated as theft and revokes every refresh token the user
+    holds — see RefreshTokenService.rotate.
+    """
+    payload = decode_refresh_token(body.refresh_token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user_id = payload.get("user_id")
+    jti = payload.get("jti")
+    if not user_id or not jti:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed refresh token"
+        )
+
+    try:
+        new_jti = RefreshTokenService.rotate(jti, user_id, REFRESH_TOKEN_EXPIRE_DAYS)
+    except Exception as e:
+        logger.error(f"Refresh rotation failed for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not refresh session")
+
+    if not new_jti:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token is no longer valid. Please sign in again.",
+        )
+
+    connection = get_db_connection()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, username, email, role FROM users WHERE id = %s", (user_id,)
+        )
+        user = cursor.fetchone()
+        cursor.close()
+    finally:
+        connection.close()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    access_token = create_access_token(
+        data={"user_id": user["id"], "username": user["username"], "role": user["role"]}
+    )
     return {
         "access_token": access_token,
+        "refresh_token": create_refresh_token(user["id"], new_jti),
         "token_type": "bearer",
         "user": {
-            "id": current_user["id"],
-            "username": current_user["username"],
-            "email": current_user["email"],
-            "role": current_user["role"],
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"],
+            "role": user["role"],
         },
     }
+
+
+@router.post("/logout")
+async def logout(body: Optional[RefreshRequest] = None,
+                 current_user: dict = Depends(get_current_user)):
+    """Revoke the caller's refresh tokens.
+
+    The access token itself is stateless and stays valid until it expires —
+    which is now an hour, not a week. Clients must still discard it locally.
+    """
+    revoked = 0
+    try:
+        if body and body.refresh_token:
+            payload = decode_refresh_token(body.refresh_token)
+            if payload and payload.get("jti"):
+                RefreshTokenService.revoke(payload["jti"])
+                revoked = 1
+        else:
+            revoked = RefreshTokenService.revoke_all_for_user(current_user["id"])
+    except Exception as e:
+        logger.error(f"Logout revocation failed for user {current_user['id']}: {e}")
+
+    return {"success": True, "revoked": revoked}
 
 
 @router.get("/users")

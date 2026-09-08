@@ -256,6 +256,20 @@ def create_tables():
         
         # API Keys table
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                jti CHAR(36) PRIMARY KEY,
+                user_id INT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                revoked_at TIMESTAMP NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                INDEX idx_refresh_user (user_id),
+                INDEX idx_refresh_expires (expires_at)
+            )
+        """)
+        logger.info("✓ Table 'refresh_tokens' ready")
+
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
                 id VARCHAR(36) PRIMARY KEY,
                 user_id INT NOT NULL,
