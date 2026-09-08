@@ -3,10 +3,31 @@ Database service for dataset and annotation operations
 """
 
 import json
+import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from app.db.session import get_db_connection
+from app.db.session import get_db_connection, db_cursor
 from mysql.connector import Error
+
+logger = logging.getLogger(__name__)
+
+
+def _decode_classes(raw) -> List[str]:
+    """Decode the JSON `classes` column, tolerating a malformed row.
+
+    This used to be a bare `json.loads` inside a block that only caught
+    mysql.connector.Error, so one bad row raised JSONDecodeError straight past
+    the handler and leaked the connection.
+    """
+    if isinstance(raw, list):
+        return raw
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("Malformed 'classes' JSON in datasets row; treating as empty")
+        return []
 
 
 class DatasetService:
@@ -39,69 +60,93 @@ class DatasetService:
     @staticmethod
     def get_dataset(dataset_id: str) -> Optional[Dict]:
         """Get dataset by ID"""
-        connection = get_db_connection()
-        if not connection:
-            return None
-        
         try:
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute("""
-                SELECT id, user_id, name, description, classes, total_images, annotated_images,
-                       created_at, updated_at
-                FROM datasets WHERE id = %s
-            """, (dataset_id,))
-            dataset = cursor.fetchone()
-            cursor.close()
-            connection.close()
-            
+            with db_cursor(dictionary=True) as cursor:
+                cursor.execute("""
+                    SELECT id, user_id, name, description, classes, total_images, annotated_images,
+                           created_at, updated_at
+                    FROM datasets WHERE id = %s
+                """, (dataset_id,))
+                dataset = cursor.fetchone()
+
             if dataset:
-                dataset['classes'] = json.loads(dataset['classes'])
+                dataset['classes'] = _decode_classes(dataset['classes'])
                 dataset['images'] = DatasetService.get_dataset_images(dataset_id)
             return dataset
-        except Error as e:
-            print(f"Error getting dataset: {e}")
-            if connection:
-                connection.close()
+        except (Error, RuntimeError) as e:
+            logger.error(f"Error getting dataset {dataset_id}: {e}")
             return None
     
     @staticmethod
     def list_datasets(user_id: Optional[int] = None) -> List[Dict]:
-        """List all datasets, optionally filtered by user_id"""
-        connection = get_db_connection()
-        if not connection:
-            return []
-        
+        """List datasets (optionally for one user) with their images attached.
+
+        Images come back in a single batched query. This used to close the
+        connection and then call get_dataset_images() once per dataset, each
+        opening its own connection — listing 50 datasets meant 51 round trips.
+        """
         try:
-            cursor = connection.cursor(dictionary=True)
-            if user_id:
-                cursor.execute("""
-                    SELECT id, user_id, name, description, classes, total_images, annotated_images,
-                           created_at, updated_at
-                    FROM datasets WHERE user_id = %s
-                    ORDER BY created_at DESC
-                """, (user_id,))
-            else:
-                cursor.execute("""
-                    SELECT id, user_id, name, description, classes, total_images, annotated_images,
-                           created_at, updated_at
-                    FROM datasets
-                    ORDER BY created_at DESC
-                """)
-            
-            datasets = cursor.fetchall()
-            cursor.close()
-            connection.close()
-            
+            with db_cursor(dictionary=True) as cursor:
+                if user_id:
+                    cursor.execute("""
+                        SELECT id, user_id, name, description, classes, total_images, annotated_images,
+                               created_at, updated_at
+                        FROM datasets WHERE user_id = %s
+                        ORDER BY created_at DESC
+                    """, (user_id,))
+                else:
+                    cursor.execute("""
+                        SELECT id, user_id, name, description, classes, total_images, annotated_images,
+                               created_at, updated_at
+                        FROM datasets
+                        ORDER BY created_at DESC
+                    """)
+                datasets = cursor.fetchall()
+
+            images_by_dataset = DatasetService.get_images_for_datasets(
+                [d["id"] for d in datasets]
+            )
             for dataset in datasets:
-                dataset['classes'] = json.loads(dataset['classes'])
-                dataset['images'] = DatasetService.get_dataset_images(dataset['id'])
-            
+                dataset['classes'] = _decode_classes(dataset['classes'])
+                dataset['images'] = images_by_dataset.get(dataset['id'], [])
+
             return datasets
-        except Error as e:
-            print(f"Error listing datasets: {e}")
-            if connection:
-                connection.close()
+        except (Error, RuntimeError) as e:
+            logger.error(f"Error listing datasets: {e}")
             return []
+
+    # Shared by get_dataset_images() and the batched list path below.
+    _IMAGE_COLUMNS = """
+        SELECT di.dataset_id, di.id, di.filename, di.original_name, di.path,
+               di.annotated, di.split, di.uploaded_at,
+               COALESCE(a.status, CASE WHEN di.annotated = TRUE THEN 'annotated' ELSE 'unlabeled' END) AS status
+        FROM dataset_images di
+        LEFT JOIN annotations a ON di.dataset_id = a.dataset_id AND di.id = a.image_id
+    """
+
+    @staticmethod
+    def get_images_for_datasets(dataset_ids: List[str]) -> Dict[str, List[Dict]]:
+        """Fetch images for many datasets in one query, grouped by dataset_id."""
+        if not dataset_ids:
+            return {}
+
+        placeholders = ",".join(["%s"] * len(dataset_ids))
+        grouped: Dict[str, List[Dict]] = {ds_id: [] for ds_id in dataset_ids}
+        try:
+            with db_cursor(dictionary=True) as cursor:
+                cursor.execute(
+                    DatasetService._IMAGE_COLUMNS + f"""
+                        WHERE di.dataset_id IN ({placeholders})
+                        ORDER BY di.dataset_id, di.uploaded_at ASC
+                    """,
+                    tuple(dataset_ids),
+                )
+                for row in cursor.fetchall():
+                    grouped.setdefault(row.pop("dataset_id"), []).append(row)
+            return grouped
+        except (Error, RuntimeError) as e:
+            logger.error(f"Error batch-fetching dataset images: {e}")
+            return grouped
     
     @staticmethod
     def update_dataset(dataset_id: str, **kwargs) -> bool:
@@ -240,30 +285,8 @@ class DatasetService:
 
     @staticmethod
     def get_dataset_images(dataset_id: str) -> List[Dict]:
-        """Get all images for a dataset"""
-        connection = get_db_connection()
-        if not connection:
-            return []
-        
-        try:
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute("""
-                SELECT di.id, di.filename, di.original_name, di.path, di.annotated, di.split, di.uploaded_at,
-                       COALESCE(a.status, CASE WHEN di.annotated = TRUE THEN 'annotated' ELSE 'unlabeled' END) AS status
-                FROM dataset_images di
-                LEFT JOIN annotations a ON di.dataset_id = a.dataset_id AND di.id = a.image_id
-                WHERE di.dataset_id = %s
-                ORDER BY di.uploaded_at ASC
-            """, (dataset_id,))
-            images = cursor.fetchall()
-            cursor.close()
-            connection.close()
-            return images
-        except Error as e:
-            print(f"Error getting images: {e}")
-            if connection:
-                connection.close()
-            return []
+        """Get all images for one dataset."""
+        return DatasetService.get_images_for_datasets([dataset_id]).get(dataset_id, [])
     
     @staticmethod
     def get_unannotated_images(dataset_id: str) -> List[Dict]:

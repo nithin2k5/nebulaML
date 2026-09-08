@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     db_user: str = "root"
     db_password: str = ""
     db_name: str = "yolo_generator"
+    # Pooled connections held open per process. MySQL's connector caps a pool at
+    # 32; keep this at or below the server's max_connections divided by the
+    # number of API processes.
+    db_pool_size: int = 10
 
     # API Configuration
     api_v1_str: str = "/api/v1"

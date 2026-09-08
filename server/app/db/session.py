@@ -3,11 +3,54 @@ Database configuration and initialization for YOLO Generator
 Creates MySQL database and tables if they don't exist
 """
 
+import re
+import threading
+from contextlib import contextmanager
+
 import mysql.connector
 from mysql.connector import Error
+from mysql.connector.pooling import MySQLConnectionPool
 
 from app.core.config import settings
 from app.core.logging import logger
+
+# ── Connection pool ──────────────────────────────────────────────────────────
+# Every request used to open a fresh MySQL connection — a TCP handshake plus
+# auth round-trip per call, across ~79 call sites. The pool hands out reusable
+# connections instead; `connection.close()` returns one to the pool rather than
+# tearing it down, so existing callers keep working unchanged.
+_pool: MySQLConnectionPool | None = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool() -> MySQLConnectionPool:
+    """Build the pool on first use (double-checked, so it survives threads)."""
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = MySQLConnectionPool(
+                    pool_name="nebulaml",
+                    pool_size=settings.db_pool_size,
+                    # Reset session state between checkouts so one caller's
+                    # temp tables / session vars can't leak into the next.
+                    pool_reset_session=True,
+                    host=settings.db_host,
+                    port=settings.db_port,
+                    user=settings.db_user,
+                    password=settings.db_password,
+                    database=settings.db_name,
+                )
+                logger.info(f"✓ MySQL connection pool ready (size={settings.db_pool_size})")
+    return _pool
+
+
+def reset_pool() -> None:
+    """Drop the pool so the next call rebuilds it. Used by tests and after a
+    config change; connections already checked out are unaffected."""
+    global _pool
+    with _pool_lock:
+        _pool = None
 
 
 def create_database():
@@ -23,8 +66,13 @@ def create_database():
         
         cursor = connection.cursor()
         
-        # Create database
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {settings.db_name}")
+        # Create database. The name is an identifier, so it cannot be bound as a
+        # parameter — validate it instead of interpolating whatever is in config.
+        if not re.fullmatch(r"[A-Za-z0-9_]+", settings.db_name):
+            raise ValueError(
+                f"Invalid DB_NAME {settings.db_name!r}: expected letters, digits and underscores only"
+            )
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{settings.db_name}`")
         logger.info(f"✓ Database '{settings.db_name}' ready")
         
         cursor.close()
@@ -37,19 +85,82 @@ def create_database():
 
 
 def get_db_connection():
-    """Get database connection"""
+    """Check a connection out of the pool, or None if that fails.
+
+    The caller owns it and must `close()` it — which returns it to the pool
+    rather than disconnecting. Prefer the `db_cursor()` context manager below,
+    which does that for you even when the body raises.
+    """
     try:
-        connection = mysql.connector.connect(
-            host=settings.db_host,
-            port=settings.db_port,
-            user=settings.db_user,
-            password=settings.db_password,
-            database=settings.db_name
-        )
-        return connection
+        connection = _get_pool().get_connection()
     except Error as e:
-        logger.error(f"✗ Error connecting to database: {e}")
+        # PoolError (pool exhausted) subclasses Error and lands here too. It
+        # means connections are being checked out and not returned, so name it
+        # explicitly rather than logging a generic connect failure.
+        if "pool exhausted" in str(e).lower():
+            logger.error(
+                f"✗ Connection pool exhausted (size={settings.db_pool_size}). "
+                "A caller is leaking connections — check for a missing close()."
+            )
+        else:
+            logger.error(f"✗ Error connecting to database: {e}")
         return None
+
+    try:
+        # A pooled connection can have been dropped server-side by wait_timeout
+        # while it sat idle. Ping-with-reconnect revives it; far cheaper than
+        # the full connect this function used to do every time.
+        connection.ping(reconnect=True, attempts=2, delay=0)
+    except Error as e:
+        logger.error(f"✗ Pooled connection is dead and could not reconnect: {e}")
+        try:
+            connection.close()
+        except Error:
+            pass
+        return None
+
+    return connection
+
+
+@contextmanager
+def db_cursor(dictionary: bool = False, commit: bool = False):
+    """Yield a cursor and always return the connection to the pool.
+
+    Handlers that opened a connection by hand only closed it on the success
+    path and inside `except Error`, so any other exception — a JSONDecodeError
+    on a malformed row, say — escaped with the connection still checked out.
+    Enough of those and the pool is exhausted and the app stops serving.
+
+    Raises RuntimeError if the database is unreachable, so callers fail loudly
+    instead of silently treating it as an empty result.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        raise RuntimeError("Database connection unavailable")
+
+    cursor = None
+    try:
+        cursor = connection.cursor(dictionary=dictionary)
+        yield cursor
+        if commit:
+            connection.commit()
+    except Exception:
+        if commit:
+            try:
+                connection.rollback()
+            except Error:
+                pass
+        raise
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Error:
+                pass
+        try:
+            connection.close()
+        except Error:
+            pass
 
 
 def migrate_users_otp_columns(connection) -> None:
