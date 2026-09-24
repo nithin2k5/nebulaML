@@ -209,27 +209,49 @@ def split_dataset_stratified(
                 Y[i, class_to_idx[cls]] = 1
 
     # 2. Perform Split
-    # We need to do this in two steps to get train/val/test
+    # We need to do this in two steps to get train/val/test.
+    # MultilabelStratifiedShuffleSplit rejects a test_size outside (0, 1), so a
+    # split with an empty side — train/val only (test_ratio=0), the default in
+    # the UI, or train/test only — has to skip that step rather than call it
+    # with 0.0 and raise ValueError.
+    X = np.arange(len(images)).reshape(-1, 1)  # Dummy X for index tracking
+
     # Step 1: Split into (train+val) and (test)
     test_size = test_ratio / (train_ratio + val_ratio + test_ratio)
-    
-    X = np.arange(len(images)).reshape(-1, 1) # Dummy X for index tracking
-    
-    msss1 = MultilabelStratifiedShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
-    train_val_indices, test_indices = next(msss1.split(X, Y))
-    
-    X_train_val = X[train_val_indices]
-    Y_train_val = Y[train_val_indices]
-    
+
+    if test_size <= 0:
+        train_val_indices = np.arange(len(images))
+        test_indices = np.array([], dtype=int)
+    elif test_size >= 1:
+        train_val_indices = np.array([], dtype=int)
+        test_indices = np.arange(len(images))
+    else:
+        msss1 = MultilabelStratifiedShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+        train_val_indices, test_indices = next(msss1.split(X, Y))
+
     # Step 2: Split (train+val) into (train) and (val)
-    val_size = val_ratio / (train_ratio + val_ratio)
-    msss2 = MultilabelStratifiedShuffleSplit(n_splits=1, test_size=val_size, random_state=seed)
-    train_indices_rel, val_indices_rel = next(msss2.split(X_train_val, Y_train_val))
-    
-    # Map relative indices back to original indices
-    train_indices = train_val_indices[train_indices_rel]
-    val_indices = train_val_indices[val_indices_rel]
-    
+    val_denominator = train_ratio + val_ratio
+    val_size = (val_ratio / val_denominator) if val_denominator > 0 else 0
+
+    if len(train_val_indices) == 0:
+        train_indices = np.array([], dtype=int)
+        val_indices = np.array([], dtype=int)
+    elif val_size <= 0:
+        train_indices = train_val_indices
+        val_indices = np.array([], dtype=int)
+    elif val_size >= 1:
+        train_indices = np.array([], dtype=int)
+        val_indices = train_val_indices
+    else:
+        X_train_val = X[train_val_indices]
+        Y_train_val = Y[train_val_indices]
+        msss2 = MultilabelStratifiedShuffleSplit(n_splits=1, test_size=val_size, random_state=seed)
+        train_indices_rel, val_indices_rel = next(msss2.split(X_train_val, Y_train_val))
+
+        # Map relative indices back to original indices
+        train_indices = train_val_indices[train_indices_rel]
+        val_indices = train_val_indices[val_indices_rel]
+
     return {
         'train': [images[i] for i in train_indices],
         'val': [images[i] for i in val_indices],

@@ -34,6 +34,50 @@ class TestMLImprovements(unittest.TestCase):
         total = sum(len(v) for v in splits.values())
         self.assertEqual(total, len(images))
 
+    def _imbalanced_images(self):
+        images = [{"id": f"A_{i}", "annotations": [{"class_name": "A"}]} for i in range(100)]
+        images += [{"id": f"B_{i}", "annotations": [{"class_name": "B"}]} for i in range(20)]
+        return images
+
+    def test_split_without_a_test_set(self):
+        """train/val only — the stratifier rejects a test_size of 0.0."""
+        images = self._imbalanced_images()
+        splits = split_dataset_stratified(images, train_ratio=0.8, val_ratio=0.2, test_ratio=0.0)
+        self.assertEqual(len(splits["test"]), 0)
+        self.assertEqual(len(splits["train"]) + len(splits["val"]), len(images))
+
+    def test_split_without_a_val_set(self):
+        """train/test only — the same guard applies to the second split."""
+        images = self._imbalanced_images()
+        splits = split_dataset_stratified(images, train_ratio=0.8, val_ratio=0.0, test_ratio=0.2)
+        self.assertEqual(len(splits["val"]), 0)
+        self.assertEqual(len(splits["train"]) + len(splits["test"]), len(images))
+
+    def test_split_all_train(self):
+        """Everything in train is a legitimate ask and must not raise."""
+        images = self._imbalanced_images()
+        splits = split_dataset_stratified(images, train_ratio=1.0, val_ratio=0.0, test_ratio=0.0)
+        self.assertEqual(len(splits["train"]), len(images))
+        self.assertEqual(len(splits["val"]), 0)
+        self.assertEqual(len(splits["test"]), 0)
+
+    def test_split_loses_no_images_across_ratios(self):
+        images = self._imbalanced_images()
+        for train, val, test in [
+            (0.7, 0.2, 0.1),
+            (0.8, 0.2, 0.0),
+            (0.8, 0.0, 0.2),
+            (1.0, 0.0, 0.0),
+            (0.5, 0.5, 0.0),
+        ]:
+            with self.subTest(ratios=(train, val, test)):
+                splits = split_dataset_stratified(
+                    images, train_ratio=train, val_ratio=val, test_ratio=test
+                )
+                ids = [img["id"] for group in splits.values() for img in group]
+                self.assertEqual(len(ids), len(images))
+                self.assertEqual(len(set(ids)), len(images), "an image landed in two splits")
+
     def test_trainer_accepts_augmentations(self):
         sig = inspect.signature(YOLOTrainer.train)
         self.assertIn("augmentations", sig.parameters)
