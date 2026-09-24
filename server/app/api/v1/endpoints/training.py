@@ -124,9 +124,16 @@ def _assert_capacity():
 
 
 def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
+    """Whether the caller may see this job.
+
+    An unowned job used to return True — a fail-open default in an
+    authorization function. Every creation path stamps user_id, so the only
+    rows that reach this with None are legacy ones written before the column
+    existed; those are now admin-only rather than visible to everybody.
+    """
     uid = job.get("user_id")
     if uid is None:
-        return True
+        return current_user.get("role") == "admin"
     return uid == current_user.get("id")
 
 
@@ -408,6 +415,17 @@ async def start_micro_training(
     Uses existing dataset from database instead of uploaded YAML.
     """
     _ensure_jobs_loaded()
+
+    # Every other start path checks this; this one did not, so any signed-in
+    # user could train against any dataset_id — burning a slot in the shared
+    # two-job queue and producing a model from someone else's data. The check
+    # also validates dataset_id before it reaches the f-string path below.
+    from app.core.access import require_role
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "admin")
+
     _assert_capacity()
     try:
         # Create minimal config
@@ -742,12 +760,13 @@ async def list_training_jobs(current_user: dict = Depends(get_current_user)):
     List all training jobs
     """
     _ensure_jobs_loaded()
-    uid = current_user.get("id")
+    # Same rule as _job_owner_ok, rather than a second copy of it that drifts:
+    # an unowned legacy job is admin-only, not everyone's.
     return {
         "jobs": [
             {"job_id": job_id, **job_data}
             for job_id, job_data in training_jobs.items()
-            if job_data.get("user_id") is None or job_data.get("user_id") == uid
+            if _job_owner_ok(job_data, current_user)
         ]
     }
 
