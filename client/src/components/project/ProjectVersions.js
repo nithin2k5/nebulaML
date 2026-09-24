@@ -371,11 +371,15 @@ export default function ProjectVersions({ dataset, onDeploy }) {
     };
 
     useEffect(() => {
-        fetchJobs();
         fetchVersions();
-        const interval = setInterval(fetchJobs, 3000);
-        return () => clearInterval(interval);
     }, [token, dataset?.id]);
+
+    usePolling(fetchJobs, {
+        intervalMs: 3000,
+        idleIntervalMs: 30000,
+        active: jobs.some(j => j.status === "running" || j.status === "pending"),
+        enabled: Boolean(token && dataset?.id),
+    });
 
     const cancelJob = async (jobId) => {
         if (!(await confirm({

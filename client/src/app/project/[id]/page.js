@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
+import { usePolling } from "@/lib/usePolling";
 import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users, TestTube2, CheckCircle, X } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -129,12 +130,22 @@ export default function ProjectPage() {
         } catch (e) { /* non-critical */ }
     };
 
-    // Poll training jobs every 8s so the pipeline bar stays live
-    useEffect(() => {
-        if (!params?.id || !token) return;
-        const interval = setInterval(() => fetchTrainingJobs(params.id), 8000);
-        return () => clearInterval(interval);
-    }, [params?.id, token]);
+    // Keep the pipeline bar live while something is actually running. This used
+    // to poll every 8s unconditionally, on every tab and behind a hidden
+    // window, alongside the 3s pollers in ProjectTrain and ProjectVersions —
+    // three timers on the same endpoint, each costing a database round trip.
+    usePolling(
+        () => fetchTrainingJobs(params.id),
+        {
+            intervalMs: 8000,
+            idleIntervalMs: 60000,
+            active: trainingJobs.some(
+                j => j.status === "running" || j.status === "pending"
+            ),
+            enabled: Boolean(params?.id && token),
+            runImmediately: false, // the mount effect above already fetched
+        }
+    );
 
 
 

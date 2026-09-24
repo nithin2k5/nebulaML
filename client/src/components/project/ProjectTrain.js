@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Play, Cpu, Clock, AlertCircle, Zap, Scale, Target, ShieldCheck, AlertTriangle, XCircle, CheckCircle2, Loader2, ListOrdered, Activity, StopCircle, ChevronRight } from "lucide-react";
 import { API_ENDPOINTS } from "@/lib/config";
+import { usePolling } from "@/lib/usePolling";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 import ProjectVersions from "@/components/project/ProjectVersions";
@@ -96,9 +97,6 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
         if (!dataset?.id) return;
         runPreflight();
         fetchQueueStatus();
-        fetchActiveJobs();
-        const interval = setInterval(fetchActiveJobs, 3000);
-        return () => clearInterval(interval);
     }, [dataset?.id]);
 
     const fetchActiveJobs = async () => {
@@ -115,6 +113,15 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
             }
         } catch(e) { /* non-critical */ }
     };
+
+    // Three seconds while a run is in flight; back off to thirty when the
+    // project is idle, and nothing at all behind a hidden tab.
+    usePolling(fetchActiveJobs, {
+        intervalMs: 3000,
+        idleIntervalMs: 30000,
+        active: activeJobs.length > 0,
+        enabled: Boolean(dataset?.id && token),
+    });
 
     const cancelJob = async (jobId) => {
         if (!(await confirm({
