@@ -891,7 +891,7 @@ async def get_per_class_metrics(job_id: str, current_user: dict = Depends(get_cu
     }
 
 @router.get("/model-registry")
-async def get_model_registry():
+async def get_model_registry(current_user: dict = Depends(get_current_user)):
     """Return the full model registry for client-side model selection."""
     return {"models": get_registry_for_api()}
 
@@ -920,7 +920,7 @@ async def get_auto_retrain_config(dataset_id: str, current_user: dict = Depends(
 
 
 @router.get("/presets")
-async def get_training_presets():
+async def get_training_presets(current_user: dict = Depends(get_current_user)):
     """
     Return available training presets with descriptions.
     """

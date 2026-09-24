@@ -101,3 +101,24 @@ def test_per_job_endpoints_resolve_through_the_owner_check(endpoint):
     assert "_get_owned_job" in source or "_job_owner_ok" in source, (
         f"{endpoint} reads a job without an ownership check"
     )
+
+
+# ── No anonymous endpoints ───────────────────────────────────────────────────
+
+def test_no_training_endpoint_is_anonymous():
+    """Every route on this router should require a caller.
+
+    /model-registry and /presets took no auth dependency. They return static
+    catalogue data rather than user data, so nothing leaked — but an
+    unauthenticated route on an otherwise authenticated router is a default
+    worth not having.
+    """
+    anonymous = []
+    for route in training.router.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint is None:
+            continue
+        params = inspect.signature(endpoint).parameters
+        if "current_user" not in params:
+            anonymous.append(getattr(route, "path", endpoint.__name__))
+    assert not anonymous, f"training endpoints with no caller: {anonymous}"
