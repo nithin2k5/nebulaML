@@ -39,6 +39,25 @@ datasets_db: Dict[str, Dict] = {}
 export_jobs: Dict[str, Dict] = {}
 auto_label_jobs: Dict[str, Dict] = {}
 
+# Both dicts above are append-only: a row goes in when a job starts and nothing
+# ever takes it out, so a long-running process accumulates one entry per export
+# and per auto-label run until it is restarted. Clients only poll a job until it
+# reaches a terminal state, so finished entries are dead weight almost
+# immediately — but they have to survive long enough for the poll that observes
+# the result, hence a retained tail rather than deleting on completion.
+_FINISHED_JOB_RETENTION = 50
+_TERMINAL_STATUSES = ("completed", "failed")
+
+
+def _prune_finished_jobs(jobs: Dict[str, Dict], keep: int = _FINISHED_JOB_RETENTION) -> None:
+    """Drop all but the most recent `keep` finished jobs, oldest first."""
+    finished = [
+        job_id for job_id, job in jobs.items()
+        if job.get("status") in _TERMINAL_STATUSES
+    ]
+    for job_id in finished[:-keep] if keep else finished:
+        jobs.pop(job_id, None)
+
 class BoundingBox(BaseModel):
     x: float
     y: float
@@ -1054,6 +1073,7 @@ async def export_dataset(
     images_with_split = [img for img in annotated_images if img.get("split")]
     
     job_id = str(uuid.uuid4())
+    _prune_finished_jobs(export_jobs)
     export_jobs[job_id] = {
         "status": "pending",
         "progress": 0,
@@ -1396,6 +1416,7 @@ async def auto_label_images(
         raise HTTPException(status_code=400, detail="No valid images selected for auto-labeling")
         
     task_job_id = str(uuid.uuid4())
+    _prune_finished_jobs(auto_label_jobs)
     auto_label_jobs[task_job_id] = {
         "status": "pending",
         "progress": 0,

@@ -123,6 +123,20 @@ def _assert_capacity():
         )
 
 
+_JOB_WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "yolo_training"
+
+
+def _cleanup_job_workspace(job_id: str) -> None:
+    """Remove the scratch directory a training job staged its inputs in."""
+    workspace = _JOB_WORKSPACE_ROOT / job_id
+    try:
+        if workspace.exists():
+            shutil.rmtree(workspace, ignore_errors=True)
+    except OSError as e:
+        # Never let cleanup failure change the outcome of a finished run.
+        logger.warning(f"Could not clean up workspace for job {job_id}: {e}")
+
+
 def _job_owner_ok(job: Dict[str, Any], current_user: dict) -> bool:
     """Whether the caller may see this job.
 
@@ -670,6 +684,14 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
             })
             
         _persist_job(job_id)
+
+        # The scratch directory this job staged its data.yaml (and, for
+        # export-and-train, a whole filtered copy of the dataset) into was
+        # never removed — /tmp/yolo_training accumulated one per run forever.
+        # The trained weights live under runs/detect, not here, so nothing
+        # downstream reads this after the run.
+        _cleanup_job_workspace(job_id)
+
         if final_status == "completed":
             logger.info(f"Training job {job_id} completed successfully")
 
@@ -779,6 +801,9 @@ async def delete_training_job(job_id: str, current_user: dict = Depends(get_curr
     if job.get("status") in ("running", "pending"):
         raise HTTPException(status_code=400, detail="Cancel the job first; training is still in progress")
     del training_jobs[job_id]
+    # Belt and braces: the run's finally already removed this, but a job
+    # deleted after a crash mid-run would otherwise leave it behind.
+    _cleanup_job_workspace(job_id)
     return {"success": True, "message": "Job deleted"}
 
 @router.get("/job/{job_id}/metrics")
