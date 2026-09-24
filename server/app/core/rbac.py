@@ -6,30 +6,28 @@ Handles authentication, authorization, and role management
 import jwt
 import bcrypt
 import logging
-import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
-    # No known-value fallback: a hardcoded default would let anyone who has
-    # read this file forge valid tokens against a deployment that forgot to
-    # set SECRET_KEY. A random per-process secret fails closed instead -
-    # existing tokens/deployments must set SECRET_KEY explicitly to persist
-    # sessions across restarts.
-    SECRET_KEY = secrets.token_urlsafe(32)
-    logger.warning(
-        "SECRET_KEY is not set in the environment. Using a randomly generated "
-        "key for this process only; all existing tokens will be invalidated "
-        "on restart. Set SECRET_KEY before deploying to production."
-    )
-ALGORITHM = "HS256"
+# One signing key for the whole process.
+#
+# This module used to read SECRET_KEY itself, via os.getenv plus its own
+# load_dotenv(), and mint its own random fallback when unset — while
+# core/config.py did exactly the same thing independently. With SECRET_KEY
+# unset (every default dev setup) that produced *two different* random
+# secrets: access tokens signed with this module's, invite tokens in
+# collaboration.py signed with the settings one. Anything that crossed
+# between them failed to verify for reasons no log line explained.
+#
+# config.py already applies the fail-closed random fallback and logs the
+# warning, so take the value from there rather than re-deriving it.
+SECRET_KEY = settings.secret_key
+ALGORITHM = settings.algorithm
 
 # Access tokens live in the browser (localStorage today), so anything that can
 # read them — XSS, a leaked log line, a shared device — gets the full window.
@@ -46,6 +44,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 # field someone adds.
 TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
+TOKEN_TYPE_INVITE = "invite"
 TOKEN_TYPE_CLAIM = "typ"
 BCRYPT_ROUNDS = 12  # Increased for production-grade security
 
@@ -185,12 +184,12 @@ def _decode(token: str, expected_type: Optional[str]) -> Optional[dict]:
     actual = payload.get(TOKEN_TYPE_CLAIM)
     if actual == expected_type:
         return payload
-    # Tokens minted before this claim existed carry no `typ`. Accept them as
-    # access tokens so a deploy does not sign everyone out mid-session.
-    # TODO: drop this fallback once ACCESS_TOKEN_EXPIRE_MINUTES has elapsed
-    # past the deploy (and definitely before REFRESH_TOKEN_EXPIRE_DAYS).
-    if actual is None and expected_type == TOKEN_TYPE_ACCESS:
-        return payload
+    # An untyped token is no longer accepted as an access token. That fallback
+    # existed so a deploy would not sign everyone out mid-session, and it has
+    # now outlived its window — but it was also the whole reason a token of a
+    # *different* purpose could be presented as an access token, since every
+    # token here is signed with the same key and algorithm. Invite tokens
+    # (collaboration.py) now carry typ=invite, so nothing untyped remains.
     logger.warning(
         "Rejected token: expected typ=%s, got typ=%s", expected_type, actual
     )

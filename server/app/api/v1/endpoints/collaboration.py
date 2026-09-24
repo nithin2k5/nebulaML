@@ -10,6 +10,7 @@ import jwt
 from app.core.config import settings
 from app.core.email import send_project_invite_email
 from app.core.access import require_role
+from app.core.rbac import TOKEN_TYPE_CLAIM, TOKEN_TYPE_INVITE
 
 router = APIRouter()
 
@@ -103,7 +104,11 @@ async def add_member(dataset_id: str, req: AddMemberRequest, current_user: dict 
             "dataset_name": ds['name'],
             "email": invite_email,
             "role": req.role,
-            "exp": datetime.utcnow() + timedelta(days=7)
+            "exp": datetime.utcnow() + timedelta(days=7),
+            # Invites are signed with the same key and algorithm as access and
+            # refresh tokens, so the type claim is the only thing that stops
+            # one being presented in place of another.
+            TOKEN_TYPE_CLAIM: TOKEN_TYPE_INVITE,
         }
         token = jwt.encode(invite_data, settings.secret_key, algorithm=settings.algorithm)
         invite_link = f"{settings.frontend_url}/project/invite?token={token}"
@@ -144,6 +149,9 @@ class AcceptInviteRequest(BaseModel):
 async def accept_invite(req: AcceptInviteRequest, current_user: dict = Depends(get_current_user)):
     try:
         payload = jwt.decode(req.token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get(TOKEN_TYPE_CLAIM) != TOKEN_TYPE_INVITE:
+            # An access or refresh token verifies against this key too.
+            raise HTTPException(status_code=400, detail="Invalid invite link.")
         email = payload.get("email")
         dataset_id = payload.get("dataset_id")
         role = payload.get("role")

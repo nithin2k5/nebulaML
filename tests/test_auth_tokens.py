@@ -44,16 +44,45 @@ def test_invite_style_token_is_rejected_as_an_access_token():
     assert rbac.decode_access_token(invite) is None
 
 
-def test_legacy_token_without_a_type_still_authenticates():
-    """Tokens minted before the claim existed must not sign everyone out."""
-    legacy = jwt.encode(
+def test_untyped_token_is_no_longer_accepted():
+    """The migration fallback for pre-`typ` tokens has been removed.
+
+    It was the last hole in type separation: every token here is signed with
+    the same key and algorithm, so an untyped one of any purpose sailed
+    through as an access token. Those tokens expired long ago; nothing the
+    system mints today is untyped.
+    """
+    untyped = jwt.encode(
         {"user_id": 1, "username": "u", "role": "user"},
         rbac.SECRET_KEY,
         algorithm=rbac.ALGORITHM,
     )
-    assert rbac.decode_access_token(legacy) is not None
-    # ...but a legacy token is still not usable as a refresh token.
-    assert rbac.decode_refresh_token(legacy) is None
+    assert rbac.decode_access_token(untyped) is None
+    assert rbac.decode_refresh_token(untyped) is None
+
+
+def test_invite_token_is_rejected_as_an_access_token():
+    """collaboration.py stamps typ=invite; it must not authenticate a request."""
+    invite = jwt.encode(
+        {
+            "dataset_id": "d1",
+            "email": "a@b.c",
+            "role": "annotator",
+            rbac.TOKEN_TYPE_CLAIM: rbac.TOKEN_TYPE_INVITE,
+        },
+        rbac.SECRET_KEY,
+        algorithm=rbac.ALGORITHM,
+    )
+    assert rbac.decode_access_token(invite) is None
+    assert rbac.decode_refresh_token(invite) is None
+
+
+def test_rbac_and_settings_share_one_signing_key():
+    """Two independently generated random keys made invites unverifiable."""
+    from app.core.config import settings
+
+    assert rbac.SECRET_KEY == settings.secret_key
+    assert rbac.ALGORITHM == settings.algorithm
 
 
 def test_expired_token_is_rejected():
