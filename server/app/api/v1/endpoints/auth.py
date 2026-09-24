@@ -26,7 +26,7 @@ from app.core.rbac import (
 )
 from app.services.refresh_tokens import RefreshTokenService
 import uuid
-import random
+import secrets
 from datetime import datetime, timedelta
 from app.core.email import send_otp_email
 from slowapi import Limiter
@@ -39,6 +39,24 @@ security = HTTPBearer(auto_error=False)
 
 
 _USERNAME_RE = re.compile(r"^[a-z0-9_]+$")
+
+# Sign-in is passwordless, so the OTP *is* the credential: it must come from a
+# CSPRNG, not `random`, whose Mersenne Twister state is recoverable from enough
+# observed outputs. An attacker can mint codes at will by POSTing /login.
+_OTP_DIGITS = 6
+_OTP_LOWER = 10 ** (_OTP_DIGITS - 1)
+
+
+def _generate_otp() -> str:
+    """Mint a cryptographically random 6-digit one-time code."""
+    return str(secrets.randbelow(9 * _OTP_LOWER) + _OTP_LOWER)
+
+
+# A 6-digit code is only 10^6 wide, so the rate limit on /verify is not by
+# itself enough — an attacker with a pool of IPs can still walk the space
+# inside the 10-minute window. Burning the code after a handful of wrong
+# guesses bounds the attempt count per *code* rather than per caller.
+MAX_OTP_ATTEMPTS = 5
 
 
 # Pydantic models
@@ -227,7 +245,7 @@ async def register(request: Request, user_data: UserRegister):
             )
         
         # Generate OTP
-        otp_code = f"{random.randint(100000, 999999)}"
+        otp_code = _generate_otp()
         otp_expiry = datetime.now() + timedelta(minutes=10)
         
         # Check if email exists in pending, update or insert
@@ -304,7 +322,7 @@ async def login(request: Request, credentials: UserLogin):
             # Generate OTP only for accounts that actually exist. The
             # response below is identical either way so the endpoint can't
             # be used to enumerate which emails are registered.
-            otp_code = f"{random.randint(100000, 999999)}"
+            otp_code = _generate_otp()
             otp_expiry = datetime.now() + timedelta(minutes=10)
 
             cursor.execute(
@@ -337,8 +355,58 @@ async def login(request: Request, credentials: UserLogin):
         )
 
 
+def _otp_matches(stored: Optional[str], supplied: str) -> bool:
+    """Compare a stored OTP against a supplied one in constant time."""
+    if not stored:
+        return False
+    return secrets.compare_digest(str(stored), supplied)
+
+
+def _register_failed_attempt(connection, cursor, table: str, row: dict) -> None:
+    """Count a wrong guess against the stored code, burning it past the budget.
+
+    Expiring the code rather than locking the account keeps this from being a
+    denial-of-service lever: the legitimate owner just requests a new one,
+    while the attacker's search is capped at MAX_OTP_ATTEMPTS per code.
+    """
+    # A table name cannot be bound as a parameter, so it is interpolated —
+    # allowlist it rather than trusting every future call site.
+    if table not in ("users", "pending_registrations"):
+        raise ValueError(f"refusing to record an attempt against table {table!r}")
+
+    attempts = (row.get("verification_attempts") or 0) + 1
+    try:
+        if attempts >= MAX_OTP_ATTEMPTS:
+            cursor.execute(
+                f"UPDATE {table} SET verification_code = NULL, "  # noqa: S608 - fixed literals
+                "verification_code_expires = NULL, verification_attempts = 0 WHERE id = %s",
+                (row["id"],),
+            )
+            logger.warning(
+                "OTP for %s id=%s burned after %d failed attempts",
+                table, row["id"], attempts,
+            )
+        else:
+            cursor.execute(
+                f"UPDATE {table} SET verification_attempts = %s WHERE id = %s",  # noqa: S608
+                (attempts, row["id"]),
+            )
+        connection.commit()
+    except mysql.connector.Error as e:
+        # Never let bookkeeping turn a rejected code into a 500 — the caller
+        # still gets its 400 either way.
+        logger.error("Could not record failed OTP attempt on %s: %s", table, e)
+
+
+# Both verify failure modes answer with this single message. Distinguishing
+# "wrong code" from "no such account" here would hand back exactly the account
+# enumeration oracle that /login goes out of its way not to expose.
+_OTP_REJECTED = "Invalid or expired code"
+
+
 @router.post("/verify", response_model=TokenResponse)
-async def verify_otp(verify_data: UserVerify):
+@limiter.limit("5/minute")
+async def verify_otp(request: Request, verify_data: UserVerify):
     """Verify OTP and return access token"""
     connection = get_db_connection()
     if not connection:
@@ -350,11 +418,18 @@ async def verify_otp(verify_data: UserVerify):
     try:
         cursor = connection.cursor(dictionary=True)
         cursor.execute(
-            "SELECT * FROM pending_registrations WHERE email = %s AND verification_code = %s AND verification_code_expires > NOW()",
-            (verify_data.email, verify_data.otp)
+            "SELECT * FROM pending_registrations WHERE email = %s AND verification_code_expires > NOW()",
+            (verify_data.email,)
         )
         pending_user = cursor.fetchone()
-        
+        if pending_user and not _otp_matches(pending_user.get("verification_code"), verify_data.otp):
+            _register_failed_attempt(
+                connection, cursor, "pending_registrations", pending_user
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_OTP_REJECTED
+            )
+
         if pending_user:
             # Move to users table
             dummy_hash = "otp_auth_only"
@@ -374,22 +449,22 @@ async def verify_otp(verify_data: UserVerify):
             user = cursor.fetchone()
         else:
             cursor.execute(
-                "SELECT * FROM users WHERE email = %s AND verification_code = %s AND verification_code_expires > NOW()",
-                (verify_data.email, verify_data.otp)
+                "SELECT * FROM users WHERE email = %s AND verification_code_expires > NOW()",
+                (verify_data.email,)
             )
             user = cursor.fetchone()
-            
-            if not user:
-                # Check if it's because of wrong OTP or expired
-                cursor.execute("SELECT id FROM users WHERE email = %s UNION SELECT id FROM pending_registrations WHERE email = %s", (verify_data.email, verify_data.email))
-                if cursor.fetchone():
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OTP")
-                else:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-                    
-            # Clear OTP
+
+            if not user or not _otp_matches(user.get("verification_code"), verify_data.otp):
+                if user:
+                    _register_failed_attempt(connection, cursor, "users", user)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=_OTP_REJECTED
+                )
+
+            # Clear the OTP and reset the attempt budget for the next one.
             cursor.execute(
-                "UPDATE users SET verification_code = NULL, verification_code_expires = NULL WHERE id = %s",
+                "UPDATE users SET verification_code = NULL, verification_code_expires = NULL, "
+                "verification_attempts = 0 WHERE id = %s",
                 (user["id"],)
             )
             connection.commit()
@@ -421,7 +496,7 @@ async def resend_otp(request: Request, body: EmailRequest):
         cursor.execute("SELECT id FROM users WHERE email = %s", (body.email,))
         user = cursor.fetchone()
 
-        otp_code = f"{random.randint(100000, 999999)}"
+        otp_code = _generate_otp()
         otp_expiry = datetime.now() + timedelta(minutes=10)
 
         if user:
@@ -549,7 +624,7 @@ async def request_change_email_current(request: Request, current_user: dict = De
     
     try:
         cursor = connection.cursor()
-        otp_code = f"{random.randint(100000, 999999)}"
+        otp_code = _generate_otp()
         otp_expiry = datetime.now() + timedelta(minutes=10)
         
         cursor.execute(
@@ -589,7 +664,7 @@ async def verify_change_email_current(request: Request, body: EmailChangeVerifyC
         if cursor.fetchone():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is already in use")
             
-        new_otp_code = f"{random.randint(100000, 999999)}"
+        new_otp_code = _generate_otp()
         new_otp_expiry = datetime.now() + timedelta(minutes=10)
         
         cursor.execute(
@@ -963,7 +1038,6 @@ async def create_api_key(
     current_user: dict = Depends(get_current_user)
 ):
     """Generate a new permanent API key"""
-    import secrets
     import hashlib
     from app.services.database import ApiKeyService
 

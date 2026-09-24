@@ -187,6 +187,19 @@ def migrate_users_otp_columns(connection) -> None:
                 "ALTER TABLE users ADD COLUMN pending_email VARCHAR(255) NULL"
             )
             logger.info("Migrated: added users.pending_email")
+        cur.execute("SHOW COLUMNS FROM users LIKE 'verification_attempts'")
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN verification_attempts INT NOT NULL DEFAULT 0"
+            )
+            logger.info("Migrated: added users.verification_attempts")
+        cur.execute("SHOW COLUMNS FROM pending_registrations LIKE 'verification_attempts'")
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE pending_registrations "
+                "ADD COLUMN verification_attempts INT NOT NULL DEFAULT 0"
+            )
+            logger.info("Migrated: added pending_registrations.verification_attempts")
         connection.commit()
         cur.close()
     except Error as e:
@@ -214,6 +227,7 @@ def create_tables():
                 is_verified BOOLEAN DEFAULT FALSE,
                 verification_code VARCHAR(6),
                 verification_code_expires TIMESTAMP NULL,
+                verification_attempts INT NOT NULL DEFAULT 0,
                 reset_token VARCHAR(255),
                 reset_token_expires TIMESTAMP NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -235,6 +249,7 @@ def create_tables():
                 role ENUM('admin', 'user', 'viewer') DEFAULT 'user',
                 verification_code VARCHAR(6),
                 verification_code_expires TIMESTAMP NULL,
+                verification_attempts INT NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_email (email)
             )
