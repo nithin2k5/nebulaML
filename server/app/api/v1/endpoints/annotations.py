@@ -23,7 +23,7 @@ import random
 # sys.path.append(str(Path(__file__).parent.parent.parent))
 from app.services.database import DatasetService, AnnotationService
 from app.api.v1.endpoints.auth import get_current_user
-from app.db.session import get_db_connection
+from app.db.session import get_db_connection, db_cursor
 from app.core.access import require_role, effective_role
 
 router = APIRouter()
@@ -927,8 +927,7 @@ async def split_dataset(
         connection.commit()
         
         cursor.close()
-        connection.close()
-        
+
         return JSONResponse(content={
             "success": True,
             "message": f"Successfully split dataset: {len(splits['train'])} train, {len(splits['val'])} val, {len(splits['test'])} test",
@@ -939,10 +938,15 @@ async def split_dataset(
             }
         })
     except Exception as e:
-        if connection:
-            connection.close()
         logger.error(f"Error splitting dataset: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to apply splits: {str(e)}")
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.get("/datasets/{dataset_id}/export-status/{job_id}")
@@ -1550,17 +1554,13 @@ async def propagate_annotations_to_all(
     image_status_map: dict = {}
     if mode == "skip_annotated":
         try:
-            _conn = get_db_connection()
-            if _conn:
-                _cur = _conn.cursor(dictionary=True)
+            with db_cursor(dictionary=True) as _cur:
                 _cur.execute(
                     "SELECT image_id, status FROM annotations WHERE dataset_id = %s",
                     (dataset_id,)
                 )
                 for row in _cur.fetchall():
                     image_status_map[str(row["image_id"])] = row["status"]
-                _cur.close()
-                _conn.close()
         except Exception as _e:
             logger.warning(f"Could not pre-fetch annotation statuses: {_e}")
 

@@ -617,7 +617,6 @@ def create_tables():
 
         connection.commit()
         cursor.close()
-        connection.close()
 
         logger.info("✅ All tables created successfully!")
         return True
@@ -625,6 +624,13 @@ def create_tables():
     except Error as e:
         logger.error(f"✗ Error creating tables: {e}")
         return False
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Error:
+                pass
 
 
 def initialize_database():
@@ -645,10 +651,17 @@ def initialize_database():
 def check_db_connection():
     """Check if database connection is working"""
     connection = get_db_connection()
-    if connection:
-        connection.close()
+    if connection is None:
+        return False
+    try:
         return True
-    return False
+    finally:
+        # Nothing here can raise today, but the close belongs in a finally so
+        # it survives anyone adding a probe query above it.
+        try:
+            connection.close()
+        except Error:
+            pass
 
 
 if __name__ == "__main__":

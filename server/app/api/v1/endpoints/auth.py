@@ -279,7 +279,6 @@ async def register(request: Request, user_data: UserRegister):
         connection.commit()
         
         cursor.close()
-        connection.close()
         
         # Send Email
         send_otp_email(user_data.email, otp_code)
@@ -297,6 +296,13 @@ async def register(request: Request, user_data: UserRegister):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Registration failed: {str(e)}"
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.post("/login")
@@ -344,7 +350,6 @@ async def login(request: Request, credentials: UserLogin):
                 logger.exception("send_otp_email failed after OTP was stored: %s", mail_err)
 
         cursor.close()
-        connection.close()
 
         return {
             "message": "If an account exists for this email, an OTP has been sent",
@@ -360,6 +365,13 @@ async def login(request: Request, credentials: UserLogin):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Login failed: {str(e)}"
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 def _otp_matches(stored: Optional[str], supplied: str) -> bool:
@@ -600,7 +612,6 @@ async def update_profile(
         )
         connection.commit()
         cursor.close()
-        connection.close()
 
         return {"message": "Profile updated", "username": update.username}
     except HTTPException:
@@ -610,6 +621,13 @@ async def update_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update profile: {str(e)}",
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 class EmailChangeVerifyCurrent(BaseModel):
@@ -640,12 +658,18 @@ async def request_change_email_current(request: Request, current_user: dict = De
         )
         connection.commit()
         cursor.close()
-        connection.close()
         
         send_otp_email(current_user["email"], otp_code)
         return {"message": "OTP sent to current email"}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to send OTP: {str(e)}")
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.post("/me/change-email/verify-current")
@@ -680,7 +704,6 @@ async def verify_change_email_current(request: Request, body: EmailChangeVerifyC
         )
         connection.commit()
         cursor.close()
-        connection.close()
         
         send_otp_email(body.new_email, new_otp_code)
         return {"message": "OTP sent to new email"}
@@ -688,6 +711,13 @@ async def verify_change_email_current(request: Request, body: EmailChangeVerifyC
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to verify and send OTP: {str(e)}")
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.post("/me/change-email/verify-new")
@@ -717,13 +747,19 @@ async def verify_change_email_new(request: Request, body: EmailChangeVerifyNew, 
         )
         connection.commit()
         cursor.close()
-        connection.close()
         
         return {"message": "Email updated successfully", "email": new_email}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to verify new email: {str(e)}")
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.get("/me/stats")
@@ -762,7 +798,6 @@ async def get_my_stats(current_user: dict = Depends(get_current_user)):
         annotations_count = cursor.fetchone()["cnt"]
 
         cursor.close()
-        connection.close()
 
         return {
             "projects_owned": projects_owned,
@@ -774,6 +809,13 @@ async def get_my_stats(current_user: dict = Depends(get_current_user)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch stats: {str(e)}",
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.get("/permissions")
@@ -904,7 +946,6 @@ async def list_users(
         cursor.execute("SELECT id, username, email, role, created_at FROM users")
         users = cursor.fetchall()
         cursor.close()
-        connection.close()
         
         return {"users": users}
     except Exception as e:
@@ -912,6 +953,13 @@ async def list_users(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching users: {str(e)}"
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.get("/users/by-username/{username}")
@@ -941,7 +989,6 @@ async def get_user_by_username(
         )
         user = cursor.fetchone()
         cursor.close()
-        connection.close()
 
         if not user:
             raise HTTPException(
@@ -958,6 +1005,13 @@ async def get_user_by_username(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching user: {str(e)}",
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.put("/users/{user_id}/role")
@@ -988,7 +1042,6 @@ async def update_user_role(
         )
         connection.commit()
         cursor.close()
-        connection.close()
         
         return {"message": f"User role updated to {new_role}"}
     except Exception as e:
@@ -996,6 +1049,13 @@ async def update_user_role(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating role: {str(e)}"
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.delete("/users/{user_id}")
@@ -1022,7 +1082,6 @@ async def delete_user(
         cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
         connection.commit()
         cursor.close()
-        connection.close()
         
         return {"message": "User deleted successfully"}
     except Exception as e:
@@ -1030,6 +1089,13 @@ async def delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting user: {str(e)}"
         )
+    finally:
+        # Return the pooled connection no matter how we leave.
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

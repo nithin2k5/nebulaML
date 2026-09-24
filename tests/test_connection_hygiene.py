@@ -17,28 +17,10 @@ import pytest
 
 APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "server" / "app"
 
-# Functions that still open a connection by hand without a finally. Each one is
-# a latent pool leak. Delete entries as they are fixed; the test fails both if
-# something not listed here appears and if an entry here stops leaking, so the
-# list can only shrink. services/database.py was cleared in one pass; the
-# remainder are endpoint handlers.
-_KNOWN_LEAKS = {
-    ("api/v1/endpoints/annotations.py", "split_dataset"),
-    ("api/v1/endpoints/annotations.py", "propagate_annotations_to_all"),
-    ("api/v1/endpoints/auth.py", "register"),
-    ("api/v1/endpoints/auth.py", "login"),
-    ("api/v1/endpoints/auth.py", "update_profile"),
-    ("api/v1/endpoints/auth.py", "request_change_email_current"),
-    ("api/v1/endpoints/auth.py", "verify_change_email_current"),
-    ("api/v1/endpoints/auth.py", "verify_change_email_new"),
-    ("api/v1/endpoints/auth.py", "get_my_stats"),
-    ("api/v1/endpoints/auth.py", "list_users"),
-    ("api/v1/endpoints/auth.py", "get_user_by_username"),
-    ("api/v1/endpoints/auth.py", "update_user_role"),
-    ("api/v1/endpoints/auth.py", "delete_user"),
-    ("db/session.py", "create_tables"),
-    ("db/session.py", "check_db_connection"),
-}
+# Every function that checks a connection out of the pool now returns it in a
+# finally (or goes through db_cursor). The list is empty and must stay that
+# way: a new entry here means a new way to exhaust the pool.
+_KNOWN_LEAKS: set = set()
 
 
 def _closes_in_finally(fn: ast.AST) -> bool:
@@ -105,10 +87,12 @@ def test_get_current_user_does_not_leak():
     assert ("api/v1/endpoints/auth.py", "get_current_user") not in _leaking_functions()
 
 
-@pytest.mark.parametrize("path, name", sorted(_KNOWN_LEAKS))
-def test_known_leaks_are_tracked(path, name):
-    """Documents the remaining debt so it stays visible in the test report."""
-    assert (APP_ROOT / path).exists()
+def test_every_pool_caller_is_accounted_for():
+    """Sanity-check the detector itself: it must still see the call sites."""
+    callers = 0
+    for path in APP_ROOT.rglob("*.py"):
+        callers += path.read_text().count("get_db_connection()")
+    assert callers > 20, "detector found almost no call sites — has it broken?"
 
 
 # ── Runtime proof ────────────────────────────────────────────────────────────
