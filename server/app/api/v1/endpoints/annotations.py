@@ -1,12 +1,13 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Body, Depends, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Dict, Optional
 import os
+import re
 import json
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import tempfile
 import uuid
 from datetime import datetime
@@ -55,10 +56,45 @@ class ImageAnnotation(BaseModel):
     boxes: List[BoundingBox]
     status: Optional[str] = "annotated"  # unlabeled, predicted, annotated, reviewed
 
+# A dataset name is a human label, but it is also pasted into export filenames.
+# `Path(dir) / f"{name}_export.zip"` does not sanitise anything, so a name of
+# "../../../../tmp/x" resolved outside the dataset directory entirely — an
+# authenticated write (and read) anywhere on disk that ends in _export.zip.
+#
+# Two layers, because names already stored in the database were never checked:
+# reject the dangerous ones on the way in, and derive a filesystem-safe stem at
+# every point of use.
+_UNSAFE_IN_FILENAME = re.compile(r"[^\w\-. ]", re.UNICODE)
+
+
+def safe_name_stem(name: str, fallback: str = "dataset") -> str:
+    """Reduce a dataset name to something that cannot escape its directory."""
+    # Take the final component first: that alone defeats "a/../../b".
+    stem = PurePosixPath(str(name or "")).name
+    stem = PureWindowsPath(stem).name
+    stem = _UNSAFE_IN_FILENAME.sub("_", stem)
+    stem = stem.strip(". ").strip()
+    return stem[:100] or fallback
+
+
 class Dataset(BaseModel):
     name: str
     description: Optional[str] = ""
     classes: List[str]
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("Dataset name cannot be empty")
+        if len(v) > 100:
+            raise ValueError("Dataset name must be 100 characters or fewer")
+        if any(sep in v for sep in ("/", "\\", "\x00")):
+            raise ValueError("Dataset name may not contain path separators")
+        if v.strip(". ") == "":
+            raise ValueError("Dataset name must contain more than dots and spaces")
+        return v
 
 class ExportRequest(BaseModel):
     split_ratio: float = 0.8
@@ -839,7 +875,7 @@ val: val/images
         with open(yaml_path, 'w') as f:
             f.write(yaml_content)
         
-        zip_path = dataset_dir / f"{dataset['name']}_export.zip"
+        zip_path = dataset_dir / f"{safe_name_stem(dataset['name'])}_export.zip"
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             zipf.write(yaml_path, "data.yaml")
             for split_name in ["train", "val", "test"]:
@@ -1032,7 +1068,7 @@ async def download_dataset(
     require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
 
     dataset = db_dataset
-    zip_path = Path(f"datasets/{dataset_id}/{dataset['name']}_export.zip")
+    zip_path = Path(f"datasets/{dataset_id}/{safe_name_stem(dataset['name'])}_export.zip")
     
     if not zip_path.exists():
         raise HTTPException(status_code=404, detail="Dataset not exported yet. Export first.")
@@ -1454,7 +1490,7 @@ async def download_format(
 
     if format == "yolo":
         # Return existing YOLO export
-        zip_path = Path(f"datasets/{dataset_id}/{db_dataset['name']}_export.zip")
+        zip_path = Path(f"datasets/{dataset_id}/{safe_name_stem(db_dataset['name'])}_export.zip")
         if not zip_path.exists():
             raise HTTPException(status_code=404, detail="YOLO export not found. Export dataset first.")
         return FileResponse(path=str(zip_path), filename=f"{db_dataset['name']}_yolo.zip", media_type="application/zip")
