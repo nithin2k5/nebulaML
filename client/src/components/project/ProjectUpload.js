@@ -169,7 +169,7 @@ export default function ProjectUpload({ dataset, onUploadComplete, onNavigate })
         formData.append("format_type", importFormat);
 
         try {
-            const response = await fetch(`${API_ENDPOINTS.DATASETS.BASE || (API_ENDPOINTS.BASE_URL + "/datasets")}/${dataset.id}/import`, {
+            const response = await fetch(API_ENDPOINTS.DATASETS.IMPORT(dataset.id), {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${token}` },
                 body: formData,

@@ -23,6 +23,7 @@ import random
 # Add parent directory to path for imports
 # sys.path.append(str(Path(__file__).parent.parent.parent))
 from app.services.database import DatasetService, AnnotationService
+from app.services.dataset_importer import DatasetImporter
 from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection, db_cursor
 from app.core.access import require_role, effective_role
@@ -1117,6 +1118,85 @@ async def download_dataset(
         filename=f"{dataset['name']}_dataset.zip",
         media_type="application/zip"
     )
+
+# Maximum size accepted for an uploaded dataset archive. The importer applies
+# its own caps to what the archive *expands* to; this bounds what we are willing
+# to spool to disk in the first place.
+MAX_IMPORT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+
+@router.post("/datasets/{dataset_id}/import")
+async def import_dataset(
+    dataset_id: str,
+    file: UploadFile = File(...),
+    format_type: str = Form("yolo"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Import a COCO or YOLO dataset from a zip archive.
+
+    DatasetImporter has been able to do this all along; it simply had no route
+    in front of it, so the Upload tab's import control called a URL that did
+    not exist.
+    """
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
+
+    fmt = (format_type or "").strip().lower()
+    if fmt not in ("yolo", "coco"):
+        raise HTTPException(
+            status_code=400, detail="format_type must be either 'yolo' or 'coco'"
+        )
+
+    if not (file.filename or "").lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Upload a .zip archive")
+
+    # Spool to a temp file rather than holding the upload in memory, and stop
+    # as soon as it exceeds the cap instead of after reading the whole thing.
+    tmp_fd, tmp_name = tempfile.mkstemp(suffix=".zip")
+    written = 0
+    try:
+        with os.fdopen(tmp_fd, "wb") as tmp:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_IMPORT_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=(
+                            "Archive is larger than the "
+                            f"{MAX_IMPORT_UPLOAD_BYTES // 1024 ** 3} GiB import limit"
+                        ),
+                    )
+                tmp.write(chunk)
+
+        if written == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        result = DatasetImporter.import_zip(dataset_id, tmp_name, fmt)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # The importer raises this for "dataset has no classes" and similar.
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Dataset import failed for %s", dataset_id)
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=400, detail=result.get("detail", "Import failed")
+        )
+
+    return result
+
 
 @router.delete("/datasets/{dataset_id}/images/{image_id}")
 async def delete_image(

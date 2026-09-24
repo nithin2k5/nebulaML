@@ -11,6 +11,7 @@ export const API_ENDPOINTS = {
         DELETE_IMAGE: (datasetId, imageId) => `${API_BASE_URL}/api/annotations/datasets/${datasetId}/images/${imageId}`,
         STATS: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/stats`,
         UPLOAD: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/upload`,
+        IMPORT: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/import`,
         EXPORT: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/export`,
         EXPORT_STATUS: (id, jobId) => `${API_BASE_URL}/api/annotations/datasets/${id}/export-status/${jobId}`,
         ANALYZE: (id) => `${API_BASE_URL}/api/annotations/datasets/${id}/analyze`,

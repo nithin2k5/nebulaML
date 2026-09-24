@@ -9,6 +9,45 @@ from typing import Dict, List, Tuple
 from app.services.database import DatasetService, AnnotationService
 from PIL import Image as PILImage
 
+# An uploaded archive is attacker-controlled, and extractall() will happily
+# write whatever the central directory claims. Modern Python strips ".."
+# components on extract, so traversal is handled — but nothing bounds the
+# *size*, and a few-hundred-KB zip can declare terabytes of output. These caps
+# are checked against the header before a single byte is written.
+MAX_UNCOMPRESSED_BYTES = 5 * 1024 * 1024 * 1024   # 5 GiB
+MAX_MEMBERS = 50_000
+MAX_COMPRESSION_RATIO = 200                        # flags the classic flat bomb
+
+
+class ZipTooLarge(ValueError):
+    """The archive declares more output than we are willing to extract."""
+
+
+def _assert_archive_is_sane(zip_ref: zipfile.ZipFile) -> None:
+    """Reject decompression bombs using the header, before extracting."""
+    infos = zip_ref.infolist()
+    if len(infos) > MAX_MEMBERS:
+        raise ZipTooLarge(
+            f"Archive contains {len(infos)} entries; the limit is {MAX_MEMBERS}"
+        )
+
+    total_uncompressed = sum(i.file_size for i in infos)
+    if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
+        raise ZipTooLarge(
+            f"Archive expands to {total_uncompressed / 1024 ** 3:.1f} GiB; "
+            f"the limit is {MAX_UNCOMPRESSED_BYTES / 1024 ** 3:.0f} GiB"
+        )
+
+    total_compressed = sum(i.compress_size for i in infos)
+    if total_compressed > 0:
+        ratio = total_uncompressed / total_compressed
+        if ratio > MAX_COMPRESSION_RATIO and total_uncompressed > 100 * 1024 * 1024:
+            raise ZipTooLarge(
+                f"Archive compression ratio is {ratio:.0f}:1, which looks like a "
+                "decompression bomb rather than a dataset"
+            )
+
+
 class DatasetImporter:
     """Service to import COCO/YOLO format datasets from a zip file."""
 
@@ -36,7 +75,12 @@ class DatasetImporter:
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    _assert_archive_is_sane(zip_ref)
                     zip_ref.extractall(tmpdir)
+            except ZipTooLarge as e:
+                return {"success": False, "detail": str(e)}
+            except zipfile.BadZipFile:
+                return {"success": False, "detail": "That file is not a valid zip archive"}
             except Exception as e:
                 return {"success": False, "detail": f"Failed to extract zip: {str(e)}"}
             
