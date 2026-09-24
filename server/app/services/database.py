@@ -805,9 +805,41 @@ class TrainingJobService:
                     pass
 
     @staticmethod
+    def get_job_owner(job_id: str) -> Optional[int]:
+        """Return the user_id that owns a job, or None if unknown.
+
+        Trained models live at runs/detect/job_<job_id>, so this is what lets
+        the models endpoints answer "whose model is this?" — the filesystem
+        carries no ownership of its own.
+        """
+        try:
+            with db_cursor(dictionary=True) as cursor:
+                cursor.execute(
+                    "SELECT user_id FROM training_jobs WHERE id = %s", (job_id,)
+                )
+                row = cursor.fetchone()
+            return row["user_id"] if row else None
+        except (Error, RuntimeError) as e:
+            logger.error(f"Error resolving owner for job {job_id}: {e}")
+            return None
+
+    @staticmethod
+    def get_job_ids_for_user(user_id: int) -> set:
+        """Every job id belonging to a user, for filtering model listings."""
+        try:
+            with db_cursor(dictionary=True) as cursor:
+                cursor.execute(
+                    "SELECT id FROM training_jobs WHERE user_id = %s", (user_id,)
+                )
+                return {row["id"] for row in cursor.fetchall()}
+        except (Error, RuntimeError) as e:
+            logger.error(f"Error listing jobs for user {user_id}: {e}")
+            return set()
+
+    @staticmethod
     def load_all_jobs() -> dict:
         """Load all persisted jobs as the in-memory dict format used by training.py.
-        
+
         Extended fields stored inside the results JSON blob are unpacked back to
         the top-level dict so callers can access them without special handling.
         """

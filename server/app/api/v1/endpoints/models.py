@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from app.api.v1.endpoints.auth import get_current_user
+from app.services.database import TrainingJobService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,36 @@ router = APIRouter()
 
 _SERVER_ROOT = Path(__file__).resolve().parents[4]
 _RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
+
+# Trained runs are written to runs/detect/job_<job_id> (training.py), and
+# training_jobs carries the user_id. The filesystem itself records no owner, so
+# every model endpoint has to resolve the name back to a job to answer
+# "is this yours?". A directory whose name does not follow that convention, or
+# whose job row is gone, has no resolvable owner — treated as admin-only rather
+# than as public, so an unrecognised layout fails closed.
+_RUN_PREFIX = "job_"
+
+
+def _owner_of_model(model_name: str) -> Optional[int]:
+    """user_id that owns this run directory, or None when unresolvable."""
+    if not model_name.startswith(_RUN_PREFIX):
+        return None
+    return TrainingJobService.get_job_owner(model_name[len(_RUN_PREFIX):])
+
+
+def _require_model_access(model_name: str, current_user: dict) -> None:
+    """Raise 404 unless the caller owns this model (or is an admin).
+
+    404 rather than 403 on purpose: the model list is already filtered, so
+    confirming that a name exists but belongs to someone else would hand back
+    exactly what the filtering is there to withhold.
+    """
+    if current_user.get("role") == "admin":
+        return
+    owner = _owner_of_model(model_name)
+    if owner is None or owner != current_user.get("id"):
+        raise HTTPException(status_code=404, detail="Model not found")
+
 
 def get_safe_model_dir(model_name: str) -> Path:
     """Securely resolve the model directory, preventing path traversal."""
@@ -39,20 +70,35 @@ async def list_models(current_user: dict = Depends(get_current_user)):
     if not models_dir.exists():
         return {"models": []}
     
+    # This used to walk the whole directory and hand every model on the box to
+    # every signed-in user. Resolve ownership once, in bulk, rather than a
+    # query per directory.
+    is_admin = current_user.get("role") == "admin"
+    own_job_ids = (
+        set() if is_admin
+        else TrainingJobService.get_job_ids_for_user(current_user["id"])
+    )
+
     models = []
     for run_dir in models_dir.iterdir():
-        if run_dir.is_dir():
-            weights_dir = run_dir / "weights"
-            if weights_dir.exists():
-                best_model = weights_dir / "best.pt"
-                if best_model.exists():
-                    models.append({
-                        "name": run_dir.name,
-                        "path": str(best_model),
-                        "size": best_model.stat().st_size,
-                        "created": best_model.stat().st_mtime
-                    })
-    
+        if not run_dir.is_dir():
+            continue
+        if not is_admin:
+            if not run_dir.name.startswith(_RUN_PREFIX):
+                continue
+            if run_dir.name[len(_RUN_PREFIX):] not in own_job_ids:
+                continue
+        weights_dir = run_dir / "weights"
+        if weights_dir.exists():
+            best_model = weights_dir / "best.pt"
+            if best_model.exists():
+                models.append({
+                    "name": run_dir.name,
+                    "path": str(best_model),
+                    "size": best_model.stat().st_size,
+                    "created": best_model.stat().st_mtime
+                })
+
     return {"models": models}
 
 @router.get("/download/{model_name}")
@@ -60,6 +106,7 @@ async def download_model(model_name: str, format: str = "pt", current_user: dict
     """
     Download a trained model
     """
+    _require_model_access(model_name, current_user)
     model_dir = get_safe_model_dir(model_name)
     weights_dir = model_dir / "weights"
     
@@ -101,6 +148,7 @@ async def delete_model(model_name: str, current_user: dict = Depends(get_current
     """
     Delete a trained model
     """
+    _require_model_access(model_name, current_user)
     model_dir = get_safe_model_dir(model_name)
     
     if not model_dir.exists():
@@ -116,6 +164,7 @@ async def get_model_info(model_name: str, current_user: dict = Depends(get_curre
     """
     Get detailed information about a model
     """
+    _require_model_access(model_name, current_user)
     model_dir = get_safe_model_dir(model_name)
     
     if not model_dir.exists():
@@ -184,6 +233,7 @@ async def export_model(model_name: str, format: str = "onnx", current_user: dict
     """
     Export a trained model to a different format (e.g., onnx, engine, openvino, coreml, torchscript)
     """
+    _require_model_access(model_name, current_user)
     model_dir = get_safe_model_dir(model_name)
 
     # Whitelist export formats
