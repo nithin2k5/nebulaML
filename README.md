@@ -20,7 +20,7 @@ A complete ML training and inference platform for YOLO object detection models.
 - React Icons
 
 ### Server (Backend)
-- Python 3.8+
+- Python 3.9+
 - FastAPI
 - Ultralytics YOLO (YOLOv8)
 - PyTorch
@@ -30,7 +30,7 @@ A complete ML training and inference platform for YOLO object detection models.
 
 ### Prerequisites
 - Node.js 18+ and npm
-- Python 3.8+
+- Python 3.9+
 - pip
 
 ### Quick Start

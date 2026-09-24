@@ -6,6 +6,7 @@ Creates MySQL database and tables if they don't exist
 import re
 import threading
 from contextlib import contextmanager
+from typing import Optional
 
 import mysql.connector
 from mysql.connector import Error
@@ -19,7 +20,7 @@ from app.core.logging import logger
 # auth round-trip per call, across ~79 call sites. The pool hands out reusable
 # connections instead; `connection.close()` returns one to the pool rather than
 # tearing it down, so existing callers keep working unchanged.
-_pool: MySQLConnectionPool | None = None
+_pool: Optional[MySQLConnectionPool] = None
 _pool_lock = threading.Lock()
 
 

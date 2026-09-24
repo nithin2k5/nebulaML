@@ -2,6 +2,8 @@
 Dataset-level access control shared across all endpoint modules.
 """
 
+from typing import Optional
+
 from fastapi import HTTPException, status
 from app.db.session import get_db_connection
 
@@ -9,7 +11,7 @@ from app.db.session import get_db_connection
 _ROLE_RANK = {"owner": 4, "admin": 3, "annotator": 2, "viewer": 1}
 
 
-def effective_role(dataset_id: str, user_id: int, owner_id: int) -> str | None:
+def effective_role(dataset_id: str, user_id: int, owner_id: int) -> Optional[str]:
     """Return the caller's effective role on a dataset, or None if no access."""
     if user_id == owner_id:
         return "owner"
