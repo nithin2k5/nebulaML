@@ -207,6 +207,50 @@ def migrate_users_otp_columns(connection) -> None:
         raise
 
 
+def migrate_auto_retrain_configs(connection) -> None:
+    """Repair `auto_retrain_configs` on databases built before the duplicate
+    CREATE TABLE was removed.
+
+    create_tables() used to declare this table twice with different columns.
+    Both were IF NOT EXISTS, so the first one won and the schema every caller
+    actually reads — min_new_annotations, annotations_since_last_train,
+    last_triggered_at — was never created. The table only ever held config
+    rows that the broken code could not read anyway, so adding the missing
+    columns is enough; nothing needs migrating across.
+    """
+    wanted = {
+        "min_new_annotations": "INT DEFAULT 50",
+        "annotations_since_last_train": "INT DEFAULT 0",
+        "last_triggered_at": "TIMESTAMP NULL",
+    }
+    try:
+        cur = connection.cursor()
+        cur.execute("SHOW TABLES LIKE 'auto_retrain_configs'")
+        if not cur.fetchone():
+            cur.close()
+            return
+        for column, ddl in wanted.items():
+            cur.execute(f"SHOW COLUMNS FROM auto_retrain_configs LIKE '{column}'")
+            if not cur.fetchone():
+                cur.execute(
+                    f"ALTER TABLE auto_retrain_configs ADD COLUMN {column} {ddl}"
+                )
+                logger.info(f"Migrated: added auto_retrain_configs.{column}")
+        # threshold_value was NOT NULL with no default, so an upsert that does
+        # not name it fails outright on a legacy table.
+        cur.execute("SHOW COLUMNS FROM auto_retrain_configs LIKE 'threshold_value'")
+        if cur.fetchone():
+            cur.execute(
+                "ALTER TABLE auto_retrain_configs MODIFY COLUMN threshold_value INT NULL DEFAULT NULL"
+            )
+            logger.info("Migrated: relaxed auto_retrain_configs.threshold_value")
+        connection.commit()
+        cur.close()
+    except Error as e:
+        logger.error(f"migrate_auto_retrain_configs: {e}")
+        raise
+
+
 def create_tables():
     """Create all required tables"""
     connection = get_db_connection()
@@ -255,20 +299,6 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'pending_registrations' ready")
-        
-        # Auto retrain configs table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS auto_retrain_configs (
-                dataset_id VARCHAR(36) PRIMARY KEY,
-                enabled BOOLEAN DEFAULT FALSE,
-                threshold_type ENUM('annotation_count', 'percentage_increase') DEFAULT 'annotation_count',
-                threshold_value INT NOT NULL,
-                current_count INT DEFAULT 0,
-                base_model VARCHAR(255) DEFAULT 'yolov8n.pt',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-        """)
         
         # API Keys table
         cursor.execute("""
@@ -583,6 +613,7 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'auto_retrain_configs' ready")
+        migrate_auto_retrain_configs(connection)
 
         connection.commit()
         cursor.close()
