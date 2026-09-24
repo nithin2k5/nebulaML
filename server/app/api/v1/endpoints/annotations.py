@@ -705,9 +705,21 @@ async def _export_task(job_id: str, dataset_id: str, split_ratio: float, augment
             val_images = annotated_images[split_idx:]
             test_images = []
         
-        train_dir = dataset_dir / "split" / "train"
-        val_dir = dataset_dir / "split" / "val"
-        test_dir = dataset_dir / "split" / "test"
+        # Rebuild the split tree from scratch.
+        #
+        # This directory is reused across exports, and the copies below are
+        # additive (mkdir exist_ok + copy2), so without clearing it an image
+        # that moved train -> val between exports stayed in BOTH: the zip and
+        # the generated data.yaml then validated the model on images it had
+        # trained on, inflating mAP with nothing logged. Deleted images and
+        # augmented copies from a previous run's settings lingered the same way.
+        split_root = dataset_dir / "split"
+        if split_root.exists():
+            shutil.rmtree(split_root)
+
+        train_dir = split_root / "train"
+        val_dir = split_root / "val"
+        test_dir = split_root / "test"
         
         splits = [
             (train_dir, train_images, "train"),
