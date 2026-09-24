@@ -9,7 +9,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 import mysql.connector
-from app.db.session import get_db_connection, migrate_users_otp_columns
+from app.db.session import get_db_connection, db_cursor, migrate_users_otp_columns
 from app.core.logging import logger
 from app.core.rbac import (
     hash_password,
@@ -171,33 +171,40 @@ async def get_current_user(
             detail="Not authenticated. Provide Bearer token or X-API-Key header."
         )
     
-    # Get user from database
-    connection = get_db_connection()
-    if not connection:
+    # Get user from database.
+    #
+    # This runs on every authenticated request, so it is the worst place in the
+    # app to leak a pooled connection: the previous version closed only on the
+    # success path, and a query that raised left the connection checked out
+    # forever. Ten of those exhaust the default pool of 10 and the API stops
+    # serving entirely. db_cursor() returns it in a finally.
+    try:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+            user = cursor.fetchone()
+    except RuntimeError:
+        # db_cursor raises this when the pool cannot hand out a connection.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection failed"
         )
-    
-    try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-        user = cursor.fetchone()
-        cursor.close()
-        connection.close()
-        
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found"
-            )
-        
-        return user
-    except Exception as e:
+    except mysql.connector.Error as e:
+        logger.error("get_current_user: could not load user %s: %s", user_id, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error fetching user: {str(e)}"
+            detail="Error fetching user"
         )
+
+    # Raised outside the try: a bare `except Exception` around this used to
+    # catch the 401 below — HTTPException is an Exception — and re-raise it as
+    # a 500, so a token for a deleted account reported a server error.
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+
+    return user
 
 
 # Dependency to check permissions
