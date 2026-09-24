@@ -49,13 +49,17 @@ class DatasetService:
             """, (dataset_id, user_id, name, description, json.dumps(classes), 0, 0))
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error creating dataset: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def get_dataset(dataset_id: str) -> Optional[Dict]:
@@ -178,13 +182,17 @@ class DatasetService:
                 connection.commit()
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error updating dataset: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def delete_dataset(dataset_id: str) -> bool:
@@ -198,13 +206,17 @@ class DatasetService:
             cursor.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error deleting dataset: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def add_image(dataset_id: str, image_id: str, filename: str, 
@@ -232,13 +244,17 @@ class DatasetService:
             connection.commit()
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error adding image: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def delete_image(dataset_id: str, image_id: str) -> bool:
@@ -275,13 +291,17 @@ class DatasetService:
             connection.commit()
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error deleting image: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def get_dataset_images(dataset_id: str) -> List[Dict]:
@@ -308,13 +328,17 @@ class DatasetService:
             """, (dataset_id,))
             images = cursor.fetchall()
             cursor.close()
-            connection.close()
             return images
         except Error as e:
             logger.error(f"Error getting unannotated images: {e}")
-            if connection:
-                connection.close()
             return []
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def update_image_split(dataset_id: str, image_id: str, split: Optional[str]) -> bool:
@@ -338,13 +362,17 @@ class DatasetService:
             connection.commit()
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error updating image split: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def mark_image_annotated(dataset_id: str, image_id: str, annotated: bool = True) -> bool:
@@ -372,13 +400,17 @@ class DatasetService:
             connection.commit()
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error marking image annotated: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
 
 class AnnotationService:
@@ -425,13 +457,17 @@ class AnnotationService:
                 DatasetService.update_image_split(dataset_id, image_id, split)
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error saving annotation: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def get_annotation(dataset_id: str, image_id: str) -> Optional[Dict]:
@@ -450,16 +486,20 @@ class AnnotationService:
             """, (annotation_id,))
             annotation = cursor.fetchone()
             cursor.close()
-            connection.close()
             
             if annotation:
                 annotation['boxes'] = json.loads(annotation['boxes'])
             return annotation
         except Error as e:
             logger.error(f"Error getting annotation: {e}")
-            if connection:
-                connection.close()
             return None
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def get_all_dataset_annotations(dataset_id: str) -> List[Dict]:
@@ -477,16 +517,20 @@ class AnnotationService:
             """, (dataset_id,))
             annotations = cursor.fetchall()
             cursor.close()
-            connection.close()
             
             for ann in annotations:
                 ann['boxes'] = json.loads(ann['boxes']) if ann['boxes'] else []
             return annotations
         except Error as e:
             logger.error(f"Error getting all dataset annotations: {e}")
-            if connection:
-                connection.close()
             return []
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
     
     @staticmethod
     def get_dataset_stats(dataset_id: str) -> Dict:
@@ -544,7 +588,6 @@ class AnnotationService:
                     class_counts[class_name] += 1
             
             cursor.close()
-            connection.close()
             
             return {
                 "dataset_id": dataset_id,
@@ -562,9 +605,14 @@ class AnnotationService:
             }
         except Error as e:
             logger.error(f"Error getting dataset stats: {e}")
-            if connection:
-                connection.close()
             return {}
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
 class DatasetVersionService:
     """Service for dataset version database operations"""
@@ -588,12 +636,17 @@ class DatasetVersionService:
             """, (version_id, dataset_id, version_number, name, json.dumps(preprocessing), json.dumps(augmentations), 0, yaml_path))
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error creating dataset version: {e}")
-            if connection: connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def add_version_image(image_id: str, version_id: str, original_image_id: str, 
@@ -620,12 +673,17 @@ class DatasetVersionService:
             connection.commit()
             
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error adding version image: {e}")
-            if connection: connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
             
     @staticmethod
     def get_version(version_id: str) -> Optional[Dict]:
@@ -655,12 +713,17 @@ class DatasetVersionService:
                 version['images'] = images
                 
             cursor.close()
-            connection.close()
             return version
         except Error as e:
             logger.error(f"Error getting dataset version: {e}")
-            if connection: connection.close()
             return None
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
             
     @staticmethod
     def list_dataset_versions(dataset_id: str) -> List[Dict]:
@@ -676,7 +739,6 @@ class DatasetVersionService:
             """, (dataset_id,))
             versions = cursor.fetchall()
             cursor.close()
-            connection.close()
             
             for v in versions:
                 v['preprocessing'] = json.loads(v['preprocessing']) if v['preprocessing'] else {}
@@ -684,8 +746,14 @@ class DatasetVersionService:
             return versions
         except Error as e:
             logger.error(f"Error listing dataset versions: {e}")
-            if connection: connection.close()
             return []
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
 
 class TrainingJobService:
@@ -724,13 +792,17 @@ class TrainingJobService:
             ))
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error upserting training job: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def load_all_jobs() -> dict:
@@ -752,7 +824,6 @@ class TrainingJobService:
             """)
             rows = cursor.fetchall()
             cursor.close()
-            connection.close()
             jobs = {}
             for row in rows:
                 config_data = json.loads(row["config"]) if row["config"] else {}
@@ -778,9 +849,14 @@ class TrainingJobService:
             return jobs
         except Error as e:
             logger.error(f"Error loading training jobs: {e}")
-            if connection:
-                connection.close()
             return {}
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
 
 class QualitySnapshotService:
@@ -843,13 +919,17 @@ class QualitySnapshotService:
             )
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error saving quality snapshot: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def get_history(dataset_id: str, limit: int = 30) -> List[Dict]:
@@ -875,7 +955,6 @@ class QualitySnapshotService:
             )
             rows = cursor.fetchall()
             cursor.close()
-            connection.close()
             result = []
             for row in rows:
                 row["created_at"] = row["created_at"].isoformat() if row["created_at"] else None
@@ -883,9 +962,14 @@ class QualitySnapshotService:
             return result
         except Error as e:
             logger.error(f"Error fetching quality history: {e}")
-            if connection:
-                connection.close()
             return []
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def get_latest_snapshot(dataset_id: str) -> Optional[Dict]:
@@ -907,15 +991,19 @@ class QualitySnapshotService:
             )
             row = cursor.fetchone()
             cursor.close()
-            connection.close()
             if row and row.get("full_snapshot"):
                 return json.loads(row["full_snapshot"])
             return None
         except Error as e:
             logger.error(f"Error fetching latest quality snapshot: {e}")
-            if connection:
-                connection.close()
             return None
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
 
 class AutoRetrainConfigService:
@@ -935,7 +1023,6 @@ class AutoRetrainConfigService:
             )
             row = cursor.fetchone()
             cursor.close()
-            connection.close()
             if row:
                 return {
                     "enabled": bool(row["enabled"]),
@@ -946,9 +1033,14 @@ class AutoRetrainConfigService:
             return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
         except Error as e:
             logger.error(f"Error fetching auto-retrain config: {e}")
-            if connection:
-                connection.close()
             return {"enabled": False, "min_new_annotations": 50, "annotations_since_last_train": 0}
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def upsert_config(dataset_id: str, enabled: bool, min_new_annotations: int) -> bool:
@@ -970,13 +1062,17 @@ class AutoRetrainConfigService:
             )
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error upserting auto-retrain config: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def increment_annotation_count(dataset_id: str) -> int:
@@ -998,7 +1094,6 @@ class AutoRetrainConfigService:
             )
             if cursor.rowcount == 0:
                 cursor.close()
-                connection.close()
                 return -1  # not enabled / not configured
             connection.commit()
             # Fetch new count
@@ -1008,13 +1103,17 @@ class AutoRetrainConfigService:
             )
             row = cursor.fetchone()
             cursor.close()
-            connection.close()
             return row["annotations_since_last_train"] if row else -1
         except Error as e:
             logger.error(f"Error incrementing annotation count: {e}")
-            if connection:
-                connection.close()
             return -1
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def reset_annotation_count(dataset_id: str) -> bool:
@@ -1034,13 +1133,17 @@ class AutoRetrainConfigService:
             )
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Error as e:
             logger.error(f"Error resetting annotation count: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
 class ApiKeyService:
     """Service for managing permanent API keys"""
@@ -1059,13 +1162,17 @@ class ApiKeyService:
             """, (key_id, user_id, name, key_hash))
             connection.commit()
             cursor.close()
-            connection.close()
             return True
         except Exception as e:
             logger.error(f"Error creating API key: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def get_user_api_keys(user_id: int) -> list:
@@ -1083,13 +1190,17 @@ class ApiKeyService:
             """, (user_id,))
             keys = cursor.fetchall()
             cursor.close()
-            connection.close()
             return keys
         except Exception as e:
             logger.error(f"Error getting API keys: {e}")
-            if connection:
-                connection.close()
             return []
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def get_api_key_by_hash(key_hash: str) -> dict:
@@ -1114,13 +1225,17 @@ class ApiKeyService:
                 connection.commit()
                 
             cursor.close()
-            connection.close()
             return key
         except Exception as e:
             logger.error(f"Error fetching API key by hash: {e}")
-            if connection:
-                connection.close()
             return None
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass
 
     @staticmethod
     def delete_api_key(key_id: str, user_id: int) -> bool:
@@ -1136,10 +1251,14 @@ class ApiKeyService:
             affected = cursor.rowcount
             connection.commit()
             cursor.close()
-            connection.close()
             return affected > 0
         except Exception as e:
             logger.error(f"Error deleting API key: {e}")
-            if connection:
-                connection.close()
             return False
+        finally:
+            # Return the pooled connection no matter how we leave.
+            if connection is not None:
+                try:
+                    connection.close()
+                except Error:
+                    pass

@@ -18,8 +18,10 @@ import pytest
 APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "server" / "app"
 
 # Functions that still open a connection by hand without a finally. Each one is
-# a latent pool leak. Delete entries as they are converted to db_cursor(); the
-# test fails if anything not listed here appears.
+# a latent pool leak. Delete entries as they are fixed; the test fails both if
+# something not listed here appears and if an entry here stops leaking, so the
+# list can only shrink. services/database.py was cleared in one pass; the
+# remainder are endpoint handlers.
 _KNOWN_LEAKS = {
     ("api/v1/endpoints/annotations.py", "split_dataset"),
     ("api/v1/endpoints/annotations.py", "propagate_annotations_to_all"),
@@ -36,35 +38,6 @@ _KNOWN_LEAKS = {
     ("api/v1/endpoints/auth.py", "delete_user"),
     ("db/session.py", "create_tables"),
     ("db/session.py", "check_db_connection"),
-    ("services/database.py", "create_dataset"),
-    ("services/database.py", "update_dataset"),
-    ("services/database.py", "delete_dataset"),
-    ("services/database.py", "add_image"),
-    ("services/database.py", "delete_image"),
-    ("services/database.py", "get_unannotated_images"),
-    ("services/database.py", "update_image_split"),
-    ("services/database.py", "mark_image_annotated"),
-    ("services/database.py", "save_annotation"),
-    ("services/database.py", "get_annotation"),
-    ("services/database.py", "get_all_dataset_annotations"),
-    ("services/database.py", "get_dataset_stats"),
-    ("services/database.py", "create_version"),
-    ("services/database.py", "add_version_image"),
-    ("services/database.py", "get_version"),
-    ("services/database.py", "list_dataset_versions"),
-    ("services/database.py", "upsert_job"),
-    ("services/database.py", "load_all_jobs"),
-    ("services/database.py", "save_snapshot"),
-    ("services/database.py", "get_history"),
-    ("services/database.py", "get_latest_snapshot"),
-    ("services/database.py", "get_config"),
-    ("services/database.py", "upsert_config"),
-    ("services/database.py", "increment_annotation_count"),
-    ("services/database.py", "reset_annotation_count"),
-    ("services/database.py", "create_api_key"),
-    ("services/database.py", "get_user_api_keys"),
-    ("services/database.py", "get_api_key_by_hash"),
-    ("services/database.py", "delete_api_key"),
 }
 
 
