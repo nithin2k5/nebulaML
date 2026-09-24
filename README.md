@@ -1,30 +1,44 @@
 # NebulaML Platform
 
-A complete ML training and inference platform for YOLO object detection models.
+A self-hosted platform for the full object-detection lifecycle: upload, annotate,
+version, train, evaluate, deploy and monitor — with YOLO, RT-DETR and torchvision
+backends behind one workflow.
 
 ## 🚀 Features
 
-- **Modern Dashboard**: Beautiful dark theme with violet accents using shadcn/ui components
-- **Object Detection**: Upload images and run real-time inference with YOLO models
-- **Model Training**: Train custom YOLO models on your datasets with full hyperparameter control
-- **Model Management**: Download, manage, and deploy trained models
-- **FastAPI Backend**: High-performance Python backend with strict ML integration
-- **Real-time Updates**: Monitor training progress and inference results in real-time
+- **Projects**: Each dataset is a project with its own images, annotations,
+  versions, models and team
+- **Annotation**: Manual bounding boxes, auto-labelling from an existing model,
+  zero-shot and segment-assisted tools, and propagation across images
+- **Dataset versioning**: Immutable snapshots with their own preprocessing and
+  augmentation settings, so a training run is reproducible
+- **Training**: YOLO, RT-DETR and torchvision backends, with preflight checks,
+  a job queue, live metrics, confusion matrices and per-class breakdowns
+- **Dataset health**: Class balance, duplicate and near-duplicate detection,
+  blur and corruption checks, scored and tracked over time
+- **Active learning**: Surfaces low-confidence predictions for review and can
+  retrain automatically once enough new annotations land
+- **Monitoring**: Inference logging and drift detection per project
+- **Collaboration**: Per-project roles (admin / annotator / viewer), email
+  invitations and an activity log
+- **Export**: YOLO, COCO and Pascal VOC, plus model export for deployment
 
 ## 🛠️ Tech Stack
 
 ### Client (Frontend)
-- Next.js 14
+- Next.js 15 (App Router)
+- React 19
 - Tailwind CSS
-- shadcn/ui components
-- React Icons
+- shadcn/ui components (Radix primitives)
+- Recharts, framer-motion, lucide-react
 
 ### Server (Backend)
 - Python 3.9+
 - FastAPI
-- Ultralytics YOLO (YOLOv8)
+- MySQL 8 (via mysql-connector, pooled)
+- Ultralytics YOLO (YOLOv8), RT-DETR, torchvision
 - PyTorch
-- OpenCV
+- OpenCV, albumentations
 
 ## 📦 Installation
 
@@ -77,29 +91,30 @@ The client will run on `http://localhost:3000`
 
 ## 📖 Usage
 
-### Inference
-1. Navigate to the "Inference" tab
-2. Upload an image (PNG, JPG)
-3. Select a YOLO model variant
-4. Adjust confidence threshold
-5. Click "Run Detection"
+Sign-in is passwordless: enter your email and the server sends a one-time code.
 
-### Training
-1. Navigate to the "Training" tab
-2. Upload a dataset YAML configuration file
-3. Configure training parameters:
-   - Base model
-   - Number of epochs
-   - Batch size
-   - Image size
-4. Click "Start Training"
-5. Monitor progress in the Training Jobs section
+Work happens inside a **project** (`/project/<id>`), whose tabs follow the
+pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 
-### Model Management
-1. Navigate to the "Models" tab
-2. View all trained models
-3. Download models for deployment
-4. Delete unused models
+1. **Upload** — drag in images, import a ZIP, or extract frames from a video
+2. **Images** — browse, filter and delete what you uploaded
+3. **Annotate** — draw boxes by hand, or auto-label from an existing model and
+   correct the results; `propagate` copies boxes across images, rescaled to
+   each target's dimensions
+4. **Health** — class balance, duplicates, blur and corruption, scored and
+   tracked across snapshots
+5. **Generate** — freeze a version with its own preprocessing and augmentation
+   settings; training always runs against a version, not the live dataset
+6. **Train** — pick a backend and version, run preflight, start the job.
+   Progress, metrics, confusion matrix and per-class results stream live
+7. **Registry** — every version and run, with its metrics
+8. **Test** — run the trained model against new images or a webcam
+9. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
+   through the API with an API key
+10. **Active Learning** — review low-confidence predictions; optionally retrain
+    automatically once enough new annotations accumulate
+11. **Monitoring** — inference volume, confidence distribution and drift
+12. **Team** — invite collaborators as admin, annotator or viewer
 
 ## 🎨 Theme
 
@@ -115,43 +130,64 @@ The platform features a sleek dark theme with violet accents:
 NebulaML/
 ├── server/
 │   ├── app/
-│   │   ├── api/
-│   │   │   └── v1/
-│   │   │       └── endpoints/
-│   │   ├── core/
-│   │   ├── db/
-│   │   └── services/
+│   │   ├── api/v1/endpoints/   # auth, annotations, training, inference,
+│   │   │                       # models, active_learning, monitoring,
+│   │   │                       # collaboration, smart_annotation, video, chat
+│   │   ├── core/               # config, rbac, access, logging, email, headers
+│   │   ├── db/session.py       # schema, migrations, connection pool
+│   │   └── services/           # trainers, inference, dataset analysis,
+│   │                           # versioning, export, model registry
 │   ├── scripts/
 │   ├── main.py
 │   └── requirements.txt
 ├── client/
-│   ├── src/
-│   │   ├── app/
-│   │   ├── components/
-│   │   └── lib/
-│   ├── package.json
-│   └── tailwind.config.js
+│   └── src/
+│       ├── app/                # routes: home, dashboard, project/[id], annotate
+│       ├── components/project/ # one component per project tab
+│       ├── context/            # AuthContext
+│       └── lib/                # config (endpoint map), usePolling, utils
+├── tests/                      # unit suite (pytest)
 └── start.sh
 ```
 
 ## 🔧 API Endpoints
 
-### Inference
-- `POST /api/inference/predict` - Run inference on single image
-- `POST /api/inference/predict-batch` - Batch inference
-- `GET /api/inference/models` - List available models
+Full interactive reference at `http://localhost:8000/docs`. Every route below
+requires either a `Bearer` access token or an `X-API-Key` header.
 
-### Training
-- `POST /api/training/start` - Start training job
-- `GET /api/training/status/{job_id}` - Get training status
-- `GET /api/training/jobs` - List all training jobs
-- `DELETE /api/training/job/{job_id}` - Delete training job
+| Prefix | Covers |
+| --- | --- |
+| `/api/auth` | OTP sign-in, refresh/rotate, profile, API keys, user admin |
+| `/api/annotations` | Datasets, images, annotations, splits, export, image serving |
+| `/api/training` | Jobs, queue, versions, preflight, metrics, auto-retrain config |
+| `/api/inference` | Single and batch prediction, model listing |
+| `/api/models` | List, info, download, export, delete |
+| `/api/smart` | Segment-assisted and zero-shot annotation |
+| `/api/active-learning` | Uncertainty collection, review, approve/reject |
+| `/api/monitoring` | Inference logging, stats, drift |
+| `/api/datasets` | Project members, invitations, activity log |
+| `/api/video` | Frame extraction |
+| `/api/chat` | In-app assistant |
 
-### Models
-- `GET /api/models/list` - List trained models
-- `GET /api/models/download/{model_name}` - Download model
-- `DELETE /api/models/delete/{model_name}` - Delete model
-- `GET /api/models/info/{model_name}` - Get model info
+A few of the most used:
+
+- `POST /api/inference/predict` — run inference on a single image
+- `GET  /api/training/jobs` — list training jobs
+- `GET  /api/training/status/{job_id}` — poll one job
+- `POST /api/training/start-from-dataset` — train from a dataset version
+- `GET  /api/models/export/{model_name}?format=onnx` — export a trained model
+
+## 🧪 Development
+
+```bash
+make test         # unit suite
+make test-integration   # needs a live MySQL
+make lint         # ruff + eslint
+make check        # format, lint, test
+```
+
+CI runs the backend lint gate and unit tests on Python 3.11, and lints and
+builds the client on Node 20.
 
 ## 🤝 Contributing
 
@@ -168,4 +204,4 @@ This project is licensed under the MIT License.
 - FastAPI for the backend framework
 
 ## Last Updated
-- 2026-02-16
+- 2026-09-25
