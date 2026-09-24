@@ -157,3 +157,42 @@ def test_export_writes_a_yaml_and_a_zip(workspace):
     assert result["zip_path"].endswith(".zip")
     yaml_text = (workspace / "data.yaml").read_text()
     assert "train: train/images" in yaml_text
+
+
+# ── Export status authorization ──────────────────────────────────────────────
+
+def test_export_status_requires_access_to_the_dataset():
+    """The old check compared caller input against caller input.
+
+    `job.dataset_id == dataset_id` says nothing about whether the caller may
+    see the dataset — it is satisfied by passing the job's own dataset_id.
+    """
+    import inspect
+
+    from app.api.v1.endpoints.annotations import get_export_status
+
+    source = inspect.getsource(get_export_status)
+    assert "require_role" in source, "export-status performs no access check"
+    assert source.index("require_role") < source.index("export_jobs[job_id]")
+
+
+def test_export_status_does_not_leak_server_paths():
+    """yaml_path and zip_path are absolute host paths; clients need neither."""
+    import inspect
+
+    from app.api.v1.endpoints.annotations import get_export_status
+
+    source = inspect.getsource(get_export_status)
+    assert "yaml_path" not in source.split("return")[-1]
+    assert "zip_path" not in source.split("return")[-1]
+
+
+def test_export_status_still_returns_what_the_client_reads():
+    """DatasetsTab polls status, error and progress."""
+    import inspect
+
+    from app.api.v1.endpoints.annotations import get_export_status
+
+    returned = inspect.getsource(get_export_status).split("return")[-1]
+    for field in ("status", "progress", "error"):
+        assert f'"{field}"' in returned

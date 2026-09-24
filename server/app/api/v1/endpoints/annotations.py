@@ -999,12 +999,31 @@ async def split_dataset(
 
 @router.get("/datasets/{dataset_id}/export-status/{job_id}")
 async def get_export_status(dataset_id: str, job_id: str, current_user: dict = Depends(get_current_user)):
+    # The only check here used to be job.dataset_id == dataset_id, which
+    # compares one piece of caller input against another and says nothing about
+    # whether the caller may see this dataset. Satisfying it was a matter of
+    # passing the job's own dataset_id. Establish access to the dataset first,
+    # the way every neighbouring endpoint does.
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
+
     if job_id not in export_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = export_jobs[job_id]
     if job.get("dataset_id") and job["dataset_id"] != dataset_id:
-        raise HTTPException(status_code=403, detail="Job does not belong to this dataset")
-    return job
+        # 404, not 403: the caller has access to the dataset they named, so
+        # confirming this job exists under a different one tells them about
+        # a dataset they may have no access to at all.
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # yaml_path and zip_path are absolute server paths; the client only needs
+    # progress and outcome.
+    return {
+        k: v for k, v in job.items()
+        if k in ("status", "progress", "dataset_id", "error")
+    }
 
 
 @router.post("/datasets/{dataset_id}/export")
