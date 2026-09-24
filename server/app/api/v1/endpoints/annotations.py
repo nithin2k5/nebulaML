@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Body, Depends, BackgroundTasks
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form, Body, Depends, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
@@ -1348,13 +1348,31 @@ async def auto_label_images(
 
 
 @router.get("/image/{dataset_id}/{image_filename}")
-async def serve_image(dataset_id: str, image_filename: str, token: Optional[str] = None):
+async def serve_image(
+    dataset_id: str,
+    image_filename: str,
+    request: Request,
+    token: Optional[str] = None,
+):
     """
     Serve an image file.
     Accepts auth via Bearer header OR ?token= query param so <img src> tags work.
     """
     from app.core.rbac import decode_access_token
-    payload = decode_access_token(token) if token else None
+
+    # The docstring has always promised the Authorization header, but only the
+    # query parameter was ever read — so every non-browser client (and anything
+    # that would rather keep its token out of a URL) got a 401 here. Prefer the
+    # header; fall back to ?token= for <img src>, which cannot send one.
+    bearer = request.headers.get("Authorization", "")
+    header_token = bearer[7:].strip() if bearer.lower().startswith("bearer ") else None
+
+    payload = None
+    for candidate in (header_token, token):
+        if candidate:
+            payload = decode_access_token(candidate)
+            if payload:
+                break
     if not payload:
         raise HTTPException(status_code=401, detail="Authentication required to view images")
 
@@ -1390,7 +1408,13 @@ async def serve_image(dataset_id: str, image_filename: str, token: Optional[str]
         media_type=media_type,
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=3600"
+            # `public` let any shared cache along the path store a per-user
+            # authorised image and hand it to a different viewer. The browser
+            # may still cache it for this user; nothing in between may.
+            "Cache-Control": "private, max-age=3600",
+            # ?token= puts a credential in the URL, which travels in Referer on
+            # any outbound navigation from a page that embeds the image.
+            "Referrer-Policy": "no-referrer",
         }
     )
 
