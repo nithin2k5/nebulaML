@@ -24,6 +24,9 @@ export const API_ENDPOINTS = {
     },
     ANNOTATIONS: {
         GET_IMAGE: (datasetId, filename, token) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}${token ? `?token=${token}` : ''}`,
+        // Downscaled copy for grids and filmstrips, cached on disk server-side.
+        // Width must be one of THUMBNAIL_WIDTHS in the annotations endpoints.
+        GET_THUMBNAIL: (datasetId, filename, token, width = 160) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}?w=${width}${token ? `&token=${token}` : ''}`,
         GET_ANNOTATION: (datasetId, imageId) => `${API_BASE_URL}/api/annotations/annotations/${datasetId}/${imageId}`,
         SAVE: `${API_BASE_URL}/api/annotations/save`,
         PROPAGATE_TO_ALL: `${API_BASE_URL}/api/annotations/annotations/propagate-to-all`,

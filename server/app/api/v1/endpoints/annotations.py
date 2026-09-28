@@ -1515,16 +1515,63 @@ async def auto_label_images(
     }
 
 
+# Widths the thumbnail cache will produce. The filmstrip asks for the smallest
+# one; the larger is there for a denser grid without a second round of changes.
+THUMBNAIL_WIDTHS = {160, 320}
+
+
+def _thumbnail_path(dataset_id: str, safe_filename: str, width: int) -> Path:
+    return Path(f"datasets/{dataset_id}/thumbs/{width}/{safe_filename}")
+
+
+def _ensure_thumbnail(source: Path, thumb: Path, width: int) -> bool:
+    """
+    Make sure a thumbnail of *source* exists at *thumb*, regenerating it when the
+    source has changed since. Returns False if one could not be produced, so the
+    caller can fall back to serving the original rather than failing the request.
+    """
+    try:
+        if thumb.exists() and thumb.stat().st_mtime >= source.stat().st_mtime:
+            return True
+
+        from PIL import Image as PILImage
+
+        thumb.parent.mkdir(parents=True, exist_ok=True)
+        with PILImage.open(source) as im:
+            if im.width <= width:
+                # Already small enough that a copy would only waste disk.
+                return False
+            # Read the format before thumbnail(), which does not preserve it, and
+            # pass it to save() explicitly: the staging name below ends in .part,
+            # from which Pillow cannot infer one.
+            fmt = im.format or "JPEG"
+            im.thumbnail((width, width * 4), PILImage.LANCZOS)
+            # Write beside the target and move into place, so a reader never
+            # sees a half-written file when two requests race on the same image.
+            staging = thumb.with_suffix(thumb.suffix + f".{os.getpid()}.part")
+            im.save(staging, format=fmt)
+            os.replace(staging, thumb)
+        return True
+    except Exception as e:
+        logger.warning(f"Could not build thumbnail for {source} at w={width}: {e}")
+        return False
+
+
 @router.get("/image/{dataset_id}/{image_filename}")
 async def serve_image(
     dataset_id: str,
     image_filename: str,
     request: Request,
     token: Optional[str] = None,
+    w: Optional[int] = None,
 ):
     """
     Serve an image file.
     Accepts auth via Bearer header OR ?token= query param so <img src> tags work.
+
+    Pass ?w= for a downscaled copy, cached on disk. The annotator's filmstrip
+    used to point at the full-resolution file for every thumbnail, so scrolling
+    a set of large photos pulled megabytes per frame to fill a 64px box.
     """
     from app.core.rbac import decode_access_token
 
@@ -1570,7 +1617,20 @@ async def serve_image(
         'webp': 'image/webp'
     }
     media_type = media_types.get(ext, 'image/jpeg')
-    
+
+    # A downscaled copy, if one was asked for. Widths are an allowlist rather
+    # than a free integer so a caller cannot fill the disk with one cache
+    # directory per pixel width.
+    if w is not None:
+        if w not in THUMBNAIL_WIDTHS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported width. Choose one of: {sorted(THUMBNAIL_WIDTHS)}",
+            )
+        thumb_path = _thumbnail_path(dataset_id, safe_filename, w)
+        if _ensure_thumbnail(image_path, thumb_path, w):
+            image_path = thumb_path
+
     return FileResponse(
         path=str(image_path),
         media_type=media_type,

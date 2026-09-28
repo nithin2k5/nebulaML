@@ -258,7 +258,7 @@ export default function ProjectImages({ dataset, onRefresh }) {
                             onClick={() => toggleSelection(img.id)}
                         >
                             <img 
-                                src={`${API_BASE_URL}/api/annotations/image/${dataset.id}/${img.filename}?token=${token}`}
+                                src={API_ENDPOINTS.ANNOTATIONS.GET_THUMBNAIL(dataset.id, img.filename, token, 320)}
                                 alt={img.original_name || img.filename} 
                                 className={`w-full h-full object-cover transition-transform ${isSelected ? "scale-95" : ""}`} 
                                 onError={(e) => { e.target.src = 'https://via.placeholder.com/300?text=Image+Not+Found' }}

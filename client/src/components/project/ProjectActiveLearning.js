@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { RefreshCw, Brain, CheckCircle, ArrowRight, Loader, Eye, Sparkles, XCircle, Layers, Cpu } from "lucide-react";
-import { API_BASE_URL, API_ENDPOINTS } from "@/lib/config";
+import { API_ENDPOINTS } from "@/lib/config";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
@@ -363,7 +363,7 @@ export default function ProjectActiveLearning({ dataset, onNavigate }) {
                                 >
                                     <div className="aspect-square bg-muted rounded overflow-hidden mb-2">
                                         <img
-                                            src={`${API_BASE_URL}/api/annotations/image/${dataset.id}/${img.filename}`}
+                                            src={API_ENDPOINTS.ANNOTATIONS.GET_THUMBNAIL(dataset.id, img.filename, token, 320)}
                                             alt={img.filename}
                                             className="w-full h-full object-cover"
                                         />

@@ -2754,7 +2754,7 @@ function AnnotationToolContent() {
                         }`}
                     >
                       <img
-                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token)}
+                        src={API_ENDPOINTS.ANNOTATIONS.GET_THUMBNAIL(datasetId, img.filename, token, 160)}
                         alt={img.original_name}
                         className="w-full h-full object-cover"
                         loading="lazy"
