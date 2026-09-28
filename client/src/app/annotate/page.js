@@ -272,173 +272,186 @@ function AnnotationToolContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxes, currentBox, isDrawing, currentPoints, activeTool, hoveredBoxIndex, selectedBoxIndex]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // Keyboard shortcuts.
+  //
+  // Defined per render and reached through a ref, so the listener always runs
+  // the current closure. It used to be built inside an effect whose dependency
+  // array listed six of the twelve values the handler reads, behind an
+  // eslint-disable — `activeTool` among the missing ones, so switching tool and
+  // then pressing Escape or Enter could act on the tool you had before.
+  // Frequent `boxes` changes rebuilt the handler often enough to hide it most
+  // of the time, which is the worst version of that bug to own.
+  const handleKeyDown = (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-      switch (e.key) {
-        case 'Enter':
-          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
-            e.preventDefault();
-            handleAiAccept();
+    switch (e.key) {
+      case 'Enter':
+        if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+          e.preventDefault();
+          handleAiAccept();
+        }
+        break;
+      case 'Escape':
+        if (activeTool === 'ai') {
+          aiRoughBoxRef.current = null;
+          aiCurrentBoxRef.current = null;
+          aiBoxStartRef.current = null;
+          aiIsDrawingBoxRef.current = false;
+          aiIsDrawingPolygonRef.current = false;
+          aiCurrentPolygonRef.current = [];
+          cursorPosRef.current = null;
+          aiPointsRef.current = [];
+          aiMaskPolygonRef.current = null;
+          aiHistoryRef.current = [];
+          aiMetadataRef.current = null;
+          aiHoverInsideMaskRef.current = false;
+          aiRequestIdRef.current++;
+          setAiStateVersion(v => v + 1);
+          setAiSubTool('polygon');
+          drawCanvas();
+        } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
+          setIsDrawing(false);
+          currentPointsRef.current = [];
+          setCurrentPoints([]);
+          cursorPosRef.current = null;
+          showToast('Canceled drawing', 'info');
+        } else if (isDrawing) {
+          setIsDrawing(false);
+          setStartPos(null);
+          setCurrentBox(null);
+        }
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        handleNavigation('prev');
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        handleNavigation('next');
+        break;
+      case 's':
+      case 'S':
+        e.preventDefault();
+        handleSaveAnnotations().then(success => {
+          if (success) showToast('Annotations saved!');
+          else showToast('Failed to save', 'error');
+        });
+        break;
+      case 'Delete':
+      case 'Backspace':
+        if (boxes.length > 0) {
+          e.preventDefault();
+          handleDeleteBox(boxes.length - 1);
+          showToast('Last annotation deleted');
+        }
+        break;
+      case 'z':
+      case 'Z':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (activeTool === 'ai' && aiHistoryRef.current.length > 0) {
+            handleAiUndo();
+          } else if (boxHistory.length > 0) {
+            const lastState = boxHistory[boxHistory.length - 1];
+            boxesRef.current = lastState;
+            setBoxes(lastState);
+            setBoxHistory(prev => prev.slice(0, -1));
+            showToast('Undo successful');
           }
-          break;
-        case 'Escape':
-          if (activeTool === 'ai') {
-            aiRoughBoxRef.current = null;
-            aiCurrentBoxRef.current = null;
-            aiBoxStartRef.current = null;
-            aiIsDrawingBoxRef.current = false;
-            aiIsDrawingPolygonRef.current = false;
-            aiCurrentPolygonRef.current = [];
-            cursorPosRef.current = null;
-            aiPointsRef.current = [];
-            aiMaskPolygonRef.current = null;
-            aiHistoryRef.current = [];
-            aiMetadataRef.current = null;
-            aiHoverInsideMaskRef.current = false;
-            aiRequestIdRef.current++;
-            setAiStateVersion(v => v + 1);
-            setAiSubTool('polygon');
-            drawCanvas();
-          } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
-            setIsDrawing(false);
-            currentPointsRef.current = [];
-            setCurrentPoints([]);
-            cursorPosRef.current = null;
-            showToast('Canceled drawing', 'info');
-          } else if (isDrawing) {
-            setIsDrawing(false);
-            setStartPos(null);
-            setCurrentBox(null);
-          }
-          break;
-        case 'ArrowLeft':
+        }
+        break;
+      case 'c':
+      case 'C':
+        if (e.ctrlKey || e.metaKey) {
           e.preventDefault();
-          handleNavigation('prev');
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          handleNavigation('next');
-          break;
-        case 's':
-        case 'S':
-          e.preventDefault();
-          handleSaveAnnotations().then(success => {
-            if (success) showToast('Annotations saved!');
-            else showToast('Failed to save', 'error');
-          });
-          break;
-        case 'Delete':
-        case 'Backspace':
           if (boxes.length > 0) {
-            e.preventDefault();
-            handleDeleteBox(boxes.length - 1);
-            showToast('Last annotation deleted');
+            setCopiedBoxes(boxes);
+            showToast(`Copied ${boxes.length} annotations`);
           }
-          break;
-        case 'z':
-        case 'Z':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (activeTool === 'ai' && aiHistoryRef.current.length > 0) {
-              handleAiUndo();
-            } else if (boxHistory.length > 0) {
-              const lastState = boxHistory[boxHistory.length - 1];
-              boxesRef.current = lastState;
-              setBoxes(lastState);
-              setBoxHistory(prev => prev.slice(0, -1));
-              showToast('Undo successful');
-            }
+        }
+        break;
+      case 'v':
+      case 'V':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (copiedBoxes && copiedBoxes.length > 0) {
+            setBoxHistory(prev => [...prev, boxesRef.current]);
+            const newBoxes = [...boxesRef.current, ...copiedBoxes];
+            boxesRef.current = newBoxes;
+            setBoxes(newBoxes);
+            showToast(`Pasted ${copiedBoxes.length} annotations`);
           }
-          break;
-        case 'c':
-        case 'C':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (boxes.length > 0) {
-              setCopiedBoxes(boxes);
-              showToast(`Copied ${boxes.length} annotations`);
-            }
-          }
-          break;
-        case 'v':
-        case 'V':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (copiedBoxes && copiedBoxes.length > 0) {
-              setBoxHistory(prev => [...prev, boxesRef.current]);
-              const newBoxes = [...boxesRef.current, ...copiedBoxes];
-              boxesRef.current = newBoxes;
-              setBoxes(newBoxes);
-              showToast(`Pasted ${copiedBoxes.length} annotations`);
-            }
-          }
-          break;
-        case 'f':
-        case 'F':
-          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
-            e.preventDefault();
-            setAiSubTool('fg');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
-          }
-          break;
-        case 'l':
-        case 'L':
-          if (activeTool === 'ai') {
-            e.preventDefault();
-            setAiSubTool('polygon');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
-          }
-          break;
-        case 'b':
-        case 'B':
-          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
-            e.preventDefault();
-            setAiSubTool('bg');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
-          }
-          break;
-        case 'r':
-        case 'R':
-        case 'd':
-        case 'D':
-          if (activeTool === 'ai') {
-            e.preventDefault();
-            aiRoughBoxRef.current = null;
-            aiCurrentBoxRef.current = null;
-            aiBoxStartRef.current = null;
-            aiIsDrawingBoxRef.current = false;
-            aiIsDrawingPolygonRef.current = false;
-            aiCurrentPolygonRef.current = [];
-            cursorPosRef.current = null;
-            aiPointsRef.current = [];
-            aiMaskPolygonRef.current = null;
-            aiHistoryRef.current = [];
-            aiMetadataRef.current = null;
-            aiHoverInsideMaskRef.current = false;
-            aiRequestIdRef.current++;
-            setAiStateVersion(v => v + 1);
-            setAiSubTool('polygon');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
-            drawCanvas();
-          }
-          break;
-        default:
-          // Number keys 1-9 for class selection
-          const num = parseInt(e.key);
-          if (num >= 1 && num <= 9 && dataset?.classes?.length >= num) {
-            e.preventDefault();
-            setSelectedClass(num - 1);
-          }
-          break;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes, boxHistory, dataset, images, currentImageIndex, copiedBoxes]);
+        }
+        break;
+      case 'f':
+      case 'F':
+        if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+          e.preventDefault();
+          setAiSubTool('fg');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
+        }
+        break;
+      case 'l':
+      case 'L':
+        if (activeTool === 'ai') {
+          e.preventDefault();
+          setAiSubTool('polygon');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+        }
+        break;
+      case 'b':
+      case 'B':
+        if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+          e.preventDefault();
+          setAiSubTool('bg');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
+        }
+        break;
+      case 'r':
+      case 'R':
+      case 'd':
+      case 'D':
+        if (activeTool === 'ai') {
+          e.preventDefault();
+          aiRoughBoxRef.current = null;
+          aiCurrentBoxRef.current = null;
+          aiBoxStartRef.current = null;
+          aiIsDrawingBoxRef.current = false;
+          aiIsDrawingPolygonRef.current = false;
+          aiCurrentPolygonRef.current = [];
+          cursorPosRef.current = null;
+          aiPointsRef.current = [];
+          aiMaskPolygonRef.current = null;
+          aiHistoryRef.current = [];
+          aiMetadataRef.current = null;
+          aiHoverInsideMaskRef.current = false;
+          aiRequestIdRef.current++;
+          setAiStateVersion(v => v + 1);
+          setAiSubTool('polygon');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+          drawCanvas();
+        }
+        break;
+      default:
+        // Number keys 1-9 for class selection
+        const num = parseInt(e.key);
+        if (num >= 1 && num <= 9 && dataset?.classes?.length >= num) {
+          e.preventDefault();
+          setSelectedClass(num - 1);
+        }
+        break;
+    }
+  };
+
+  const keyDownRef = useRef(handleKeyDown);
+  useEffect(() => {
+    keyDownRef.current = handleKeyDown;
+  });
+  useEffect(() => {
+    const listener = (e) => keyDownRef.current(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   const fetchUnannotatedImages = useCallback(async () => {
     if (!datasetId || !token) return;
