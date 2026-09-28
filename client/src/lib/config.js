@@ -47,6 +47,11 @@ export const API_ENDPOINTS = {
         JOB: (id) => `${API_BASE_URL}/api/training/job/${id}`,
         CANCEL: (id) => `${API_BASE_URL}/api/training/cancel/${id}`,
         JOB_METRICS: (id) => `${API_BASE_URL}/api/training/job/${id}/metrics`,
+        // TrainingTab has always called TRAINING.STREAM, which was never
+        // defined here — so it threw on every running job and the catch logged
+        // it, leaving the dashboard's live progress permanently blank. The
+        // server route exists (GET /job/{job_id}/stream).
+        STREAM: (id) => `${API_BASE_URL}/api/training/job/${id}/stream`,
         TERMINATE: (id) => `${API_BASE_URL}/api/training/job/${id}`,
         PREVIEW_AUGMENTATION: `${API_BASE_URL}/api/training/preview-augmentation`,
         PREFLIGHT: (datasetId) => `${API_BASE_URL}/api/training/preflight/${datasetId}`,

@@ -7,7 +7,8 @@ import { Home } from "lucide-react";
 import Link from "next/link";
 import { Toaster } from 'sonner';
 import { cn } from "@/lib/utils";
-import { navGroups } from "@/lib/pipeline";
+import { navGroups, visibleSteps } from "@/lib/pipeline";
+import { API_ENDPOINTS } from "@/lib/config";
 
 function GridBackground() {
   return (
@@ -18,11 +19,28 @@ function GridBackground() {
 }
 
 export default function ProjectLayout({ children }) {
-    const { user, loading, hasPermission } = useAuth();
+    const { user, token, loading, hasPermission } = useAuth();
     const router = useRouter();
     const params = useParams();
     const searchParams = useSearchParams();
     const currentTab = searchParams.get('tab');
+    const [role, setRole] = useState(null);
+
+    // The per-project role decides which steps are worth offering. hasPermission
+    // above reads the global account permissions, which say nothing about this
+    // project — so until now an invited annotator was shown Train and Deploy
+    // and found out by collecting a 403.
+    useEffect(() => {
+        if (!params.id || !token) return;
+        let cancelled = false;
+        fetch(API_ENDPOINTS.DATASETS.GET(params.id), {
+            headers: { Authorization: `Bearer ${token}` },
+        })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (!cancelled && d) setRole(d.your_role || null); })
+            .catch(() => { /* fall back to showing everything */ });
+        return () => { cancelled = true; };
+    }, [params.id, token]);
 
     useEffect(() => {
         if (!loading) {
@@ -36,8 +54,8 @@ export default function ProjectLayout({ children }) {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-black flex items-center justify-center font-mono text-violet-500 uppercase text-xs">
-                [ SYS_INIT... ]
+            <div className="min-h-screen bg-black flex items-center justify-center text-violet-400 text-sm">
+                Loading project…
             </div>
         );
     }
@@ -60,7 +78,7 @@ export default function ProjectLayout({ children }) {
                 <nav className="flex-1 py-4 px-2 md:px-3 space-y-2 overflow-y-auto">
                     <SidebarItem icon={Home} label="DASHBOARD" href="/dashboard" />
 
-                    {params.id && navGroups().map(({ phase, steps }, i) => (
+                    {params.id && navGroups(visibleSteps(role)).map(({ phase, steps }, i) => (
                         <div key={phase.id} className="space-y-1">
                             <div className="pt-4 pb-2 px-2 hidden md:block text-[10px] font-mono text-gray-500 uppercase tracking-widest">
                                 {phase.ambient ? phase.label : `${i + 1} // ${phase.label}`}

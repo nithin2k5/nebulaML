@@ -212,6 +212,30 @@ export function navGroups(steps = STEPS) {
 }
 
 // ---------------------------------------------------------------------------
+// Roles
+// ---------------------------------------------------------------------------
+
+// Mirrors _ROLE_RANK in server/app/core/access.py.
+const ROLE_RANK = { owner: 4, admin: 3, annotator: 2, viewer: 1 };
+
+export function roleAtLeast(role, minimum) {
+    return (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[minimum] ?? 99);
+}
+
+/**
+ * The steps a given role should be offered.
+ *
+ * Steps they cannot act on are dropped rather than shown locked: a lock says
+ * "do this first", which is wrong when the answer is "this isn't yours". An
+ * unknown role (the field is missing, or an older server) gets everything, so
+ * this can only ever narrow a view it understands.
+ */
+export function visibleSteps(role, steps = STEPS) {
+    if (!role || !(role in ROLE_RANK)) return steps;
+    return steps.filter((s) => roleAtLeast(role, s.minRole));
+}
+
+// ---------------------------------------------------------------------------
 // Step state
 // ---------------------------------------------------------------------------
 
