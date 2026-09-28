@@ -2585,12 +2585,41 @@ function AnnotationToolContent() {
               <div className="pt-3 border-t border-white/5">
                 <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Shortcuts</h3>
                 <div className="text-[11px] text-gray-500 space-y-1.5 px-1">
-                  <div className="flex justify-between"><span>Navigate</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">← →</kbd></div>
-                  <div className="flex justify-between"><span>Save</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">S</kbd></div>
-                  <div className="flex justify-between"><span>Delete last</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">Del</kbd></div>
-                  <div className="flex justify-between"><span>Undo</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">⌘Z</kbd></div>
-                  <div className="flex justify-between"><span>Class</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">1-9</kbd></div>
+                  {[
+                    ["Navigate", "← →"],
+                    ["Save", "S"],
+                    ["Delete last", "Del"],
+                    ["Undo", "⌘Z"],
+                    ["Select class", "1-9"],
+                    ["Copy all boxes", "⌘C"],
+                    ["Paste onto image", "⌘V"],
+                    ["Cancel drawing", "Esc"],
+                  ].map(([label, keys]) => (
+                    <div key={label} className="flex justify-between gap-2">
+                      <span>{label}</span>
+                      <kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400 shrink-0">{keys}</kbd>
+                    </div>
+                  ))}
                 </div>
+                {activeTool === 'ai' && (
+                  <div className="mt-3 pt-3 border-t border-white/5">
+                    <h4 className="font-medium text-[10px] text-gray-500 uppercase tracking-wider mb-2 px-1">Smart tool</h4>
+                    <div className="text-[11px] text-gray-500 space-y-1.5 px-1">
+                      {[
+                        ["Accept mask", "Enter"],
+                        ["Lasso", "L"],
+                        ["Add region", "F"],
+                        ["Remove region", "B"],
+                        ["Reset", "R"],
+                      ].map(([label, keys]) => (
+                        <div key={label} className="flex justify-between gap-2">
+                          <span>{label}</span>
+                          <kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400 shrink-0">{keys}</kbd>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
