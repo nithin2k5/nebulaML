@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
 import { usePolling } from "@/lib/usePolling";
-import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users, TestTube2, CheckCircle, X } from "lucide-react";
+import { STEPS } from "@/lib/pipeline";
+import { ArrowLeft, Cpu, CheckCircle, X } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
@@ -171,62 +172,34 @@ export default function ProjectPage() {
     const isTraining    = runningJobs.length > 0;
     const hasFailed     = failedJobs.length > 0 && !hasModels && !isTraining;
 
-    const pipelineStages = [
-        {
-            id: 'overview',
-            label: 'Overview',
-            icon: LayoutDashboard,
-            status: 'pending',
-            meta: 'Summary'
-        },
-        {
-            id: 'upload',
-            label: 'Upload',
-            icon: Upload,
+    // Per-step status and meta, keyed by step id. The step list itself — order,
+    // labels, icons — comes from lib/pipeline.js, so this no longer restates it
+    // and can no longer drift from the sidebar or the guide.
+    const stageDetail = {
+        overview: { status: 'pending', meta: 'Summary' },
+        upload: {
             status: (stats?.total_images > 0) ? 'complete' : 'pending',
             meta: `${stats?.total_images || 0} Images`
         },
-        {
-            id: 'images',
-            label: 'Images',
-            icon: Grid,
+        images: {
             status: (stats?.total_images > 0) ? 'complete' : 'pending',
             meta: 'Manage Data'
         },
-        {
-            id: 'annotate',
-            label: 'Annotate',
-            icon: Image,
+        annotate: {
             status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
                 (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
             meta: `${Math.round(stats?.completion_percentage || 0)}% Done`
         },
-        {
-            id: 'health',
-            label: 'Health',
-            icon: Activity,
+        health: {
             status: (stats?.total_images > 0) ? (hasModels ? 'complete' : 'inprogress') : 'pending',
             meta: stats?.total_images > 0 ? 'Quality Check' : 'No Data'
         },
-        {
-            id: 'generate',
-            label: 'Generate',
-            icon: Layers,
+        generate: {
             status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
                     (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
             meta: 'Version Snapshot'
         },
-        {
-            id: 'versions',
-            label: 'Registry',
-            icon: Package,
-            status: hasModels ? 'complete' : 'pending',
-            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
-        },
-        {
-            id: 'train',
-            label: 'Train',
-            icon: Cpu,
+        train: {
             status: isTraining ? 'inprogress' :
                     hasModels ? 'complete' :
                     hasFailed ? 'failed' : 'pending',
@@ -234,42 +207,35 @@ export default function ProjectPage() {
                   hasModels ? `${completedJobs.length} Model${completedJobs.length > 1 ? 's' : ''}` :
                   hasFailed ? 'Failed' : 'No Jobs'
         },
-        {
-            id: 'test',
-            label: 'Test',
-            icon: TestTube2,
+        versions: {
+            status: hasModels ? 'complete' : 'pending',
+            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
+        },
+        test: {
             status: hasModels ? 'complete' : 'pending',
             meta: hasModels ? 'Ready' : 'No Model'
         },
-        {
-            id: 'deploy',
-            label: 'Deploy',
-            icon: Code,
+        deploy: {
             status: hasModels ? 'complete' : 'pending',
             meta: hasModels ? 'Ready' : 'Not Ready'
         },
-        {
-            id: 'active-learning',
-            label: 'Learning',
-            icon: Brain,
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'Needs Model'
-        },
-        {
-            id: 'monitoring',
-            label: 'Monitor',
-            icon: BarChart3,
+        monitoring: {
             status: monitoringTotal > 0 ? 'complete' : hasModels ? 'inprogress' : 'pending',
             meta: monitoringTotal > 0 ? `${monitoringTotal} Inferences` : hasModels ? 'Run Inference' : 'No Data'
         },
-        {
-            id: 'team',
-            label: 'Team',
-            icon: Users,
-            status: 'pending',
-            meta: 'Access & Logs'
-        }
-    ];
+        'active-learning': {
+            status: hasModels ? 'complete' : 'pending',
+            meta: hasModels ? 'Ready' : 'Needs Model'
+        },
+        team: { status: 'pending', meta: 'Access & Logs' },
+    };
+
+    const pipelineStages = STEPS.map((step) => ({
+        id: step.id,
+        label: step.label,
+        icon: step.icon,
+        ...(stageDetail[step.id] ?? { status: 'pending', meta: '' }),
+    }));
 
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-black text-white font-sans">
@@ -318,18 +284,6 @@ export default function ProjectPage() {
 
             {/* Tabs Navigation similar to Roboflow */}
             <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col min-h-0">
-                <div className="border-b border-border bg-muted/5 px-6 hidden">
-                    <TabsList className="h-12 bg-transparent p-0 gap-6">
-                        <TabTrigger value="overview" icon={Grid}>Overview</TabTrigger>
-                        <TabTrigger value="upload" icon={Upload}>Upload</TabTrigger>
-                        <TabTrigger value="annotate" icon={Image}>Annotate</TabTrigger>
-                        <TabTrigger value="generate" icon={Layers}>Generate</TabTrigger>
-                        <TabTrigger value="train" icon={Cpu}>Train</TabTrigger>
-                        <TabTrigger value="versions" icon={Layers}>Registry</TabTrigger>
-                        <TabTrigger value="deploy" icon={Code}>Deploy</TabTrigger>
-                    </TabsList>
-                </div>
-
                 {isTraining && (
                     <div className="px-6 py-3 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest">
                         <div className="flex items-center gap-4">
@@ -432,17 +386,5 @@ export default function ProjectPage() {
                 </div>
             </Tabs>
         </div>
-    );
-}
-
-function TabTrigger({ value, icon: Icon, children }) {
-    return (
-        <TabsTrigger
-            value={value}
-            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-full px-2 text-muted-foreground data-[state=active]:text-foreground transition-all gap-2"
-        >
-            <Icon />
-            {children}
-        </TabsTrigger>
     );
 }
