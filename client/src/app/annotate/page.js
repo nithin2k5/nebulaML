@@ -27,6 +27,11 @@ const BOX_VALIDATION = {
   MIN_RELATIVE_SIZE: 0.001, // box must be >= 0.1% of image area
 };
 
+// A stable signature of what was last persisted for an image. Auto-save
+// compares against this rather than trying to infer intent from saveStatus.
+const annotationSignature = (boxList, status) =>
+  JSON.stringify({ status, boxes: boxList });
+
 function validateBox(box, imageWidth, imageHeight) {
   const errors = [];
   const { x, y, width, height } = box;
@@ -99,6 +104,9 @@ function AnnotationToolContent() {
   const [boxes, setBoxes] = useState([]);
   const boxesRef = useRef([]);
   const isImageLoadingRef = useRef(true);
+  // Signature of the annotation state the server last accepted, or null before
+  // anything has loaded. Auto-save runs only when the current state differs.
+  const savedSnapshotRef = useRef(null);
   const latestImageIndexRequested = useRef(currentImageIndex);
   const [boxHistory, setBoxHistory] = useState([]);
   const [selectedClass, setSelectedClass] = useState(0);
@@ -526,17 +534,20 @@ function AnnotationToolContent() {
         boxesRef.current = fetchedBoxes;
         setBoxes(fetchedBoxes);
         setReviewStatus(data.status || 'annotated');
+        savedSnapshotRef.current = annotationSignature(fetchedBoxes, data.status || 'annotated');
         setAnnotationType(data.annotation_type || (dataset?.type?.toLowerCase().includes('class') ? 'classification' : 'detection'));
       } else {
         boxesRef.current = [];
         setBoxes([]);
         setReviewStatus('unlabeled');
+        savedSnapshotRef.current = annotationSignature([], 'unlabeled');
       }
     } catch (error) {
       if (latestImageIndexRequested.current === index) {
         boxesRef.current = [];
         setBoxes([]);
         setReviewStatus('unlabeled');
+        savedSnapshotRef.current = annotationSignature([], 'unlabeled');
       }
     } finally {
       if (latestImageIndexRequested.current === index) {
@@ -1824,6 +1835,7 @@ function AnnotationToolContent() {
       });
 
       if (response.ok) {
+        savedSnapshotRef.current = annotationSignature(currentBoxesToSave, newStatus);
         setSaveStatus('saved');
         setReviewStatus(newStatus);
         // Update the status of the current image in the images array
@@ -1911,21 +1923,30 @@ function AnnotationToolContent() {
     }
   }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, annotationType, fetchDataset, fetchStats]);
 
-  // Auto-save when boxes change (debounced)
+  // Auto-save when the annotations actually differ from what was last saved.
+  //
+  // This used to gate on `saveStatus`, which made it re-save forever. saveStatus
+  // returns to null 2s after a successful save while the debounce is 1s, so the
+  // cycle was: save → 'saved' (effect returns early) → 2s later null → schedule
+  // → save again, about every three seconds for as long as an image with any box
+  // was open, with nobody touching anything. Each pass cost a POST /save — which
+  // re-reads the dataset, re-checks the role on its own connection, upserts, and
+  // rewrites the YOLO label file — plus the fetchStats() that follows it.
+  //
+  // Comparing against the last persisted state fixes that and subsumes the two
+  // special cases the old version needed: a freshly loaded image is never dirty,
+  // and an image that loaded empty and unlabelled stays that way untouched.
   useEffect(() => {
-    if (boxes.length === 0 && reviewStatus === 'unlabeled') return; // Don't save empty if already unlabeled
-
-    // Skip initial load
-    if (saveStatus === 'saved' || saveStatus === 'loading') return;
+    if (isImageLoadingRef.current) return;
+    if (!datasetId || !images[currentImageIndex]) return;
+    if (annotationSignature(boxes, reviewStatus) === savedSnapshotRef.current) return;
 
     const timeoutId = setTimeout(() => {
-      if (datasetId && images[currentImageIndex]) {
-        handleSaveAnnotations();
-      }
+      handleSaveAnnotations();
     }, 1000); // 1s debounce
 
     return () => clearTimeout(timeoutId);
-  }, [boxes, datasetId, images, currentImageIndex, handleSaveAnnotations, reviewStatus, saveStatus]);
+  }, [boxes, reviewStatus, datasetId, images, currentImageIndex, handleSaveAnnotations]);
 
   const handleNavigation = async (direction) => {
     await handleSaveAnnotations();
