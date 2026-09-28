@@ -27,6 +27,14 @@ const BOX_VALIDATION = {
   MIN_RELATIVE_SIZE: 0.001, // box must be >= 0.1% of image area
 };
 
+// Filmstrip geometry. Thumbnails are a fixed 48px wide with a 4px gap, so the
+// virtualised window can be computed exactly: spacers stand in for what is
+// off-screen and the scrollbar keeps the length it would have had.
+const THUMB_W = 48;
+const THUMB_GAP = 4;
+const THUMB_STRIDE = THUMB_W + THUMB_GAP;
+const THUMB_OVERSCAN = 8;
+
 // A stable signature of what was last persisted for an image. Auto-save
 // compares against this rather than trying to infer intent from saveStatus.
 const annotationSignature = (boxList, status) =>
@@ -191,6 +199,48 @@ function AnnotationToolContent() {
   }, [filteredImages]);
 
   const currentFilteredIndex = getFilteredIndex(currentImageIndex);
+
+  // The filmstrip renders a window of thumbnails, not all of them (geometry
+  // constants at the top of this file).
+  const stripRef = useRef(null);
+  const stripFrameRef = useRef(0);
+  const [stripWindow, setStripWindow] = useState({ start: 0, end: 60 });
+
+  const recomputeStripWindow = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const first = Math.floor(el.scrollLeft / THUMB_STRIDE);
+    const across = Math.ceil(el.clientWidth / THUMB_STRIDE);
+    setStripWindow({
+      start: Math.max(0, first - THUMB_OVERSCAN),
+      end: Math.min(filteredImages.length, first + across + THUMB_OVERSCAN),
+    });
+  }, [filteredImages.length]);
+
+  const handleStripScroll = useCallback(() => {
+    // One recompute per frame; a scroll event can fire far more often than that.
+    if (stripFrameRef.current) return;
+    stripFrameRef.current = requestAnimationFrame(() => {
+      stripFrameRef.current = 0;
+      recomputeStripWindow();
+    });
+  }, [recomputeStripWindow]);
+
+  useEffect(() => {
+    recomputeStripWindow();
+  }, [recomputeStripWindow]);
+
+  // Keep the selected thumbnail in view. Arrow-key navigation used to move the
+  // canvas while leaving the strip wherever it was, so the highlight would walk
+  // off the edge and stay there.
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || currentFilteredIndex < 0) return;
+    const left = currentFilteredIndex * THUMB_STRIDE;
+    if (left < el.scrollLeft || left + THUMB_STRIDE > el.scrollLeft + el.clientWidth) {
+      el.scrollTo({ left: Math.max(0, left - el.clientWidth / 2), behavior: "smooth" });
+    }
+  }, [currentFilteredIndex]);
 
   // Warm the neighbouring images so Arrow-Right doesn't wait on a cold
   // download. The image route already sends `Cache-Control: private,
@@ -2739,8 +2789,21 @@ function AnnotationToolContent() {
             {images.length > 0 && (
               <div className="border-t border-white/5 bg-zinc-950/80 backdrop-blur-sm shrink-0">
                 {/* Thumbnail Strip (Filtered) */}
-                <div className="h-16 flex items-center gap-1 px-4 overflow-x-auto custom-scrollbar">
-                  {filteredImages.map((img, idx) => (
+                <div
+                  ref={stripRef}
+                  onScroll={handleStripScroll}
+                  className="h-16 flex items-center gap-1 px-4 overflow-x-auto custom-scrollbar"
+                >
+                  {stripWindow.start > 0 && (
+                    <div
+                      aria-hidden="true"
+                      className="flex-shrink-0"
+                      style={{ width: stripWindow.start * THUMB_STRIDE - THUMB_GAP }}
+                    />
+                  )}
+                  {filteredImages.slice(stripWindow.start, stripWindow.end).map((img, offset) => {
+                    const idx = stripWindow.start + offset;
+                    return (
                     <div
                       key={img.id || `img-${idx}`}
                       onClick={async () => {
@@ -2767,7 +2830,15 @@ function AnnotationToolContent() {
                           }`} />
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
+                  {stripWindow.end < filteredImages.length && (
+                    <div
+                      aria-hidden="true"
+                      className="flex-shrink-0"
+                      style={{ width: (filteredImages.length - stripWindow.end) * THUMB_STRIDE - THUMB_GAP }}
+                    />
+                  )}
                   {filteredImages.length === 0 && (
                     <div className="w-full text-center text-xs text-gray-500 py-4">
                       No images match filter &quot;{filterStatus}&quot;
