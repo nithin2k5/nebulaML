@@ -102,6 +102,8 @@ export const STEPS = [
         icon: Activity,
         requires: ["upload"],
         minRole: "annotator",
+        // Advisory: worth reading, never the thing to nag someone to finish.
+        advisory: true,
         blurb: "Class balance, duplicates, blur and corruption, scored over time.",
     },
 
@@ -133,6 +135,7 @@ export const STEPS = [
         icon: Package,
         requires: ["train"],
         minRole: "admin",
+        advisory: true,
         blurb: "Every version and run, with its metrics.",
     },
 
@@ -206,4 +209,182 @@ export function navGroups(steps = STEPS) {
         phase,
         steps: steps.filter((s) => s.phase === phase.id),
     })).filter((g) => g.steps.length > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Step state
+// ---------------------------------------------------------------------------
+
+export const STATE = {
+    // A prerequisite is missing. Carries the reason and the step that clears it.
+    LOCKED: "locked",
+    // Actionable now. The old model had no word for this, which is why steps
+    // you could do were indistinguishable from steps you couldn't.
+    READY: "ready",
+    // Underway: partly annotated, training running, inference arriving.
+    ACTIVE: "active",
+    // Someone actually did it.
+    DONE: "done",
+    // Last run failed.
+    FAILED: "failed",
+};
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * Work out where every step stands from facts the project page already has.
+ *
+ * `done` is only ever asserted from evidence that the work happened. It used to
+ * be inferred: test, deploy and active-learning all read
+ * `hasModels ? 'complete' : 'pending'`, so all three went green the instant
+ * training finished, before anyone had tested, exported or reviewed anything.
+ * That also made WizardBanner's "every step complete" check pass at the end of
+ * training, at which point it deleted its own localStorage flag for good.
+ *
+ * Steps whose completion nothing currently records stop at `ready`, which is
+ * true, rather than claiming `done`, which wasn't.
+ */
+export function deriveStates(facts = {}) {
+    const {
+        totalImages = 0,
+        annotatedImages = 0,
+        versionCount = 0,
+        completedJobs = 0,
+        runningJobs = 0,
+        failedJobs = 0,
+        monitoringTotal = 0,
+    } = facts;
+
+    const hasImages = totalImages > 0;
+    const unlabelled = Math.max(0, totalImages - annotatedImages);
+    const fullyAnnotated = hasImages && unlabelled === 0;
+    const hasVersion = versionCount > 0;
+    const hasModel = completedJobs > 0;
+    const isTraining = runningJobs > 0;
+    const trainFailed = failedJobs > 0 && !hasModel && !isTraining;
+
+    const out = {};
+    const set = (id, state, reason, blockedBy = null) => {
+        out[id] = { state, reason, blockedBy };
+    };
+
+    // Ambient — always available, never "complete".
+    set("overview", STATE.READY, null);
+    set("team", STATE.READY, null);
+
+    // --- Data -------------------------------------------------------------
+    set(
+        "upload",
+        hasImages ? STATE.DONE : STATE.READY,
+        hasImages ? `${plural(totalImages, "image")} uploaded.` : "No images yet."
+    );
+
+    if (!hasImages) {
+        set("images", STATE.LOCKED, "Nothing uploaded yet.", "upload");
+        set("annotate", STATE.LOCKED, "Nothing uploaded yet.", "upload");
+        set("health", STATE.LOCKED, "Nothing uploaded yet.", "upload");
+    } else {
+        set("images", STATE.DONE, `${plural(totalImages, "image")} in the project.`);
+        set(
+            "annotate",
+            fullyAnnotated ? STATE.DONE : annotatedImages > 0 ? STATE.ACTIVE : STATE.READY,
+            fullyAnnotated
+                ? "Every image has boxes."
+                : `${plural(unlabelled, "image")} still need boxes.`
+        );
+        // A health check is advice, not a task with an end — it never reads done.
+        set("health", STATE.READY, "Check class balance, duplicates and blur.");
+    }
+
+    // --- Build ------------------------------------------------------------
+    if (!fullyAnnotated) {
+        set(
+            "generate",
+            STATE.LOCKED,
+            hasImages
+                ? `${plural(unlabelled, "image")} still need boxes — freezing now would train against blanks.`
+                : "Nothing uploaded yet.",
+            hasImages ? "annotate" : "upload"
+        );
+    } else {
+        set(
+            "generate",
+            hasVersion ? STATE.DONE : STATE.READY,
+            hasVersion
+                ? `${plural(versionCount, "version")} frozen.`
+                : "Freeze a snapshot to train against."
+        );
+    }
+
+    if (!hasVersion) {
+        set(
+            "train",
+            STATE.LOCKED,
+            "Training runs against a frozen version, never the live dataset — that is what makes a run reproducible.",
+            "generate"
+        );
+    } else if (isTraining) {
+        set("train", STATE.ACTIVE, `${plural(runningJobs, "job")} running.`);
+    } else if (hasModel) {
+        set("train", STATE.DONE, `${plural(completedJobs, "model")} trained.`);
+    } else if (trainFailed) {
+        set("train", STATE.FAILED, "The last run failed — see the log.");
+    } else {
+        set("train", STATE.READY, "Pick a backend and version, then run preflight.");
+    }
+
+    set(
+        "versions",
+        hasModel || isTraining ? STATE.READY : STATE.LOCKED,
+        hasModel
+            ? `${plural(completedJobs, "run")} with metrics.`
+            : isTraining
+              ? "A run is in progress."
+              : "No runs yet.",
+        hasModel || isTraining ? null : "train"
+    );
+
+    // --- Operate ----------------------------------------------------------
+    const needsModel = "Needs a trained model.";
+    if (!hasModel) {
+        set("test", STATE.LOCKED, needsModel, "train");
+        set("deploy", STATE.LOCKED, needsModel, "train");
+        set("monitoring", STATE.LOCKED, needsModel, "train");
+        set("active-learning", STATE.LOCKED, needsModel, "train");
+    } else {
+        // Nothing records a test run per project today, so this stops at ready.
+        set("test", STATE.READY, "Run the model against new images or a webcam.");
+        // Likewise an export: reaching `done` here needs an export to be
+        // written to activity_logs, which nothing does yet.
+        set("deploy", STATE.READY, "Export the weights, or call the model over the API.");
+        // Monitoring is ongoing, so it reads active rather than done.
+        set(
+            "monitoring",
+            monitoringTotal > 0 ? STATE.ACTIVE : STATE.READY,
+            monitoringTotal > 0
+                ? `${plural(monitoringTotal, "inference")} logged.`
+                : "No inference logged yet."
+        );
+        set("active-learning", STATE.READY, "Review low-confidence predictions.");
+    }
+
+    return out;
+}
+
+/**
+ * The step a person should do next: the first `ready`, `active` or `failed`
+ * step in pipeline order, skipping ambient ones.
+ *
+ * Returns null only when nothing is actionable at all.
+ */
+export function nextStep(states, steps = STEPS) {
+    const actionable = [STATE.READY, STATE.ACTIVE, STATE.FAILED];
+    return (
+        steps.find((s) => {
+            // Ambient steps are always available and advisory ones (Health,
+            // Registry) are for reading, so neither is ever "what to do next".
+            if (s.phase === "project" || s.advisory) return false;
+            return actionable.includes(states[s.id]?.state);
+        }) || null
+    );
 }

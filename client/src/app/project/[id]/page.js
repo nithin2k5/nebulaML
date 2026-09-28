@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
 import { usePolling } from "@/lib/usePolling";
-import { STEPS } from "@/lib/pipeline";
+import { STEPS, STATE, deriveStates } from "@/lib/pipeline";
 import { ArrowLeft, Cpu, CheckCircle, X } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
@@ -37,6 +37,7 @@ export default function ProjectPage() {
     const [stats, setStats] = useState(null);
     const [trainingJobs, setTrainingJobs] = useState([]);
     const [monitoringTotal, setMonitoringTotal] = useState(0);
+    const [versionCount, setVersionCount] = useState(0);
     const [versionRefreshKey, setVersionRefreshKey] = useState(0);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
     const [completionBanner, setCompletionBanner] = useState(null);
@@ -64,6 +65,7 @@ export default function ProjectPage() {
                 fetchStats(params.id);
                 fetchTrainingJobs(params.id);
                 fetchMonitoringStats(params.id);
+                fetchVersionCount(params.id);
             } else {
                 setLoading(false);
             }
@@ -119,6 +121,20 @@ export default function ProjectPage() {
         } catch (e) { console.error(e); }
     };
 
+    // Whether a frozen version exists is what separates "you can train" from
+    // "training would fail", so the gate model needs it on this page.
+    const fetchVersionCount = async (datasetId) => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.VERSIONS_LIST(datasetId), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setVersionCount((data.versions || []).length);
+            }
+        } catch (e) { /* non-critical */ }
+    };
+
     const fetchMonitoringStats = async (datasetId) => {
         try {
             const res = await fetch(API_ENDPOINTS.MONITORING.STATS(datasetId), {
@@ -170,72 +186,41 @@ export default function ProjectPage() {
     const failedJobs    = trainingJobs.filter(j => j.status === 'failed');
     const hasModels     = completedJobs.length > 0;
     const isTraining    = runningJobs.length > 0;
-    const hasFailed     = failedJobs.length > 0 && !hasModels && !isTraining;
 
-    // Per-step status and meta, keyed by step id. The step list itself — order,
-    // labels, icons — comes from lib/pipeline.js, so this no longer restates it
-    // and can no longer drift from the sidebar or the guide.
-    const stageDetail = {
-        overview: { status: 'pending', meta: 'Summary' },
-        upload: {
-            status: (stats?.total_images > 0) ? 'complete' : 'pending',
-            meta: `${stats?.total_images || 0} Images`
-        },
-        images: {
-            status: (stats?.total_images > 0) ? 'complete' : 'pending',
-            meta: 'Manage Data'
-        },
-        annotate: {
-            status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
-                (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
-            meta: `${Math.round(stats?.completion_percentage || 0)}% Done`
-        },
-        health: {
-            status: (stats?.total_images > 0) ? (hasModels ? 'complete' : 'inprogress') : 'pending',
-            meta: stats?.total_images > 0 ? 'Quality Check' : 'No Data'
-        },
-        generate: {
-            status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
-                    (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
-            meta: 'Version Snapshot'
-        },
-        train: {
-            status: isTraining ? 'inprogress' :
-                    hasModels ? 'complete' :
-                    hasFailed ? 'failed' : 'pending',
-            meta: isTraining ? `${runningJobs[0] ? Math.round(runningJobs[0].progress || 0) + '%' : 'Running'}` :
-                  hasModels ? `${completedJobs.length} Model${completedJobs.length > 1 ? 's' : ''}` :
-                  hasFailed ? 'Failed' : 'No Jobs'
-        },
-        versions: {
-            status: hasModels ? 'complete' : 'pending',
-            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
-        },
-        test: {
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'No Model'
-        },
-        deploy: {
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'Not Ready'
-        },
-        monitoring: {
-            status: monitoringTotal > 0 ? 'complete' : hasModels ? 'inprogress' : 'pending',
-            meta: monitoringTotal > 0 ? `${monitoringTotal} Inferences` : hasModels ? 'Run Inference' : 'No Data'
-        },
-        'active-learning': {
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'Needs Model'
-        },
-        team: { status: 'pending', meta: 'Access & Logs' },
-    };
+    // One derivation for every step's state, from facts rather than from
+    // whether a sibling step happens to have produced something.
+    const stepStates = deriveStates({
+        totalImages: stats?.total_images || 0,
+        annotatedImages: stats?.annotated_images || 0,
+        versionCount,
+        completedJobs: completedJobs.length,
+        runningJobs: runningJobs.length,
+        failedJobs: failedJobs.length,
+        monitoringTotal,
+    });
 
-    const pipelineStages = STEPS.map((step) => ({
-        id: step.id,
-        label: step.label,
-        icon: step.icon,
-        ...(stageDetail[step.id] ?? { status: 'pending', meta: '' }),
-    }));
+    const pipelineStages = STEPS.map((step) => {
+        const { state, reason, blockedBy } = stepStates[step.id] ?? {};
+        return {
+            id: step.id,
+            label: step.label,
+            icon: step.icon,
+            state,
+            reason,
+            blockedBy,
+            // `status` is what the pipeline bar and the guide already read.
+            // Ambient steps get no marker at all rather than a permanent
+            // `pending` one they could never shed.
+            status: step.phase === 'project'
+                ? 'ambient'
+                : state === STATE.DONE ? 'complete'
+                : state === STATE.ACTIVE ? 'inprogress'
+                : state === STATE.FAILED ? 'failed'
+                : state === STATE.READY ? 'ready'
+                : 'blocked',
+            meta: reason || '',
+        };
+    });
 
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-black text-white font-sans">
@@ -352,7 +337,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="generate" className="mt-0 h-full">
-                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); setVersionRefreshKey(k => k + 1); handleTabChange('train'); }} />
+                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); fetchVersionCount(dataset.id); setVersionRefreshKey(k => k + 1); handleTabChange('train'); }} />
                         </TabsContent>
 
                         <TabsContent value="versions" className="mt-0 h-full">
