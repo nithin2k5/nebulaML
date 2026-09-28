@@ -7,13 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
 import { usePolling } from "@/lib/usePolling";
-import { STEPS, STATE, deriveStates } from "@/lib/pipeline";
+import { deriveStates } from "@/lib/pipeline";
 import { ArrowLeft, Cpu, CheckCircle, X } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
 // Components for each tab
-import WizardBanner from "@/components/WizardBanner";
+import NextStepRail from "@/components/NextStepRail";
 import ProjectOverview from "@/components/project/ProjectOverview";
 import ProjectUpload from "@/components/project/ProjectUpload";
 import ProjectImages from "@/components/project/ProjectImages";
@@ -199,29 +199,6 @@ export default function ProjectPage() {
         monitoringTotal,
     });
 
-    const pipelineStages = STEPS.map((step) => {
-        const { state, reason, blockedBy } = stepStates[step.id] ?? {};
-        return {
-            id: step.id,
-            label: step.label,
-            icon: step.icon,
-            state,
-            reason,
-            blockedBy,
-            // `status` is what the pipeline bar and the guide already read.
-            // Ambient steps get no marker at all rather than a permanent
-            // `pending` one they could never shed.
-            status: step.phase === 'project'
-                ? 'ambient'
-                : state === STATE.DONE ? 'complete'
-                : state === STATE.ACTIVE ? 'inprogress'
-                : state === STATE.FAILED ? 'failed'
-                : state === STATE.READY ? 'ready'
-                : 'blocked',
-            meta: reason || '',
-        };
-    });
-
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-black text-white font-sans">
             {/* Project Header */}
@@ -265,7 +242,7 @@ export default function ProjectPage() {
 
 
 
-            <WizardBanner pipelineStages={pipelineStages} activeTab={activeTab} onNavigate={handleTabChange} />
+            <NextStepRail stepStates={stepStates} activeTab={activeTab} onNavigate={handleTabChange} />
 
             {/* Tabs Navigation similar to Roboflow */}
             <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col min-h-0">
