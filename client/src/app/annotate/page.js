@@ -192,6 +192,33 @@ function AnnotationToolContent() {
 
   const currentFilteredIndex = getFilteredIndex(currentImageIndex);
 
+  // Warm the neighbouring images so Arrow-Right doesn't wait on a cold
+  // download. The image route already sends `Cache-Control: private,
+  // max-age=3600`, so a warmed image is served from cache and the only cost is
+  // fetching it slightly sooner than it was needed anyway.
+  const prefetchedRef = useRef(new Set());
+  useEffect(() => {
+    if (!datasetId || !token || currentFilteredIndex < 0) return;
+    // Navigation walks the filtered list, so warm along that order: two ahead,
+    // one behind, for going back over what you just labelled.
+    const targets = [1, 2, -1]
+      .map((offset) => filteredImages[currentFilteredIndex + offset])
+      .filter(Boolean);
+
+    for (const img of targets) {
+      const url = API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token);
+      if (prefetchedRef.current.has(url)) continue;
+      prefetchedRef.current.add(url);
+      // window.Image, not Image: this file imports a long list of lucide icons,
+      // and an `Image` added to it would shadow the constructor silently.
+      const warm = new window.Image();
+      warm.src = url;
+    }
+
+    // Long sessions walk thousands of images; don't grow the set without bound.
+    if (prefetchedRef.current.size > 300) prefetchedRef.current.clear();
+  }, [datasetId, token, currentFilteredIndex, filteredImages]);
+
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
   const fileInputRef = useRef(null);
