@@ -16,6 +16,11 @@ server/datasets/
 server/uploads/
 server/exports/
 
+# Server-side thumbnail cache, rebuilt on demand from the source images. The
+# root datasets/ tree is tracked, so without this the cache would show up as
+# untracked files whenever the server runs from the repository root.
+datasets/*/thumbs/
+
 # YOLO model weights and training outputs
 *.pt
 *.pth

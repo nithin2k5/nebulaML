@@ -27,6 +27,19 @@ const BOX_VALIDATION = {
   MIN_RELATIVE_SIZE: 0.001, // box must be >= 0.1% of image area
 };
 
+// Filmstrip geometry. Thumbnails are a fixed 48px wide with a 4px gap, so the
+// virtualised window can be computed exactly: spacers stand in for what is
+// off-screen and the scrollbar keeps the length it would have had.
+const THUMB_W = 48;
+const THUMB_GAP = 4;
+const THUMB_STRIDE = THUMB_W + THUMB_GAP;
+const THUMB_OVERSCAN = 8;
+
+// A stable signature of what was last persisted for an image. Auto-save
+// compares against this rather than trying to infer intent from saveStatus.
+const annotationSignature = (boxList, status) =>
+  JSON.stringify({ status, boxes: boxList });
+
 function validateBox(box, imageWidth, imageHeight) {
   const errors = [];
   const { x, y, width, height } = box;
@@ -99,6 +112,9 @@ function AnnotationToolContent() {
   const [boxes, setBoxes] = useState([]);
   const boxesRef = useRef([]);
   const isImageLoadingRef = useRef(true);
+  // Signature of the annotation state the server last accepted, or null before
+  // anything has loaded. Auto-save runs only when the current state differs.
+  const savedSnapshotRef = useRef(null);
   const latestImageIndexRequested = useRef(currentImageIndex);
   const [boxHistory, setBoxHistory] = useState([]);
   const [selectedClass, setSelectedClass] = useState(0);
@@ -184,6 +200,75 @@ function AnnotationToolContent() {
 
   const currentFilteredIndex = getFilteredIndex(currentImageIndex);
 
+  // The filmstrip renders a window of thumbnails, not all of them (geometry
+  // constants at the top of this file).
+  const stripRef = useRef(null);
+  const stripFrameRef = useRef(0);
+  const [stripWindow, setStripWindow] = useState({ start: 0, end: 60 });
+
+  const recomputeStripWindow = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const first = Math.floor(el.scrollLeft / THUMB_STRIDE);
+    const across = Math.ceil(el.clientWidth / THUMB_STRIDE);
+    setStripWindow({
+      start: Math.max(0, first - THUMB_OVERSCAN),
+      end: Math.min(filteredImages.length, first + across + THUMB_OVERSCAN),
+    });
+  }, [filteredImages.length]);
+
+  const handleStripScroll = useCallback(() => {
+    // One recompute per frame; a scroll event can fire far more often than that.
+    if (stripFrameRef.current) return;
+    stripFrameRef.current = requestAnimationFrame(() => {
+      stripFrameRef.current = 0;
+      recomputeStripWindow();
+    });
+  }, [recomputeStripWindow]);
+
+  useEffect(() => {
+    recomputeStripWindow();
+  }, [recomputeStripWindow]);
+
+  // Keep the selected thumbnail in view. Arrow-key navigation used to move the
+  // canvas while leaving the strip wherever it was, so the highlight would walk
+  // off the edge and stay there.
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || currentFilteredIndex < 0) return;
+    const left = currentFilteredIndex * THUMB_STRIDE;
+    if (left < el.scrollLeft || left + THUMB_STRIDE > el.scrollLeft + el.clientWidth) {
+      el.scrollTo({ left: Math.max(0, left - el.clientWidth / 2), behavior: "smooth" });
+    }
+  }, [currentFilteredIndex]);
+
+  // Warm the neighbouring images so Arrow-Right doesn't wait on a cold
+  // download. The image route already sends `Cache-Control: private,
+  // max-age=3600`, so a warmed image is served from cache and the only cost is
+  // fetching it slightly sooner than it was needed anyway.
+  const prefetchedRef = useRef(new Set());
+  useEffect(() => {
+    if (!datasetId || !token || currentFilteredIndex < 0) return;
+    // Navigation walks the filtered list, so warm along that order: two ahead,
+    // one behind, for going back over what you just labelled.
+    const targets = [1, 2, -1]
+      .map((offset) => filteredImages[currentFilteredIndex + offset])
+      .filter(Boolean);
+
+    for (const img of targets) {
+      const url = API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token);
+      if (prefetchedRef.current.has(url)) continue;
+      prefetchedRef.current.add(url);
+      // window.Image, not Image: this file imports a long list of lucide icons,
+      // and an `Image` added to it would shadow the constructor silently.
+      const warm = new window.Image();
+      warm.src = url;
+    }
+
+    // Long sessions walk thousands of images; don't grow the set without bound.
+    if (prefetchedRef.current.size > 300) prefetchedRef.current.clear();
+  }, [datasetId, token, currentFilteredIndex, filteredImages]);
+
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -237,173 +322,186 @@ function AnnotationToolContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxes, currentBox, isDrawing, currentPoints, activeTool, hoveredBoxIndex, selectedBoxIndex]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // Keyboard shortcuts.
+  //
+  // Defined per render and reached through a ref, so the listener always runs
+  // the current closure. It used to be built inside an effect whose dependency
+  // array listed six of the twelve values the handler reads, behind an
+  // eslint-disable — `activeTool` among the missing ones, so switching tool and
+  // then pressing Escape or Enter could act on the tool you had before.
+  // Frequent `boxes` changes rebuilt the handler often enough to hide it most
+  // of the time, which is the worst version of that bug to own.
+  const handleKeyDown = (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-      switch (e.key) {
-        case 'Enter':
-          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
-            e.preventDefault();
-            handleAiAccept();
+    switch (e.key) {
+      case 'Enter':
+        if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+          e.preventDefault();
+          handleAiAccept();
+        }
+        break;
+      case 'Escape':
+        if (activeTool === 'ai') {
+          aiRoughBoxRef.current = null;
+          aiCurrentBoxRef.current = null;
+          aiBoxStartRef.current = null;
+          aiIsDrawingBoxRef.current = false;
+          aiIsDrawingPolygonRef.current = false;
+          aiCurrentPolygonRef.current = [];
+          cursorPosRef.current = null;
+          aiPointsRef.current = [];
+          aiMaskPolygonRef.current = null;
+          aiHistoryRef.current = [];
+          aiMetadataRef.current = null;
+          aiHoverInsideMaskRef.current = false;
+          aiRequestIdRef.current++;
+          setAiStateVersion(v => v + 1);
+          setAiSubTool('polygon');
+          drawCanvas();
+        } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
+          setIsDrawing(false);
+          currentPointsRef.current = [];
+          setCurrentPoints([]);
+          cursorPosRef.current = null;
+          showToast('Canceled drawing', 'info');
+        } else if (isDrawing) {
+          setIsDrawing(false);
+          setStartPos(null);
+          setCurrentBox(null);
+        }
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        handleNavigation('prev');
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        handleNavigation('next');
+        break;
+      case 's':
+      case 'S':
+        e.preventDefault();
+        handleSaveAnnotations().then(success => {
+          if (success) showToast('Annotations saved!');
+          else showToast('Failed to save', 'error');
+        });
+        break;
+      case 'Delete':
+      case 'Backspace':
+        if (boxes.length > 0) {
+          e.preventDefault();
+          handleDeleteBox(boxes.length - 1);
+          showToast('Last annotation deleted');
+        }
+        break;
+      case 'z':
+      case 'Z':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (activeTool === 'ai' && aiHistoryRef.current.length > 0) {
+            handleAiUndo();
+          } else if (boxHistory.length > 0) {
+            const lastState = boxHistory[boxHistory.length - 1];
+            boxesRef.current = lastState;
+            setBoxes(lastState);
+            setBoxHistory(prev => prev.slice(0, -1));
+            showToast('Undo successful');
           }
-          break;
-        case 'Escape':
-          if (activeTool === 'ai') {
-            aiRoughBoxRef.current = null;
-            aiCurrentBoxRef.current = null;
-            aiBoxStartRef.current = null;
-            aiIsDrawingBoxRef.current = false;
-            aiIsDrawingPolygonRef.current = false;
-            aiCurrentPolygonRef.current = [];
-            cursorPosRef.current = null;
-            aiPointsRef.current = [];
-            aiMaskPolygonRef.current = null;
-            aiHistoryRef.current = [];
-            aiMetadataRef.current = null;
-            aiHoverInsideMaskRef.current = false;
-            aiRequestIdRef.current++;
-            setAiStateVersion(v => v + 1);
-            setAiSubTool('polygon');
-            drawCanvas();
-          } else if (activeTool === 'polygon' && (isDrawing || currentPointsRef.current.length > 0)) {
-            setIsDrawing(false);
-            currentPointsRef.current = [];
-            setCurrentPoints([]);
-            cursorPosRef.current = null;
-            showToast('Canceled drawing', 'info');
-          } else if (isDrawing) {
-            setIsDrawing(false);
-            setStartPos(null);
-            setCurrentBox(null);
-          }
-          break;
-        case 'ArrowLeft':
+        }
+        break;
+      case 'c':
+      case 'C':
+        if (e.ctrlKey || e.metaKey) {
           e.preventDefault();
-          handleNavigation('prev');
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          handleNavigation('next');
-          break;
-        case 's':
-        case 'S':
-          e.preventDefault();
-          handleSaveAnnotations().then(success => {
-            if (success) showToast('Annotations saved!');
-            else showToast('Failed to save', 'error');
-          });
-          break;
-        case 'Delete':
-        case 'Backspace':
           if (boxes.length > 0) {
-            e.preventDefault();
-            handleDeleteBox(boxes.length - 1);
-            showToast('Last annotation deleted');
+            setCopiedBoxes(boxes);
+            showToast(`Copied ${boxes.length} annotations`);
           }
-          break;
-        case 'z':
-        case 'Z':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (activeTool === 'ai' && aiHistoryRef.current.length > 0) {
-              handleAiUndo();
-            } else if (boxHistory.length > 0) {
-              const lastState = boxHistory[boxHistory.length - 1];
-              boxesRef.current = lastState;
-              setBoxes(lastState);
-              setBoxHistory(prev => prev.slice(0, -1));
-              showToast('Undo successful');
-            }
+        }
+        break;
+      case 'v':
+      case 'V':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          if (copiedBoxes && copiedBoxes.length > 0) {
+            setBoxHistory(prev => [...prev, boxesRef.current]);
+            const newBoxes = [...boxesRef.current, ...copiedBoxes];
+            boxesRef.current = newBoxes;
+            setBoxes(newBoxes);
+            showToast(`Pasted ${copiedBoxes.length} annotations`);
           }
-          break;
-        case 'c':
-        case 'C':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (boxes.length > 0) {
-              setCopiedBoxes(boxes);
-              showToast(`Copied ${boxes.length} annotations`);
-            }
-          }
-          break;
-        case 'v':
-        case 'V':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            if (copiedBoxes && copiedBoxes.length > 0) {
-              setBoxHistory(prev => [...prev, boxesRef.current]);
-              const newBoxes = [...boxesRef.current, ...copiedBoxes];
-              boxesRef.current = newBoxes;
-              setBoxes(newBoxes);
-              showToast(`Pasted ${copiedBoxes.length} annotations`);
-            }
-          }
-          break;
-        case 'f':
-        case 'F':
-          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
-            e.preventDefault();
-            setAiSubTool('fg');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
-          }
-          break;
-        case 'l':
-        case 'L':
-          if (activeTool === 'ai') {
-            e.preventDefault();
-            setAiSubTool('polygon');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
-          }
-          break;
-        case 'b':
-        case 'B':
-          if (activeTool === 'ai' && aiMaskPolygonRef.current) {
-            e.preventDefault();
-            setAiSubTool('bg');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
-          }
-          break;
-        case 'r':
-        case 'R':
-        case 'd':
-        case 'D':
-          if (activeTool === 'ai') {
-            e.preventDefault();
-            aiRoughBoxRef.current = null;
-            aiCurrentBoxRef.current = null;
-            aiBoxStartRef.current = null;
-            aiIsDrawingBoxRef.current = false;
-            aiIsDrawingPolygonRef.current = false;
-            aiCurrentPolygonRef.current = [];
-            cursorPosRef.current = null;
-            aiPointsRef.current = [];
-            aiMaskPolygonRef.current = null;
-            aiHistoryRef.current = [];
-            aiMetadataRef.current = null;
-            aiHoverInsideMaskRef.current = false;
-            aiRequestIdRef.current++;
-            setAiStateVersion(v => v + 1);
-            setAiSubTool('polygon');
-            if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
-            drawCanvas();
-          }
-          break;
-        default:
-          // Number keys 1-9 for class selection
-          const num = parseInt(e.key);
-          if (num >= 1 && num <= 9 && dataset?.classes?.length >= num) {
-            e.preventDefault();
-            setSelectedClass(num - 1);
-          }
-          break;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes, boxHistory, dataset, images, currentImageIndex, copiedBoxes]);
+        }
+        break;
+      case 'f':
+      case 'F':
+        if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+          e.preventDefault();
+          setAiSubTool('fg');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
+        }
+        break;
+      case 'l':
+      case 'L':
+        if (activeTool === 'ai') {
+          e.preventDefault();
+          setAiSubTool('polygon');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+        }
+        break;
+      case 'b':
+      case 'B':
+        if (activeTool === 'ai' && aiMaskPolygonRef.current) {
+          e.preventDefault();
+          setAiSubTool('bg');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'cell';
+        }
+        break;
+      case 'r':
+      case 'R':
+      case 'd':
+      case 'D':
+        if (activeTool === 'ai') {
+          e.preventDefault();
+          aiRoughBoxRef.current = null;
+          aiCurrentBoxRef.current = null;
+          aiBoxStartRef.current = null;
+          aiIsDrawingBoxRef.current = false;
+          aiIsDrawingPolygonRef.current = false;
+          aiCurrentPolygonRef.current = [];
+          cursorPosRef.current = null;
+          aiPointsRef.current = [];
+          aiMaskPolygonRef.current = null;
+          aiHistoryRef.current = [];
+          aiMetadataRef.current = null;
+          aiHoverInsideMaskRef.current = false;
+          aiRequestIdRef.current++;
+          setAiStateVersion(v => v + 1);
+          setAiSubTool('polygon');
+          if (canvasRef.current) canvasRef.current.style.cursor = 'crosshair';
+          drawCanvas();
+        }
+        break;
+      default:
+        // Number keys 1-9 for class selection
+        const num = parseInt(e.key);
+        if (num >= 1 && num <= 9 && dataset?.classes?.length >= num) {
+          e.preventDefault();
+          setSelectedClass(num - 1);
+        }
+        break;
+    }
+  };
+
+  const keyDownRef = useRef(handleKeyDown);
+  useEffect(() => {
+    keyDownRef.current = handleKeyDown;
+  });
+  useEffect(() => {
+    const listener = (e) => keyDownRef.current(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   const fetchUnannotatedImages = useCallback(async () => {
     if (!datasetId || !token) return;
@@ -526,17 +624,20 @@ function AnnotationToolContent() {
         boxesRef.current = fetchedBoxes;
         setBoxes(fetchedBoxes);
         setReviewStatus(data.status || 'annotated');
+        savedSnapshotRef.current = annotationSignature(fetchedBoxes, data.status || 'annotated');
         setAnnotationType(data.annotation_type || (dataset?.type?.toLowerCase().includes('class') ? 'classification' : 'detection'));
       } else {
         boxesRef.current = [];
         setBoxes([]);
         setReviewStatus('unlabeled');
+        savedSnapshotRef.current = annotationSignature([], 'unlabeled');
       }
     } catch (error) {
       if (latestImageIndexRequested.current === index) {
         boxesRef.current = [];
         setBoxes([]);
         setReviewStatus('unlabeled');
+        savedSnapshotRef.current = annotationSignature([], 'unlabeled');
       }
     } finally {
       if (latestImageIndexRequested.current === index) {
@@ -1824,6 +1925,7 @@ function AnnotationToolContent() {
       });
 
       if (response.ok) {
+        savedSnapshotRef.current = annotationSignature(currentBoxesToSave, newStatus);
         setSaveStatus('saved');
         setReviewStatus(newStatus);
         // Update the status of the current image in the images array
@@ -1911,21 +2013,30 @@ function AnnotationToolContent() {
     }
   }, [dataset, token, images, currentImageIndex, datasetId, propagateMode, annotationType, fetchDataset, fetchStats]);
 
-  // Auto-save when boxes change (debounced)
+  // Auto-save when the annotations actually differ from what was last saved.
+  //
+  // This used to gate on `saveStatus`, which made it re-save forever. saveStatus
+  // returns to null 2s after a successful save while the debounce is 1s, so the
+  // cycle was: save → 'saved' (effect returns early) → 2s later null → schedule
+  // → save again, about every three seconds for as long as an image with any box
+  // was open, with nobody touching anything. Each pass cost a POST /save — which
+  // re-reads the dataset, re-checks the role on its own connection, upserts, and
+  // rewrites the YOLO label file — plus the fetchStats() that follows it.
+  //
+  // Comparing against the last persisted state fixes that and subsumes the two
+  // special cases the old version needed: a freshly loaded image is never dirty,
+  // and an image that loaded empty and unlabelled stays that way untouched.
   useEffect(() => {
-    if (boxes.length === 0 && reviewStatus === 'unlabeled') return; // Don't save empty if already unlabeled
-
-    // Skip initial load
-    if (saveStatus === 'saved' || saveStatus === 'loading') return;
+    if (isImageLoadingRef.current) return;
+    if (!datasetId || !images[currentImageIndex]) return;
+    if (annotationSignature(boxes, reviewStatus) === savedSnapshotRef.current) return;
 
     const timeoutId = setTimeout(() => {
-      if (datasetId && images[currentImageIndex]) {
-        handleSaveAnnotations();
-      }
+      handleSaveAnnotations();
     }, 1000); // 1s debounce
 
     return () => clearTimeout(timeoutId);
-  }, [boxes, datasetId, images, currentImageIndex, handleSaveAnnotations, reviewStatus, saveStatus]);
+  }, [boxes, reviewStatus, datasetId, images, currentImageIndex, handleSaveAnnotations]);
 
   const handleNavigation = async (direction) => {
     await handleSaveAnnotations();
@@ -2524,12 +2635,41 @@ function AnnotationToolContent() {
               <div className="pt-3 border-t border-white/5">
                 <h3 className="font-medium text-xs text-gray-500 uppercase tracking-wider mb-2 px-1">Shortcuts</h3>
                 <div className="text-[11px] text-gray-500 space-y-1.5 px-1">
-                  <div className="flex justify-between"><span>Navigate</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">← →</kbd></div>
-                  <div className="flex justify-between"><span>Save</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">S</kbd></div>
-                  <div className="flex justify-between"><span>Delete last</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">Del</kbd></div>
-                  <div className="flex justify-between"><span>Undo</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">⌘Z</kbd></div>
-                  <div className="flex justify-between"><span>Class</span><kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400">1-9</kbd></div>
+                  {[
+                    ["Navigate", "← →"],
+                    ["Save", "S"],
+                    ["Delete last", "Del"],
+                    ["Undo", "⌘Z"],
+                    ["Select class", "1-9"],
+                    ["Copy all boxes", "⌘C"],
+                    ["Paste onto image", "⌘V"],
+                    ["Cancel drawing", "Esc"],
+                  ].map(([label, keys]) => (
+                    <div key={label} className="flex justify-between gap-2">
+                      <span>{label}</span>
+                      <kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400 shrink-0">{keys}</kbd>
+                    </div>
+                  ))}
                 </div>
+                {activeTool === 'ai' && (
+                  <div className="mt-3 pt-3 border-t border-white/5">
+                    <h4 className="font-medium text-[10px] text-gray-500 uppercase tracking-wider mb-2 px-1">Smart tool</h4>
+                    <div className="text-[11px] text-gray-500 space-y-1.5 px-1">
+                      {[
+                        ["Accept mask", "Enter"],
+                        ["Lasso", "L"],
+                        ["Add region", "F"],
+                        ["Remove region", "B"],
+                        ["Reset", "R"],
+                      ].map(([label, keys]) => (
+                        <div key={label} className="flex justify-between gap-2">
+                          <span>{label}</span>
+                          <kbd className="bg-white/5 px-1.5 py-0.5 rounded text-gray-400 shrink-0">{keys}</kbd>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2649,8 +2789,21 @@ function AnnotationToolContent() {
             {images.length > 0 && (
               <div className="border-t border-white/5 bg-zinc-950/80 backdrop-blur-sm shrink-0">
                 {/* Thumbnail Strip (Filtered) */}
-                <div className="h-16 flex items-center gap-1 px-4 overflow-x-auto custom-scrollbar">
-                  {filteredImages.map((img, idx) => (
+                <div
+                  ref={stripRef}
+                  onScroll={handleStripScroll}
+                  className="h-16 flex items-center gap-1 px-4 overflow-x-auto custom-scrollbar"
+                >
+                  {stripWindow.start > 0 && (
+                    <div
+                      aria-hidden="true"
+                      className="flex-shrink-0"
+                      style={{ width: stripWindow.start * THUMB_STRIDE - THUMB_GAP }}
+                    />
+                  )}
+                  {filteredImages.slice(stripWindow.start, stripWindow.end).map((img, offset) => {
+                    const idx = stripWindow.start + offset;
+                    return (
                     <div
                       key={img.id || `img-${idx}`}
                       onClick={async () => {
@@ -2664,7 +2817,7 @@ function AnnotationToolContent() {
                         }`}
                     >
                       <img
-                        src={API_ENDPOINTS.ANNOTATIONS.GET_IMAGE(datasetId, img.filename, token)}
+                        src={API_ENDPOINTS.ANNOTATIONS.GET_THUMBNAIL(datasetId, img.filename, token, 160)}
                         alt={img.original_name}
                         className="w-full h-full object-cover"
                         loading="lazy"
@@ -2677,7 +2830,15 @@ function AnnotationToolContent() {
                           }`} />
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
+                  {stripWindow.end < filteredImages.length && (
+                    <div
+                      aria-hidden="true"
+                      className="flex-shrink-0"
+                      style={{ width: (filteredImages.length - stripWindow.end) * THUMB_STRIDE - THUMB_GAP }}
+                    />
+                  )}
                   {filteredImages.length === 0 && (
                     <div className="w-full text-center text-xs text-gray-500 py-4">
                       No images match filter &quot;{filterStatus}&quot;
