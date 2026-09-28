@@ -2,17 +2,18 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { API_ENDPOINTS } from "@/lib/config";
 import { usePolling } from "@/lib/usePolling";
-import { ArrowLeft, Upload, Image, Cpu, Layers, Code, Grid, Activity, Brain, BarChart3, LayoutDashboard, Package, Users, TestTube2, CheckCircle, X } from "lucide-react";
+import { deriveStates } from "@/lib/pipeline";
+import { ArrowLeft, Cpu, CheckCircle, X } from "lucide-react";
 import { toast } from 'sonner';
 import { useAuth } from "@/context/AuthContext";
 
 // Components for each tab
-import WizardBanner from "@/components/WizardBanner";
+import NextStepRail from "@/components/NextStepRail";
 import ProjectOverview from "@/components/project/ProjectOverview";
 import ProjectUpload from "@/components/project/ProjectUpload";
 import ProjectImages from "@/components/project/ProjectImages";
@@ -36,6 +37,7 @@ export default function ProjectPage() {
     const [stats, setStats] = useState(null);
     const [trainingJobs, setTrainingJobs] = useState([]);
     const [monitoringTotal, setMonitoringTotal] = useState(0);
+    const [versionCount, setVersionCount] = useState(0);
     const [versionRefreshKey, setVersionRefreshKey] = useState(0);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
     const [completionBanner, setCompletionBanner] = useState(null);
@@ -63,6 +65,7 @@ export default function ProjectPage() {
                 fetchStats(params.id);
                 fetchTrainingJobs(params.id);
                 fetchMonitoringStats(params.id);
+                fetchVersionCount(params.id);
             } else {
                 setLoading(false);
             }
@@ -118,6 +121,20 @@ export default function ProjectPage() {
         } catch (e) { console.error(e); }
     };
 
+    // Whether a frozen version exists is what separates "you can train" from
+    // "training would fail", so the gate model needs it on this page.
+    const fetchVersionCount = async (datasetId) => {
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.VERSIONS_LIST(datasetId), {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setVersionCount((data.versions || []).length);
+            }
+        } catch (e) { /* non-critical */ }
+    };
+
     const fetchMonitoringStats = async (datasetId) => {
         try {
             const res = await fetch(API_ENDPOINTS.MONITORING.STATS(datasetId), {
@@ -169,107 +186,18 @@ export default function ProjectPage() {
     const failedJobs    = trainingJobs.filter(j => j.status === 'failed');
     const hasModels     = completedJobs.length > 0;
     const isTraining    = runningJobs.length > 0;
-    const hasFailed     = failedJobs.length > 0 && !hasModels && !isTraining;
 
-    const pipelineStages = [
-        {
-            id: 'overview',
-            label: 'Overview',
-            icon: LayoutDashboard,
-            status: 'pending',
-            meta: 'Summary'
-        },
-        {
-            id: 'upload',
-            label: 'Upload',
-            icon: Upload,
-            status: (stats?.total_images > 0) ? 'complete' : 'pending',
-            meta: `${stats?.total_images || 0} Images`
-        },
-        {
-            id: 'images',
-            label: 'Images',
-            icon: Grid,
-            status: (stats?.total_images > 0) ? 'complete' : 'pending',
-            meta: 'Manage Data'
-        },
-        {
-            id: 'annotate',
-            label: 'Annotate',
-            icon: Image,
-            status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
-                (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
-            meta: `${Math.round(stats?.completion_percentage || 0)}% Done`
-        },
-        {
-            id: 'health',
-            label: 'Health',
-            icon: Activity,
-            status: (stats?.total_images > 0) ? (hasModels ? 'complete' : 'inprogress') : 'pending',
-            meta: stats?.total_images > 0 ? 'Quality Check' : 'No Data'
-        },
-        {
-            id: 'generate',
-            label: 'Generate',
-            icon: Layers,
-            status: (stats?.annotated_images > 0 && stats?.annotated_images === stats?.total_images) ? 'complete' :
-                    (stats?.annotated_images > 0) ? 'inprogress' : 'pending',
-            meta: 'Version Snapshot'
-        },
-        {
-            id: 'versions',
-            label: 'Registry',
-            icon: Package,
-            status: hasModels ? 'complete' : 'pending',
-            meta: `${completedJobs.length} Model${completedJobs.length !== 1 ? 's' : ''}`
-        },
-        {
-            id: 'train',
-            label: 'Train',
-            icon: Cpu,
-            status: isTraining ? 'inprogress' :
-                    hasModels ? 'complete' :
-                    hasFailed ? 'failed' : 'pending',
-            meta: isTraining ? `${runningJobs[0] ? Math.round(runningJobs[0].progress || 0) + '%' : 'Running'}` :
-                  hasModels ? `${completedJobs.length} Model${completedJobs.length > 1 ? 's' : ''}` :
-                  hasFailed ? 'Failed' : 'No Jobs'
-        },
-        {
-            id: 'test',
-            label: 'Test',
-            icon: TestTube2,
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'No Model'
-        },
-        {
-            id: 'deploy',
-            label: 'Deploy',
-            icon: Code,
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'Not Ready'
-        },
-        {
-            id: 'active-learning',
-            label: 'Learning',
-            icon: Brain,
-            status: hasModels ? 'complete' : 'pending',
-            meta: hasModels ? 'Ready' : 'Needs Model'
-        },
-        {
-            id: 'monitoring',
-            label: 'Monitor',
-            icon: BarChart3,
-            status: monitoringTotal > 0 ? 'complete' : hasModels ? 'inprogress' : 'pending',
-            meta: monitoringTotal > 0 ? `${monitoringTotal} Inferences` : hasModels ? 'Run Inference' : 'No Data'
-        },
-        {
-            id: 'team',
-            label: 'Team',
-            icon: Users,
-            status: 'pending',
-            meta: 'Access & Logs'
-        }
-    ];
+    // One derivation for every step's state, from facts rather than from
+    // whether a sibling step happens to have produced something.
+    const stepStates = deriveStates({
+        totalImages: stats?.total_images || 0,
+        annotatedImages: stats?.annotated_images || 0,
+        versionCount,
+        completedJobs: completedJobs.length,
+        runningJobs: runningJobs.length,
+        failedJobs: failedJobs.length,
+        monitoringTotal,
+    });
 
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-black text-white font-sans">
@@ -285,7 +213,7 @@ export default function ProjectPage() {
                         </h1>
                         <Badge variant="outline" className="text-[10px]">{dataset.type || "DETECTION"}</Badge>
                         <span className="text-[10px] font-mono text-gray-500 ml-4 hidden md:inline">
-                            V_COUNT: {stats?.total_images || 0} {"//"} C_COUNT: {dataset.classes?.length || 0}
+                            {stats?.total_images || 0} images {"·"} {dataset.classes?.length || 0} classes
                         </span>
                     </div>
                 </div>
@@ -293,51 +221,39 @@ export default function ProjectPage() {
                 <div className="flex items-center gap-3">
                     {isTraining && (
                         <div 
-                            className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono font-bold uppercase tracking-widest cursor-pointer hover:bg-amber-500/20 transition-colors"
+                            className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium cursor-pointer hover:bg-amber-500/20 transition-colors"
                             onClick={() => handleTabChange('versions')}
                             title="Click to view training progress"
                         >
                             <span className="w-1.5 h-1.5 bg-amber-400 animate-pulse" />
-                            SYS.TRAINING [{Math.round(runningJobs[0]?.progress || 0)}%]
+                            Training {Math.round(runningJobs[0]?.progress || 0)}%
                         </div>
                     )}
                     {failedJobs.length > 0 && !isTraining && !hasModels && (
-                        <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/30 text-red-400 text-[10px] font-mono font-bold uppercase tracking-widest">
-                            SYS.ERR [TRAIN_FAIL]
+                        <div className="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium">
+                            Training failed
                         </div>
                     )}
                     <Button size="sm" onClick={() => router.push(`/annotate?dataset=${dataset.id}`)}>
-                        ANNOTATE
+                        Open annotator
                     </Button>
                 </div>
             </header>
 
 
 
-            <WizardBanner pipelineStages={pipelineStages} activeTab={activeTab} onNavigate={handleTabChange} />
+            <NextStepRail stepStates={stepStates} activeTab={activeTab} onNavigate={handleTabChange} />
 
             {/* Tabs Navigation similar to Roboflow */}
             <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col min-h-0">
-                <div className="border-b border-border bg-muted/5 px-6 hidden">
-                    <TabsList className="h-12 bg-transparent p-0 gap-6">
-                        <TabTrigger value="overview" icon={Grid}>Overview</TabTrigger>
-                        <TabTrigger value="upload" icon={Upload}>Upload</TabTrigger>
-                        <TabTrigger value="annotate" icon={Image}>Annotate</TabTrigger>
-                        <TabTrigger value="generate" icon={Layers}>Generate</TabTrigger>
-                        <TabTrigger value="train" icon={Cpu}>Train</TabTrigger>
-                        <TabTrigger value="versions" icon={Layers}>Registry</TabTrigger>
-                        <TabTrigger value="deploy" icon={Code}>Deploy</TabTrigger>
-                    </TabsList>
-                </div>
-
                 {isTraining && (
-                    <div className="px-6 py-3 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest">
+                    <div className="px-6 py-3 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between text-sm">
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-2 text-amber-400 font-bold">
                                 <Cpu className="w-4 h-4 animate-pulse" />
-                                <span>SYS.TRAINING_ACTIVE</span>
+                                <span>Training in progress</span>
                             </div>
-                            <span className="text-amber-500/50 hidden md:inline">{"// BACKGROUND_PROCESS_RUNNING"}</span>
+                            <span className="text-amber-500/70 hidden md:inline">It keeps running if you leave this tab.</span>
                         </div>
                         <Button
                             variant="outline"
@@ -345,28 +261,28 @@ export default function ProjectPage() {
                             onClick={() => handleTabChange('versions')}
                             className="border-amber-500/30 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
                         >
-                            [ VIEW_LOGS ]
+                            View progress
                         </Button>
                     </div>
                 )}
 
                 {completionBanner && (
-                    <div className="px-6 py-3 bg-emerald-500/10 border-b border-emerald-500/30 flex items-center justify-between font-mono text-[10px] uppercase tracking-widest">
+                    <div className="px-6 py-3 bg-emerald-500/10 border-b border-emerald-500/30 flex items-center justify-between text-sm">
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-2 text-emerald-400 font-bold">
                                 <CheckCircle className="w-4 h-4 shrink-0" />
-                                <span>SYS.TRAINING_COMPLETE</span>
+                                <span>Training complete</span>
                             </div>
                             {completionBanner.mAP !== null && (
-                                <span className="text-emerald-500/70 hidden md:inline">{"// MAP50_SCORE:"} {(completionBanner.mAP * 100).toFixed(1)}%</span>
+                                <span className="text-emerald-500/70 hidden md:inline">mAP50 {(completionBanner.mAP * 100).toFixed(1)}%</span>
                             )}
                         </div>
                         <div className="flex items-center gap-2">
                             <Button size="sm" variant="outline" className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" onClick={() => { setCompletionBanner(null); handleTabChange('test'); }}>
-                                [ RUN_TEST ]
+                                Test it
                             </Button>
                             <Button size="sm" className="bg-emerald-500 text-black hover:bg-emerald-400" onClick={() => { setCompletionBanner(null); handleTabChange('deploy'); }}>
-                                [ DEPLOY_MODEL ]
+                                Deploy
                             </Button>
                             <Button size="icon" aria-label="Dismiss notification" variant="ghost" className="w-8 h-8 rounded-none border border-transparent hover:border-emerald-500/50 text-emerald-500" onClick={() => setCompletionBanner(null)}>
                                 <X className="w-4 h-4" />
@@ -398,7 +314,7 @@ export default function ProjectPage() {
                         </TabsContent>
 
                         <TabsContent value="generate" className="mt-0 h-full">
-                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); setVersionRefreshKey(k => k + 1); handleTabChange('train'); }} />
+                            <ProjectGenerate dataset={dataset} stats={stats} onGenerate={() => { fetchStats(dataset.id); fetchVersionCount(dataset.id); setVersionRefreshKey(k => k + 1); handleTabChange('train'); }} />
                         </TabsContent>
 
                         <TabsContent value="versions" className="mt-0 h-full">
@@ -432,17 +348,5 @@ export default function ProjectPage() {
                 </div>
             </Tabs>
         </div>
-    );
-}
-
-function TabTrigger({ value, icon: Icon, children }) {
-    return (
-        <TabsTrigger
-            value={value}
-            className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-full px-2 text-muted-foreground data-[state=active]:text-foreground transition-all gap-2"
-        >
-            <Icon />
-            {children}
-        </TabsTrigger>
     );
 }

@@ -136,7 +136,7 @@ export default function DashboardStats({ onNavigate }) {
             </div>
             <Button
               className="w-full bg-violet-500 hover:bg-violet-400 text-black border-0 shadow-none"
-              onClick={() => onNavigate && onNavigate("inference")}
+              onClick={() => onNavigate && onNavigate("test")}
             >
               [ EXECUTE_DETECTION ]
               <ArrowRight className="ml-2 w-4 h-4" />

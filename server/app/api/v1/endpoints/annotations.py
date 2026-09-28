@@ -290,12 +290,16 @@ async def get_dataset(
     if not db_dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
+    role = require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
 
     # Sync with memory
     datasets_db[dataset_id] = db_dataset
 
-    return db_dataset
+    # The client needs the caller's own role to decide what to offer them. It
+    # had no way to ask, so it showed every collaborator the admin-only steps
+    # and let the server turn the click into a 403. require_role already
+    # resolved this, so reporting it costs no extra query.
+    return {**db_dataset, "your_role": role}
 
 
 @router.get("/datasets/{dataset_id}/unannotated-images")

@@ -3,10 +3,12 @@
 import { useAuth } from "@/context/AuthContext";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
-import { Database, Image, Settings, BarChart2, Cpu, Layers, Code, Grid, Home, Upload, Zap } from "lucide-react";
+import { Home } from "lucide-react";
 import Link from "next/link";
 import { Toaster } from 'sonner';
 import { cn } from "@/lib/utils";
+import { navGroups, visibleSteps } from "@/lib/pipeline";
+import { API_ENDPOINTS } from "@/lib/config";
 
 function GridBackground() {
   return (
@@ -17,10 +19,28 @@ function GridBackground() {
 }
 
 export default function ProjectLayout({ children }) {
-    const { user, loading, hasPermission } = useAuth();
+    const { user, token, loading, hasPermission } = useAuth();
     const router = useRouter();
     const params = useParams();
     const searchParams = useSearchParams();
+    const currentTab = searchParams.get('tab');
+    const [role, setRole] = useState(null);
+
+    // The per-project role decides which steps are worth offering. hasPermission
+    // above reads the global account permissions, which say nothing about this
+    // project — so until now an invited annotator was shown Train and Deploy
+    // and found out by collecting a 403.
+    useEffect(() => {
+        if (!params.id || !token) return;
+        let cancelled = false;
+        fetch(API_ENDPOINTS.DATASETS.GET(params.id), {
+            headers: { Authorization: `Bearer ${token}` },
+        })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (!cancelled && d) setRole(d.your_role || null); })
+            .catch(() => { /* fall back to showing everything */ });
+        return () => { cancelled = true; };
+    }, [params.id, token]);
 
     useEffect(() => {
         if (!loading) {
@@ -34,8 +54,8 @@ export default function ProjectLayout({ children }) {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-black flex items-center justify-center font-mono text-violet-500 uppercase text-xs">
-                [ SYS_INIT... ]
+            <div className="min-h-screen bg-black flex items-center justify-center text-violet-400 text-sm">
+                Loading project…
             </div>
         );
     }
@@ -56,21 +76,27 @@ export default function ProjectLayout({ children }) {
                 </div>
 
                 <nav className="flex-1 py-4 px-2 md:px-3 space-y-2 overflow-y-auto">
-                    <SidebarItem icon={Home} label="OVERVIEW" href="/dashboard" />
+                    <SidebarItem icon={Home} label="DASHBOARD" href="/dashboard" />
 
-                    {params.id && (
-                        <>
+                    {params.id && navGroups(visibleSteps(role)).map(({ phase, steps }, i) => (
+                        <div key={phase.id} className="space-y-1">
                             <div className="pt-4 pb-2 px-2 hidden md:block text-[10px] font-mono text-gray-500 uppercase tracking-widest">
-                                MODULE // PROJECT
+                                {phase.ambient ? phase.label : `${i + 1} // ${phase.label}`}
                             </div>
-                            <SidebarItem icon={Grid} label="OVERVIEW" href={`/project/${params.id}?tab=overview`} active={searchParams.get('tab') === 'overview' || !searchParams.get('tab')} />
-                            <SidebarItem icon={Upload} label="INGEST" href={`/project/${params.id}?tab=upload`} active={searchParams.get('tab') === 'upload'} />
-                            <SidebarItem icon={Image} label="ANNOTATE" href={`/project/${params.id}?tab=annotate`} active={searchParams.get('tab') === 'annotate'} />
-                            <SidebarItem icon={Layers} label="GENERATE" href={`/project/${params.id}?tab=generate`} active={searchParams.get('tab') === 'generate'} />
-                            <SidebarItem icon={Cpu} label="TRAIN" href={`/project/${params.id}?tab=train`} active={searchParams.get('tab') === 'train'} />
-                            <SidebarItem icon={Code} label="DEPLOY" href={`/project/${params.id}?tab=deploy`} active={searchParams.get('tab') === 'deploy'} />
-                        </>
-                    )}
+                            {steps.map((step) => (
+                                <SidebarItem
+                                    key={step.id}
+                                    icon={step.icon}
+                                    label={step.label}
+                                    href={`/project/${params.id}?tab=${step.id}`}
+                                    active={
+                                        currentTab === step.id ||
+                                        (step.id === "overview" && !currentTab)
+                                    }
+                                />
+                            ))}
+                        </div>
+                    ))}
                 </nav>
 
                 <div className="p-4 border-t border-white/20 bg-black/40">
@@ -100,7 +126,9 @@ function SidebarItem({ icon: Icon, label, href, active }) {
         <Link
             href={href}
             className={cn(
-                "flex items-center gap-3 px-3 py-3 transition-colors duration-200 text-xs font-mono border border-transparent",
+                // py-2 rather than py-3: the nav now carries all twelve steps
+                // plus phase headings, and has to fit without scrolling.
+                "flex items-center gap-3 px-3 py-2 transition-colors duration-200 text-xs font-mono border border-transparent",
                 active
                     ? "bg-violet-500/10 text-violet-400 border-violet-500/30 shadow-[inset_2px_0_0_0_#8b5cf6]"
                     : "text-gray-500 hover:text-white hover:border-white/10"
