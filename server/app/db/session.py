@@ -282,7 +282,6 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'users' ready")
-        migrate_users_otp_columns(connection)
         
         # Pending registrations table
         cursor.execute("""
@@ -299,6 +298,7 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'pending_registrations' ready")
+        migrate_users_otp_columns(connection)
         
         # API Keys table
         cursor.execute("""
