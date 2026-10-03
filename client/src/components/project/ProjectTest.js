@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { API_ENDPOINTS } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import LiveInference from "@/components/project/LiveInference";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -40,6 +41,7 @@ function StatPill({ label, value, color = "indigo" }) {
 export default function ProjectTest({ dataset }) {
   const { token } = useAuth();
   const [models, setModels]               = useState([]);
+  const [liveRuns, setLiveRuns]           = useState([]);
   const [selectedModel, setSelectedModel] = useState(null);
   const [modelOpen, setModelOpen]         = useState(false);
   const [testImages, setTestImages]       = useState([]);
@@ -91,14 +93,19 @@ export default function ProjectTest({ dataset }) {
       let datasetJobIds = new Set();
       if (jobsRes.ok) {
         const jobsData = await jobsRes.json();
+        const runs = [];
         (jobsData.jobs || []).forEach(j => {
           if (
             j.dataset_id === dataset.id &&
             (j.status === "completed" || j.status === "success" || j.status === "cancelled")
           ) {
             datasetJobIds.add(`job_${j.job_id}`);
+            // Live inference addresses a run by its job id, not by the
+            // `job_<id>` model name the registry uses.
+            runs.push({ id: j.job_id, model_name: j.model_name });
           }
         });
+        setLiveRuns(runs);
       }
 
       const datasetModels = datasetJobIds.size > 0
@@ -715,6 +722,12 @@ export default function ProjectTest({ dataset }) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Live camera: the other half of "test the model" — a still image
+            tells you if it works, a live feed tells you if it is usable. */}
+        <div className="mt-6">
+          <LiveInference dataset={dataset} jobs={liveRuns} />
         </div>
       </div>
     </div>

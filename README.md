@@ -31,6 +31,9 @@ backends behind one workflow.
   scene, and can retrain automatically once enough new annotations land
 - **Assistant**: An in-app assistant that reads your projects — labelling
   progress, dataset health, how a run scored and where it goes wrong
+- **Live inference**: Point a webcam at the model over a WebSocket and watch
+  it predict in real time, with latest-frame-wins so a slow model drops frames
+  instead of falling behind
 - **Monitoring**: Inference logging and drift detection per project
 - **Collaboration**: Per-project roles (admin / annotator / viewer), email
   invitations and an activity log
@@ -126,7 +129,8 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
    positives and misses by kind, read the confidence sweep, and diff two runs
    per class
 8. **Registry** — every version and run, with its metrics
-9. **Test** — run the trained model against new images or a webcam
+9. **Test** — run the trained model against uploaded images, or stream your
+   webcam to it and see live boxes with a real frames-per-second figure
 10. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
     through the API with an API key
 11. **Active Learning** — review low-confidence predictions; optionally retrain
@@ -151,7 +155,8 @@ NebulaML/
 │   │   ├── api/v1/endpoints/   # auth, annotations, training, inference,
 │   │   │                       # models, active_learning, monitoring,
 │   │   │                       # collaboration, smart_annotation, video,
-│   │   │                       # chat, search, evaluation, label_audit
+│   │   │                       # chat, search, evaluation, label_audit,
+│   │                       # stream
 │   │   ├── core/               # config, rbac, access, logging, email, headers
 │   │   ├── db/session.py       # schema, migrations, connection pool
 │   │   └── services/           # trainers, inference, dataset analysis,
@@ -192,6 +197,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/search` | Semantic/visual search, embedding duplicates, clusters |
 | `/api/evaluation` | Evaluate a run, browse per-image errors, compare runs |
 | `/api/label-audit` | Flag suspect annotations, review queue, resolve findings |
+| `/api/stream` | `ws://…/live` — live inference over a WebSocket |
 
 A few of the most used:
 

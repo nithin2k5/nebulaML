@@ -25,7 +25,7 @@ if platform.system() == "Darwin":
         except OSError:
             pass
 
-from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration, chat, search, evaluation, label_audit
+from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration, chat, search, evaluation, label_audit, stream
 from app.db.session import initialize_database
 from app.core.config import settings
 from app.core.logging import logger
@@ -91,6 +91,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(search.router, prefix="/api/search", tags=["Semantic Search"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
 app.include_router(label_audit.router, prefix="/api/label-audit", tags=["Label Audit"])
+app.include_router(stream.router, prefix="/api/stream", tags=["Live Inference"])
 
 @app.get("/")
 async def root():
