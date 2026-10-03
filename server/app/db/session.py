@@ -702,6 +702,35 @@ def create_tables():
         """)
         logger.info("✓ Table 'evaluation_images' ready")
 
+        # Label-audit findings
+        #
+        # Annotations a confident model disagrees with. One row per finding
+        # rather than per image, because the review unit is a single suspect
+        # box; `status` tracks what a reviewer decided so a re-run does not
+        # resurface something already judged fine.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS label_audit_findings (
+                id VARCHAR(255) PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                job_id VARCHAR(255),
+                image_id VARCHAR(255) NOT NULL,
+                filename VARCHAR(255),
+                kind VARCHAR(40) NOT NULL,
+                severity INT DEFAULT 0,
+                confidence FLOAT NULL,
+                labelled_class VARCHAR(255),
+                predicted_class VARCHAR(255),
+                detail JSON,
+                status ENUM('open', 'fixed', 'dismissed') DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                INDEX idx_audit_dataset (dataset_id, status),
+                INDEX idx_audit_queue (dataset_id, status, severity, confidence),
+                INDEX idx_audit_image (dataset_id, image_id)
+            )
+        """)
+        logger.info("✓ Table 'label_audit_findings' ready")
+
         connection.commit()
         cursor.close()
 

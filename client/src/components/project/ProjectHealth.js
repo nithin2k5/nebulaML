@@ -12,6 +12,7 @@ import {
     BarChart, AlertOctagon, RotateCcw, RefreshCw, TrendingUp, Eye, Layers
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import LabelAuditPanel from "@/components/project/LabelAuditPanel";
 
 export default function ProjectHealth({ params }) {
     const { token } = useAuth();
@@ -291,6 +292,10 @@ export default function ProjectHealth({ params }) {
                         </Alert>
                     )}
 
+                    {/* Label audit lives in Health: it is a data-quality
+                        check, not a model metric — the model is only the
+                        instrument. */}
+
                     {clustersError && !clusters && (
                         <Alert className="bg-white/[0.02] border-white/10">
                             <Layers className="h-4 w-4 text-gray-400" />
@@ -453,6 +458,8 @@ export default function ProjectHealth({ params }) {
                     </div>
                 </>
             )}
+
+            <LabelAuditPanel datasetId={params.id} />
         </div>
     );
 }

@@ -100,6 +100,14 @@ export const API_ENDPOINTS = {
         APPROVE: `${API_BASE_URL}/api/active-learning/approve`,
         REJECT: `${API_BASE_URL}/api/active-learning/reject`,
     },
+    LABEL_AUDIT: {
+        RUN: `${API_BASE_URL}/api/label-audit/run`,
+        STATUS: (auditId) => `${API_BASE_URL}/api/label-audit/status/${auditId}`,
+        FINDINGS: (datasetId, params = '') =>
+            `${API_BASE_URL}/api/label-audit/findings/${datasetId}${params}`,
+        SUMMARY: (datasetId) => `${API_BASE_URL}/api/label-audit/summary/${datasetId}`,
+        RESOLVE: (datasetId) => `${API_BASE_URL}/api/label-audit/resolve/${datasetId}`,
+    },
     EVALUATION: {
         RUN: `${API_BASE_URL}/api/evaluation/run`,
         STATUS: (evaluationId) => `${API_BASE_URL}/api/evaluation/status/${evaluationId}`,

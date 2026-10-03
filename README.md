@@ -23,6 +23,9 @@ backends behind one workflow.
 - **Evaluation**: Score a run against a held-out split and browse its mistakes
   by kind (hallucinated, wrong class, loose box, duplicate, missed), with a
   confidence sweep and per-class diffs between runs
+- **Label audit**: Uses a trained model to proofread the labels it was trained
+  on — flagging wrong classes, missing boxes, empty boxes and loose extents,
+  as a review queue with durable dismissals
 - **Active learning**: Surfaces low-confidence predictions for review, spread
   across embedding clusters so a review batch is not forty frames of one
   scene, and can retrain automatically once enough new annotations land
@@ -113,7 +116,8 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
    correct the results; `propagate` copies boxes across images, rescaled to
    each target's dimensions
 4. **Health** — class balance, duplicates, blur and corruption, scored and
-   tracked across snapshots
+   tracked across snapshots; embedding coverage gaps; and a label audit that
+   flags annotations a trained model confidently disagrees with
 5. **Generate** — freeze a version with its own preprocessing and augmentation
    settings; training always runs against a version, not the live dataset
 6. **Train** — pick a backend and version, run preflight, start the job.
@@ -147,12 +151,13 @@ NebulaML/
 │   │   ├── api/v1/endpoints/   # auth, annotations, training, inference,
 │   │   │                       # models, active_learning, monitoring,
 │   │   │                       # collaboration, smart_annotation, video,
-│   │   │                       # chat, search, evaluation
+│   │   │                       # chat, search, evaluation, label_audit
 │   │   ├── core/               # config, rbac, access, logging, email, headers
 │   │   ├── db/session.py       # schema, migrations, connection pool
 │   │   └── services/           # trainers, inference, dataset analysis,
 │   │                           # versioning, export, model registry,
-│   │                           # embeddings, error_analysis, assistant_tools
+│   │                           # embeddings, error_analysis,
+│   │                           # assistant_tools, label_audit
 │   ├── scripts/
 │   ├── main.py
 │   └── requirements.txt
@@ -186,6 +191,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/chat` | In-app assistant (Claude, with read-only project tools) |
 | `/api/search` | Semantic/visual search, embedding duplicates, clusters |
 | `/api/evaluation` | Evaluate a run, browse per-image errors, compare runs |
+| `/api/label-audit` | Flag suspect annotations, review queue, resolve findings |
 
 A few of the most used:
 
