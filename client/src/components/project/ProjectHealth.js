@@ -20,6 +20,10 @@ export default function ProjectHealth({ params }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isPolling, setIsPolling] = useState(false);
+    // Embedding-space coverage. Separate from the main analysis because it
+    // depends on the search index, which a project may simply not have built.
+    const [clusters, setClusters] = useState(null);
+    const [clustersError, setClustersError] = useState(null);
 
     const fetchAnalysis = async (forceRefresh = false) => {
         if (!analysis && !isPolling) setLoading(true);
@@ -61,8 +65,27 @@ export default function ProjectHealth({ params }) {
         }
     };
 
+    const fetchClusters = async () => {
+        setClustersError(null);
+        try {
+            const res = await fetch(API_ENDPOINTS.SEARCH.CLUSTERS(params.id, 8), {
+                headers: { "Authorization": `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                // 409 just means "no index yet", which is a prompt, not a failure.
+                setClustersError(data.detail || "Coverage analysis unavailable");
+                return;
+            }
+            setClusters(data);
+        } catch (e) {
+            setClustersError("Coverage analysis unavailable");
+        }
+    };
+
     useEffect(() => {
         fetchAnalysis();
+        fetchClusters();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [params.id]);
 
@@ -246,6 +269,37 @@ export default function ProjectHealth({ params }) {
                             <AlertTitle className="text-orange-400">Near-Duplicate Images</AlertTitle>
                             <AlertDescription className="text-orange-200/80">
                                 {nearDups.length} visually similar pair{nearDups.length !== 1 ? "s" : ""} detected (perceptual hash distance ≤ 10). Consider deduplication.
+                            </AlertDescription>
+                        </Alert>
+                    )}
+
+                    {clusters?.coverage_gaps?.length > 0 && (
+                        <Alert className="bg-violet-950/20 border-violet-900/50">
+                            <Layers className="h-4 w-4 text-violet-400" />
+                            <AlertTitle className="text-violet-300">
+                                Annotation Coverage Gaps
+                            </AlertTitle>
+                            <AlertDescription className="text-violet-200/80 space-y-1">
+                                <p className="text-xs opacity-80">
+                                    Groups of visually similar images that are mostly
+                                    unlabelled. A per-class histogram cannot see these.
+                                </p>
+                                {clusters.coverage_gaps.slice(0, 5).map((gap) => (
+                                    <div key={gap.cluster}>• {gap.message}</div>
+                                ))}
+                            </AlertDescription>
+                        </Alert>
+                    )}
+
+                    {clustersError && !clusters && (
+                        <Alert className="bg-white/[0.02] border-white/10">
+                            <Layers className="h-4 w-4 text-gray-400" />
+                            <AlertTitle className="text-gray-300">
+                                Coverage Analysis Unavailable
+                            </AlertTitle>
+                            <AlertDescription className="text-gray-400/80">
+                                {clustersError} Build the search index from the Images tab
+                                to group this dataset by visual similarity.
                             </AlertDescription>
                         </Alert>
                     )}

@@ -100,6 +100,18 @@ export const API_ENDPOINTS = {
         APPROVE: `${API_BASE_URL}/api/active-learning/approve`,
         REJECT: `${API_BASE_URL}/api/active-learning/reject`,
     },
+    SEARCH: {
+        BUILD_INDEX: (datasetId, force = false) =>
+            `${API_BASE_URL}/api/search/index/${datasetId}${force ? '?force=true' : ''}`,
+        INDEX_STATUS: (jobId) => `${API_BASE_URL}/api/search/index-status/${jobId}`,
+        COVERAGE: (datasetId) => `${API_BASE_URL}/api/search/status/${datasetId}`,
+        TEXT: `${API_BASE_URL}/api/search/text`,
+        SIMILAR: `${API_BASE_URL}/api/search/similar`,
+        DUPLICATES: (datasetId, threshold = 0.95) =>
+            `${API_BASE_URL}/api/search/duplicates/${datasetId}?threshold=${threshold}`,
+        CLUSTERS: (datasetId, clusters = 8) =>
+            `${API_BASE_URL}/api/search/clusters/${datasetId}?clusters=${clusters}`,
+    },
     MONITORING: {
         LOG: `${API_BASE_URL}/api/monitoring/log`,
         STATS: (datasetId) => `${API_BASE_URL}/api/monitoring/stats/${datasetId}`,

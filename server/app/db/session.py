@@ -615,6 +615,29 @@ def create_tables():
         logger.info("✓ Table 'auto_retrain_configs' ready")
         migrate_auto_retrain_configs(connection)
 
+        # Image embeddings table
+        #
+        # One CLIP vector per image, stored as a raw float32 BLOB rather than
+        # JSON: 512 floats are 2KB packed and roughly 10KB as JSON text, and
+        # the whole dataset gets read on every search. `model` and `dim` are
+        # recorded so vectors from a previous model are detectable instead of
+        # being silently mixed into the same similarity space.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS image_embeddings (
+                image_id VARCHAR(255) PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                model VARCHAR(255) NOT NULL,
+                dim INT NOT NULL,
+                vector BLOB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                FOREIGN KEY (image_id) REFERENCES dataset_images(id) ON DELETE CASCADE,
+                INDEX idx_embedding_dataset (dataset_id),
+                INDEX idx_embedding_model (dataset_id, model)
+            )
+        """)
+        logger.info("✓ Table 'image_embeddings' ready")
+
         connection.commit()
         cursor.close()
 
