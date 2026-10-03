@@ -8,6 +8,7 @@ import {
     Image as ImageIcon,
     Layers,
     LayoutDashboard,
+    Microscope,
     Package,
     TestTube2,
     Upload,
@@ -124,6 +125,18 @@ export const STEPS = [
         requires: ["generate"],
         minRole: "admin",
         blurb: "Run a backend against a frozen version and stream metrics.",
+    },
+    {
+        // Reading a run is a separate act from making one: Train reports a
+        // number, Evaluate says which images are wrong and how.
+        id: "evaluate",
+        label: "Evaluate",
+        phase: "build",
+        icon: Microscope,
+        requires: ["train"],
+        minRole: "admin",
+        advisory: true,
+        blurb: "Browse a model's false positives and misses, and compare runs.",
     },
     {
         // Registry holds what training produces, so it follows Train. The old
@@ -356,6 +369,15 @@ export function deriveStates(facts = {}) {
     } else {
         set("train", STATE.READY, "Pick a backend and version, then run preflight.");
     }
+
+    set(
+        "evaluate",
+        hasModel ? STATE.READY : STATE.LOCKED,
+        hasModel
+            ? "Score a run against a held-out split and inspect its mistakes."
+            : "Needs a trained model.",
+        hasModel ? null : "train"
+    );
 
     set(
         "versions",

@@ -8,7 +8,7 @@ flags uncertain images for human review, and supports re-training loops.
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import uuid
 import json
 import logging
@@ -33,6 +33,14 @@ class CollectRequest(BaseModel):
     model_job_id: str
     confidence_threshold: float = 0.5
     max_images: int = 50
+    # "diversity" clusters the uncertain pool in embedding space and takes the
+    # most uncertain image from each cluster; "uncertainty" keeps the original
+    # behaviour of taking whatever scores lowest. Diversity is the default
+    # because pure uncertainty sampling tends to return many near-identical
+    # frames of one hard scene — all correctly flagged, all redundant to review.
+    # It falls back to uncertainty automatically when the dataset has no
+    # embeddings, so no client has to check first.
+    sampling: str = "diversity"
 
 
 class ApproveRequest(BaseModel):
@@ -140,7 +148,70 @@ def _remove_uncertain_images(dataset_id: str, image_ids: set) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-def _collect_task(dataset_id: str, model_job_id: str, confidence_threshold: float, max_images: int):
+def _apply_diversity(
+    dataset_id: str, candidates: List[Dict], max_images: int
+) -> Tuple[List[Dict], str]:
+    """
+    Narrow an over-collected uncertain pool to a visually spread-out subset.
+
+    Returns (selected, strategy_actually_used). Any reason the embedding path
+    cannot run — no index, numpy missing, a short pool — degrades to plain
+    uncertainty ranking rather than failing the collection, because a reviewer
+    waiting on a scan would rather have redundant images than none.
+    """
+    by_uncertainty = sorted(candidates, key=lambda c: c.get("min_confidence", 0.0))
+
+    if len(candidates) <= max_images:
+        return by_uncertainty[:max_images], "uncertainty"
+
+    try:
+        from app.api.v1.endpoints.search import _load_dataset_vectors
+        from app.services import embeddings
+
+        if not embeddings.is_available():
+            return by_uncertainty[:max_images], "uncertainty"
+
+        indexed_ids, matrix = _load_dataset_vectors(dataset_id)
+        if matrix is None:
+            return by_uncertainty[:max_images], "uncertainty"
+
+        # Restrict the index to the candidate pool, keeping ids and rows aligned.
+        position = {image_id: i for i, image_id in enumerate(indexed_ids)}
+        rows, pool_ids, priority = [], [], []
+        for candidate in candidates:
+            i = position.get(candidate["image_id"])
+            if i is None:
+                continue
+            rows.append(i)
+            pool_ids.append(candidate["image_id"])
+            # Higher priority = more uncertain, so the cluster winner is the
+            # hardest image in its neighbourhood rather than an arbitrary one.
+            priority.append(1.0 - float(candidate.get("min_confidence", 0.0)))
+
+        # Too little of the pool is indexed for clustering to mean anything.
+        if len(pool_ids) < max_images:
+            return by_uncertainty[:max_images], "uncertainty"
+
+        picked = set(embeddings.diverse_sample(
+            matrix[rows], pool_ids, max_images, priority=priority
+        ))
+        if not picked:
+            return by_uncertainty[:max_images], "uncertainty"
+
+        selected = [c for c in by_uncertainty if c["image_id"] in picked]
+        return selected[:max_images], "diversity"
+    except Exception as e:
+        logger.warning(f"Diversity sampling unavailable, using uncertainty: {e}")
+        return by_uncertainty[:max_images], "uncertainty"
+
+
+def _collect_task(
+    dataset_id: str,
+    model_job_id: str,
+    confidence_threshold: float,
+    max_images: int,
+    sampling: str = "diversity",
+):
     try:
         from app.services.inference import YOLOInference
         from PIL import Image as PILImage
@@ -160,9 +231,16 @@ def _collect_task(dataset_id: str, model_job_id: str, confidence_threshold: floa
         inference = YOLOInference(model_path)
         images = DatasetService.get_dataset_images(dataset_id)
 
+        # Diversity sampling needs more candidates than it will keep, otherwise
+        # there is nothing to choose between. Uncertainty-only stops as soon as
+        # it has enough, which is the cheaper scan it has always been.
+        want_diversity = sampling == "diversity"
+        candidate_cap = max_images * 4 if want_diversity else max_images
+        scan_limit = max_images * 6 if want_diversity else max_images * 3
+
         uncertain = []
-        for img_data in images[: max_images * 3]:
-            if len(uncertain) >= max_images:
+        for img_data in images[:scan_limit]:
+            if len(uncertain) >= candidate_cap:
                 break
 
             img_path = Path(img_data.get("path", ""))
@@ -190,11 +268,20 @@ def _collect_task(dataset_id: str, model_job_id: str, confidence_threshold: floa
             except Exception as e:
                 logger.warning(f"Failed to process image {img_data.get('filename')}: {e}")
 
+        strategy = "uncertainty"
+        if want_diversity:
+            uncertain, strategy = _apply_diversity(dataset_id, uncertain, max_images)
+        else:
+            uncertain = sorted(
+                uncertain, key=lambda c: c.get("min_confidence", 0.0)
+            )[:max_images]
+
         _save_uncertain_batch(dataset_id, uncertain)
-        
+
         active_learning_jobs[dataset_id] = {
             "status": "completed",
-            "uncertain_count": len(uncertain)
+            "uncertain_count": len(uncertain),
+            "sampling": strategy,
         }
     except Exception as e:
         logger.error(f"Active learning collection failed: {e}")
@@ -227,12 +314,19 @@ async def collect_uncertain(
         "status": "processing"
     }
 
+    if request.sampling not in ("diversity", "uncertainty"):
+        raise HTTPException(
+            status_code=400,
+            detail="sampling must be 'diversity' or 'uncertainty'",
+        )
+
     background_tasks.add_task(
         _collect_task,
         request.dataset_id,
         request.model_job_id,
         request.confidence_threshold,
-        request.max_images
+        request.max_images,
+        request.sampling,
     )
 
     return JSONResponse(content={

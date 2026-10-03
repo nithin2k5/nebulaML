@@ -21,6 +21,7 @@ import ProjectAnnotate from "@/components/project/ProjectAnnotate";
 import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
 import ProjectVersions from "@/components/project/ProjectVersions";
+import ProjectEvaluate from "@/components/project/ProjectEvaluate";
 import ProjectTest from "@/components/project/ProjectTest";
 import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth";
@@ -323,6 +324,10 @@ export default function ProjectPage() {
 
                         <TabsContent value="train" className="mt-0 h-full">
                             <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} onDeploy={() => handleTabChange('deploy')} />
+                        </TabsContent>
+
+                        <TabsContent value="evaluate" className="mt-0 h-full">
+                            <ProjectEvaluate dataset={dataset} />
                         </TabsContent>
 
                         <TabsContent value="test" className="mt-0 h-full">
