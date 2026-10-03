@@ -100,6 +100,19 @@ export const API_ENDPOINTS = {
         APPROVE: `${API_BASE_URL}/api/active-learning/approve`,
         REJECT: `${API_BASE_URL}/api/active-learning/reject`,
     },
+    EVALUATION: {
+        RUN: `${API_BASE_URL}/api/evaluation/run`,
+        STATUS: (evaluationId) => `${API_BASE_URL}/api/evaluation/status/${evaluationId}`,
+        LATEST: (jobId) => `${API_BASE_URL}/api/evaluation/latest/${jobId}`,
+        GET: (evaluationId) => `${API_BASE_URL}/api/evaluation/${evaluationId}`,
+        IMAGES: (evaluationId, params = '') =>
+            `${API_BASE_URL}/api/evaluation/${evaluationId}/images${params}`,
+        IMAGE: (evaluationId, imageId) =>
+            `${API_BASE_URL}/api/evaluation/${evaluationId}/image/${imageId}`,
+        COMPARE: (a, b, metric = 'mAP50') =>
+            `${API_BASE_URL}/api/evaluation/compare/${a}/${b}?metric=${metric}`,
+        HISTORY: (jobId) => `${API_BASE_URL}/api/evaluation/job/${jobId}/history`,
+    },
     SEARCH: {
         BUILD_INDEX: (datasetId, force = false) =>
             `${API_BASE_URL}/api/search/index/${datasetId}${force ? '?force=true' : ''}`,

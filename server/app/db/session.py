@@ -638,6 +638,70 @@ def create_tables():
         """)
         logger.info("✓ Table 'image_embeddings' ready")
 
+        # Evaluation runs
+        #
+        # One row per "evaluate this trained model against this split". The
+        # aggregate JSON blobs are small and always read together; the
+        # per-image detail lives in evaluation_images so the error browser can
+        # filter and paginate in SQL rather than loading a whole split.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evaluations (
+                id VARCHAR(255) PRIMARY KEY,
+                job_id VARCHAR(255) NOT NULL,
+                dataset_id VARCHAR(255),
+                split VARCHAR(20) NOT NULL,
+                iou_threshold FLOAT NOT NULL DEFAULT 0.5,
+                conf_threshold FLOAT NOT NULL DEFAULT 0.25,
+                status ENUM('pending', 'running', 'completed', 'failed') DEFAULT 'pending',
+                images_evaluated INT DEFAULT 0,
+                metrics JSON,
+                per_class_metrics JSON,
+                error_kinds JSON,
+                class_confusion JSON,
+                confidence_sweep JSON,
+                best_operating_point JSON,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                INDEX idx_evaluation_job (job_id),
+                INDEX idx_evaluation_dataset (dataset_id),
+                INDEX idx_evaluation_created (created_at)
+            )
+        """)
+        logger.info("✓ Table 'evaluations' ready")
+
+        # Per-image evaluation detail
+        #
+        # The error-kind counts are columns rather than JSON keys so the error
+        # browser can say "show me images with a wrong_class error, worst
+        # precision first" as an indexed query. `details` carries the actual
+        # boxes, read only when one image is opened.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evaluation_images (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                evaluation_id VARCHAR(255) NOT NULL,
+                image_id VARCHAR(255) NOT NULL,
+                filename VARCHAR(255),
+                tp INT DEFAULT 0,
+                fp INT DEFAULT 0,
+                fn INT DEFAULT 0,
+                precision_score FLOAT DEFAULT 0,
+                recall_score FLOAT DEFAULT 0,
+                n_background INT DEFAULT 0,
+                n_wrong_class INT DEFAULT 0,
+                n_poor_localisation INT DEFAULT 0,
+                n_duplicate INT DEFAULT 0,
+                n_missed INT DEFAULT 0,
+                details JSON,
+                FOREIGN KEY (evaluation_id) REFERENCES evaluations(id) ON DELETE CASCADE,
+                UNIQUE KEY unique_evaluation_image (evaluation_id, image_id),
+                INDEX idx_eval_image_eval (evaluation_id),
+                INDEX idx_eval_image_quality (evaluation_id, precision_score),
+                INDEX idx_eval_image_errors (evaluation_id, fp, fn)
+            )
+        """)
+        logger.info("✓ Table 'evaluation_images' ready")
+
         connection.commit()
         cursor.close()
 
