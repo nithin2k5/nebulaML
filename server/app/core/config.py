@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     # Frontend URL (for invites/password resets)
     frontend_url: str = "http://localhost:3000"
 
+    # Claude API, for the in-app assistant. Unset means the assistant falls back
+    # to a small rule-based reply rather than failing the request — a key is not
+    # required to run the platform, and self-hosted deployments may not want to
+    # make outbound calls at all.
+    anthropic_api_key: str = ""
+    assistant_model: str = "claude-opus-5"
+    # Tool-calling rounds one question may take before the loop gives up. Each
+    # round is an API call, so this is the cost ceiling for a single question.
+    assistant_max_tool_rounds: int = 8
+
     # Send Strict-Transport-Security. Off by default: over plain HTTP in local
     # development it pins the browser to https://localhost, which then refuses
     # to connect. Turn it on wherever the API is served over TLS.

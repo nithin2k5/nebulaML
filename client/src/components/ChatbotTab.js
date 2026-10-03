@@ -8,6 +8,23 @@ import { toast } from "sonner";
 import { API_ENDPOINTS } from "@/lib/config";
 import { motion, AnimatePresence } from "framer-motion";
 
+// What the assistant consulted, in words. Showing its work is the difference
+// between an answer the user trusts and one they have to re-verify by hand.
+const TOOL_LABELS = {
+  list_projects: "your projects",
+  get_project_overview: "project stats",
+  get_training_runs: "training runs",
+  get_evaluation: "evaluation results",
+  get_dataset_health: "dataset health",
+  search_images: "image search",
+};
+
+function consultedLine(tools) {
+  if (!tools || tools.length === 0) return null;
+  const seen = [...new Set(tools)].map((t) => TOOL_LABELS[t] || t);
+  return `Looked at ${seen.join(", ")}`;
+}
+
 export default function ChatbotTab() {
   const { token } = useAuth();
   const [messages, setMessages] = useState([]);
@@ -44,13 +61,37 @@ export default function ChatbotTab() {
         body: JSON.stringify({ messages: currentMessages })
       });
 
-      if (!response.ok) throw new Error("Failed to get response");
-      
+      if (!response.ok) {
+        // The server distinguishes a missing key, a rate limit and an
+        // unreachable API; collapsing that into one toast hid the fix.
+        let detail = "Something went wrong reaching the assistant.";
+        try {
+          const body = await response.json();
+          if (body?.detail) detail = body.detail;
+        } catch {
+          // Non-JSON error body; the default stands.
+        }
+        toast.error(detail);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: detail, isError: true },
+        ]);
+        return;
+      }
+
       const data = await response.json();
       setMessages(prev => [...prev, data]);
     } catch (error) {
       console.error("Chat error:", error);
-      toast.error("Failed to communicate with assistant");
+      toast.error("Could not reach the server.");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Could not reach the server. Check your connection and try again.",
+          isError: true,
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -199,11 +240,18 @@ export default function ChatbotTab() {
                     className={cn(
                       "px-6 py-4 rounded-none max-w-[85%] text-[15px] leading-relaxed shadow-none",
                       msg.role === "assistant"
-                        ? "bg-white/[0.03] border border-white/[0.05] text-gray-200 rounded-none backdrop-blur-md"
+                        ? msg.isError
+                          ? "bg-red-950/20 border border-red-900/40 text-red-200 rounded-none backdrop-blur-md"
+                          : "bg-white/[0.03] border border-white/[0.05] text-gray-200 rounded-none backdrop-blur-md"
                         : "   text-white rounded-none shadow-none"
                     )}
                   >
                     <div className="whitespace-pre-wrap">{msg.content}</div>
+                    {consultedLine(msg.tools_used) && (
+                      <div className="mt-3 pt-3 border-t border-white/[0.06] text-xs text-violet-300/60">
+                        {consultedLine(msg.tools_used)}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

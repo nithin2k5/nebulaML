@@ -9,6 +9,23 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
 
+// What the assistant consulted, in words. Showing its work is the difference
+// between an answer the user trusts and one they have to re-verify by hand.
+const TOOL_LABELS = {
+  list_projects: "your projects",
+  get_project_overview: "project stats",
+  get_training_runs: "training runs",
+  get_evaluation: "evaluation results",
+  get_dataset_health: "dataset health",
+  search_images: "image search",
+};
+
+function consultedLine(tools) {
+  if (!tools || tools.length === 0) return null;
+  const seen = [...new Set(tools)].map((t) => TOOL_LABELS[t] || t);
+  return `Looked at ${seen.join(", ")}`;
+}
+
 export default function ChatbotWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
@@ -59,12 +76,35 @@ export default function ChatbotWidget() {
         body: JSON.stringify({ messages: currentMessages })
       });
 
-      if (!response.ok) throw new Error("Failed to get response");
-      
+      if (!response.ok) {
+        // The server distinguishes a missing key, a rate limit and an
+        // unreachable API; swallowing that left the widget looking broken.
+        let detail = "Something went wrong reaching the assistant.";
+        try {
+          const body = await response.json();
+          if (body?.detail) detail = body.detail;
+        } catch {
+          // Non-JSON error body; the default stands.
+        }
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: detail, isError: true },
+        ]);
+        return;
+      }
+
       const data = await response.json();
       setMessages(prev => [...prev, data]);
     } catch (error) {
       console.error("Chat error:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Could not reach the server. Check your connection and try again.",
+          isError: true,
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -137,11 +177,18 @@ export default function ChatbotWidget() {
                     className={cn(
                       "px-4 py-3 rounded-none max-w-[82%] text-[13px] leading-relaxed shadow-none",
                       msg.role === "assistant"
-                        ? "bg-white/[0.03] border border-white/[0.05] text-gray-200 rounded-none"
+                        ? msg.isError
+                          ? "bg-red-950/20 border border-red-900/40 text-red-200 rounded-none"
+                          : "bg-white/[0.03] border border-white/[0.05] text-gray-200 rounded-none"
                         : "   text-white rounded-none shadow-none"
                     )}
                   >
                     <div className="whitespace-pre-wrap">{msg.content}</div>
+                    {consultedLine(msg.tools_used) && (
+                      <div className="mt-2 pt-2 border-t border-white/[0.06] text-[11px] text-violet-300/60">
+                        {consultedLine(msg.tools_used)}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}

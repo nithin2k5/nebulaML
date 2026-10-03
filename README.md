@@ -15,9 +15,19 @@ backends behind one workflow.
 - **Training**: YOLO, RT-DETR and torchvision backends, with preflight checks,
   a job queue, live metrics, confusion matrices and per-class breakdowns
 - **Dataset health**: Class balance, duplicate and near-duplicate detection,
-  blur and corruption checks, scored and tracked over time
-- **Active learning**: Surfaces low-confidence predictions for review and can
-  retrain automatically once enough new annotations land
+  blur and corruption checks, scored and tracked over time, plus
+  embedding-space coverage gaps
+- **Semantic search**: Find images by describing them ("a red truck at night"),
+  find visually similar images, and detect duplicates that perceptual hashing
+  misses — one CLIP index per project
+- **Evaluation**: Score a run against a held-out split and browse its mistakes
+  by kind (hallucinated, wrong class, loose box, duplicate, missed), with a
+  confidence sweep and per-class diffs between runs
+- **Active learning**: Surfaces low-confidence predictions for review, spread
+  across embedding clusters so a review batch is not forty frames of one
+  scene, and can retrain automatically once enough new annotations land
+- **Assistant**: An in-app assistant that reads your projects — labelling
+  progress, dataset health, how a run scored and where it goes wrong
 - **Monitoring**: Inference logging and drift detection per project
 - **Collaboration**: Per-project roles (admin / annotator / viewer), email
   invitations and an activity log
@@ -97,7 +107,8 @@ Work happens inside a **project** (`/project/<id>`), whose tabs follow the
 pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 
 1. **Upload** — drag in images, import a ZIP, or extract frames from a video
-2. **Images** — browse, filter and delete what you uploaded
+2. **Images** — browse, filter and delete what you uploaded, or search it
+   by description once the CLIP index is built
 3. **Annotate** — draw boxes by hand, or auto-label from an existing model and
    correct the results; `propagate` copies boxes across images, rescaled to
    each target's dimensions
@@ -107,14 +118,17 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
    settings; training always runs against a version, not the live dataset
 6. **Train** — pick a backend and version, run preflight, start the job.
    Progress, metrics, confusion matrix and per-class results stream live
-7. **Registry** — every version and run, with its metrics
-8. **Test** — run the trained model against new images or a webcam
-9. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
-   through the API with an API key
-10. **Active Learning** — review low-confidence predictions; optionally retrain
+7. **Evaluate** — score a run against the test split, browse its false
+   positives and misses by kind, read the confidence sweep, and diff two runs
+   per class
+8. **Registry** — every version and run, with its metrics
+9. **Test** — run the trained model against new images or a webcam
+10. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
+    through the API with an API key
+11. **Active Learning** — review low-confidence predictions; optionally retrain
     automatically once enough new annotations accumulate
-11. **Monitoring** — inference volume, confidence distribution and drift
-12. **Team** — invite collaborators as admin, annotator or viewer
+12. **Monitoring** — inference volume, confidence distribution and drift
+13. **Team** — invite collaborators as admin, annotator or viewer
 
 ## 🎨 Theme
 
@@ -132,11 +146,13 @@ NebulaML/
 │   ├── app/
 │   │   ├── api/v1/endpoints/   # auth, annotations, training, inference,
 │   │   │                       # models, active_learning, monitoring,
-│   │   │                       # collaboration, smart_annotation, video, chat
+│   │   │                       # collaboration, smart_annotation, video,
+│   │   │                       # chat, search, evaluation
 │   │   ├── core/               # config, rbac, access, logging, email, headers
 │   │   ├── db/session.py       # schema, migrations, connection pool
 │   │   └── services/           # trainers, inference, dataset analysis,
-│   │                           # versioning, export, model registry
+│   │                           # versioning, export, model registry,
+│   │                           # embeddings, error_analysis, assistant_tools
 │   ├── scripts/
 │   ├── main.py
 │   └── requirements.txt
@@ -167,7 +183,9 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/monitoring` | Inference logging, stats, drift |
 | `/api/datasets` | Project members, invitations, activity log |
 | `/api/video` | Frame extraction |
-| `/api/chat` | In-app assistant |
+| `/api/chat` | In-app assistant (Claude, with read-only project tools) |
+| `/api/search` | Semantic/visual search, embedding duplicates, clusters |
+| `/api/evaluation` | Evaluate a run, browse per-image errors, compare runs |
 
 A few of the most used:
 
@@ -176,6 +194,20 @@ A few of the most used:
 - `GET  /api/training/status/{job_id}` — poll one job
 - `POST /api/training/start-from-dataset` — train from a dataset version
 - `GET  /api/models/export/{model_name}?format=onnx` — export a trained model
+
+## ⚙️ Optional configuration
+
+Both additions below degrade gracefully — the platform runs without either.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | unset | Enables the in-app assistant. Unset, `/api/chat` answers with a short canned reply and says it is unconfigured. |
+| `ASSISTANT_MODEL` | `claude-opus-5` | Model backing the assistant. |
+| `ASSISTANT_MAX_TOOL_ROUNDS` | `8` | Tool-calling rounds one question may take. Each round is an API call, so this is the per-question cost ceiling. |
+
+Semantic search needs no key, but the CLIP weights (~600MB) download on first
+use. With no network, indexing reports the feature as unavailable and the rest
+of the platform is unaffected.
 
 ## 🧪 Development
 
@@ -204,4 +236,4 @@ This project is licensed under the MIT License.
 - FastAPI for the backend framework
 
 ## Last Updated
-- 2026-09-25
+- 2026-10-03
