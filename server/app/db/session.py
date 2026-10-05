@@ -615,6 +615,100 @@ def create_tables():
         logger.info("✓ Table 'auto_retrain_configs' ready")
         migrate_auto_retrain_configs(connection)
 
+        # Evaluation runs table
+        # One row per "score this model against this version's split" request.
+        # Training jobs already report val metrics, but each backend computes
+        # them its own way; an evaluation run re-scores a finished model with
+        # one shared metric path so two runs are actually comparable.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evaluation_runs (
+                id VARCHAR(255) PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                version_id VARCHAR(255) NULL,
+                model_name VARCHAR(255) NOT NULL,
+                job_id VARCHAR(255) NULL,
+                split ENUM('train', 'val', 'test') DEFAULT 'test',
+                status ENUM('pending', 'running', 'completed', 'failed') DEFAULT 'pending',
+                progress INT DEFAULT 0,
+                conf_threshold FLOAT DEFAULT 0.25,
+                iou_threshold FLOAT DEFAULT 0.5,
+                total_images INT DEFAULT 0,
+                gt_count INT DEFAULT 0,
+                pred_count INT DEFAULT 0,
+                metrics JSON,
+                per_class_metrics JSON,
+                confusion_matrix JSON,
+                class_names JSON,
+                error_message TEXT,
+                created_by INT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                FOREIGN KEY (version_id) REFERENCES dataset_versions(id) ON DELETE SET NULL,
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                INDEX idx_eval_dataset_id (dataset_id),
+                INDEX idx_eval_status (status),
+                INDEX idx_eval_created_at (created_at)
+            )
+        """)
+        logger.info("✓ Table 'evaluation_runs' ready")
+
+        # Per-image evaluation summary.
+        # Denormalised counts so the error gallery can rank images by how badly
+        # the model did on them without aggregating the per-box table.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evaluation_images (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                run_id VARCHAR(255) NOT NULL,
+                image_id VARCHAR(255) NULL,
+                filename VARCHAR(255) NOT NULL,
+                path VARCHAR(500),
+                width INT NOT NULL,
+                height INT NOT NULL,
+                tp_count INT DEFAULT 0,
+                fp_count INT DEFAULT 0,
+                fn_count INT DEFAULT 0,
+                gt_count INT DEFAULT 0,
+                pred_count INT DEFAULT 0,
+                error_score FLOAT DEFAULT 0,
+                FOREIGN KEY (run_id) REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+                UNIQUE KEY unique_eval_image (run_id, filename),
+                INDEX idx_eval_img_run (run_id),
+                INDEX idx_eval_img_score (run_id, error_score)
+            )
+        """)
+        logger.info("✓ Table 'evaluation_images' ready")
+
+        # Per-box evaluation detail.
+        # `outcome` is the bookkeeping (tp/fp/fn) and `error_type` is the
+        # diagnosis the failure explorer filters on — a false positive that
+        # overlaps the right object with the wrong label is a different problem
+        # from one invented on empty background.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS evaluation_predictions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                run_id VARCHAR(255) NOT NULL,
+                image_id VARCHAR(255) NULL,
+                filename VARCHAR(255) NOT NULL,
+                outcome ENUM('tp', 'fp', 'fn') NOT NULL,
+                error_type ENUM('correct', 'duplicate', 'wrong_class', 'poor_localization', 'background', 'missed') DEFAULT 'correct',
+                pred_class INT NULL,
+                pred_class_name VARCHAR(255) NULL,
+                gt_class INT NULL,
+                gt_class_name VARCHAR(255) NULL,
+                confidence FLOAT NULL,
+                iou FLOAT NULL,
+                box JSON,
+                gt_box JSON,
+                FOREIGN KEY (run_id) REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+                INDEX idx_eval_pred_run (run_id),
+                INDEX idx_eval_pred_image (run_id, filename),
+                INDEX idx_eval_pred_outcome (run_id, outcome),
+                INDEX idx_eval_pred_error (run_id, error_type)
+            )
+        """)
+        logger.info("✓ Table 'evaluation_predictions' ready")
+
         connection.commit()
         cursor.close()
 

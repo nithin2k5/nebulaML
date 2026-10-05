@@ -78,6 +78,22 @@ _REQUIRED_COLUMNS = {
         "verification_code", "verification_code_expires", "verification_attempts",
     },
     "refresh_tokens": {"jti", "user_id", "expires_at", "revoked_at"},
+    "evaluation_runs": {
+        "id", "dataset_id", "version_id", "model_name", "job_id", "split",
+        "status", "progress", "conf_threshold", "iou_threshold", "total_images",
+        "metrics", "per_class_metrics", "confusion_matrix", "class_names",
+        "error_message", "created_by",
+    },
+    "evaluation_images": {
+        "run_id", "image_id", "filename", "path", "width", "height",
+        "tp_count", "fp_count", "fn_count", "gt_count", "pred_count",
+        "error_score",
+    },
+    "evaluation_predictions": {
+        "run_id", "image_id", "filename", "outcome", "error_type",
+        "pred_class", "pred_class_name", "gt_class", "gt_class_name",
+        "confidence", "iou", "box", "gt_box",
+    },
 }
 
 
