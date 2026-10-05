@@ -16,6 +16,10 @@ backends behind one workflow.
   a job queue, live metrics, confusion matrices and per-class breakdowns
 - **Dataset health**: Class balance, duplicate and near-duplicate detection,
   blur and corruption checks, scored and tracked over time
+- **Evaluation**: Score a finished model against a version's held-out split
+  through one shared metric path, so runs from different backends are
+  comparable; per-class table, confusion matrix, confidence sweep, a per-image
+  failure explorer, and side-by-side run comparison with per-class deltas
 - **Active learning**: Surfaces low-confidence predictions for review and can
   retrain automatically once enough new annotations land
 - **Monitoring**: Inference logging and drift detection per project
@@ -108,13 +112,20 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 6. **Train** — pick a backend and version, run preflight, start the job.
    Progress, metrics, confusion matrix and per-class results stream live
 7. **Registry** — every version and run, with its metrics
-8. **Test** — run the trained model against new images or a webcam
-9. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
-   through the API with an API key
-10. **Active Learning** — review low-confidence predictions; optionally retrain
+8. **Evaluate** — score a finished model against a version's split. mAP is
+   measured across the whole curve; precision, recall and the error breakdown
+   are at the confidence you pick. Shows a per-class table worst-first, a
+   confusion matrix, a confidence sweep for choosing a deployment threshold,
+   and the images the model did worst on with every box diagnosed as a
+   duplicate, a loose box, a wrong label, an invention or a miss. Tick two runs
+   to compare them
+9. **Test** — run the trained model against new images or a webcam
+10. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
+    through the API with an API key
+11. **Active Learning** — review low-confidence predictions; optionally retrain
     automatically once enough new annotations accumulate
-11. **Monitoring** — inference volume, confidence distribution and drift
-12. **Team** — invite collaborators as admin, annotator or viewer
+12. **Monitoring** — inference volume, confidence distribution and drift
+13. **Team** — invite collaborators as admin, annotator or viewer
 
 ## 🎨 Theme
 
@@ -209,4 +220,4 @@ This project is licensed under the MIT License.
 - FastAPI for the backend framework
 
 ## Last Updated
-- 2026-09-25
+- 2026-10-05

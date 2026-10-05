@@ -100,6 +100,27 @@ export const API_ENDPOINTS = {
         APPROVE: `${API_BASE_URL}/api/active-learning/approve`,
         REJECT: `${API_BASE_URL}/api/active-learning/reject`,
     },
+    EVALUATION: {
+        RUN: `${API_BASE_URL}/api/evaluation/run`,
+        RUNS: (datasetId) => `${API_BASE_URL}/api/evaluation/runs/${datasetId}`,
+        GET: (runId) => `${API_BASE_URL}/api/evaluation/run/${runId}`,
+        DELETE: (runId) => `${API_BASE_URL}/api/evaluation/run/${runId}`,
+        SWEEP: (runId) => `${API_BASE_URL}/api/evaluation/run/${runId}/threshold-sweep`,
+        ERRORS: (runId, { errorType, limit = 50, offset = 0 } = {}) => {
+            const query = new URLSearchParams({ limit, offset });
+            if (errorType) query.set("error_type", errorType);
+            return `${API_BASE_URL}/api/evaluation/run/${runId}/errors?${query}`;
+        },
+        IMAGE_DETAIL: (runId, filename) =>
+            `${API_BASE_URL}/api/evaluation/run/${runId}/image/${encodeURIComponent(filename)}`,
+        // Version-snapshot image for the failure explorer. The token rides in
+        // the query string because an <img src> cannot send a header.
+        GET_IMAGE: (runId, filename, token) =>
+            `${API_BASE_URL}/api/evaluation/image/${runId}/${encodeURIComponent(filename)}` +
+            `${token ? `?token=${token}` : ""}`,
+        COMPARE: (runIds) =>
+            `${API_BASE_URL}/api/evaluation/compare?runs=${runIds.join(",")}`,
+    },
     MONITORING: {
         LOG: `${API_BASE_URL}/api/monitoring/log`,
         STATS: (datasetId) => `${API_BASE_URL}/api/monitoring/stats/${datasetId}`,
