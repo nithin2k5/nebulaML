@@ -283,6 +283,7 @@ def _persist_results(
     per_image_rows: List[Tuple],
     class_names: Dict[int, str],
     iou_threshold: float,
+    conf_threshold: float,
 ) -> None:
     """
     Compute the aggregates and write both the summary and the per-image rows.
@@ -294,6 +295,13 @@ def _persist_results(
     summary = evaluate_detections(predictions, targets, class_names)
     per_image_details = [json.loads(row[-1]) for row in per_image_rows]
     sweep = ea.confidence_sweep(predictions, targets, iou_threshold=iou_threshold)
+    matrix = ea.confusion_matrix(
+        predictions,
+        targets,
+        n_classes=len(class_names),
+        iou_threshold=iou_threshold,
+        conf_threshold=conf_threshold,
+    )
 
     if per_image_rows:
         try:
@@ -328,6 +336,7 @@ def _persist_results(
         "per_class_metrics": json.dumps(summary.get("per_class_metrics", [])),
         "error_kinds": json.dumps(ea.aggregate_error_kinds(per_image_details)),
         "class_confusion": json.dumps(ea.class_confusion(per_image_details)),
+        "confusion_matrix": json.dumps(matrix),
         "confidence_sweep": json.dumps(sweep),
         "best_operating_point": json.dumps(ea.best_operating_point(sweep) or {}),
     })
@@ -406,6 +415,7 @@ def _evaluate_task(
             per_image_rows=per_image_rows,
             class_names=class_names,
             iou_threshold=request.iou_threshold,
+            conf_threshold=request.conf_threshold,
         )
 
         mark("completed", evaluation_id=evaluation_id, images_evaluated=len(predictions))
@@ -568,7 +578,8 @@ async def latest_evaluation(job_id: str, current_user: dict = Depends(get_curren
         "job_id": job_id,
         "evaluation": _decode(
             row, "metrics", "per_class_metrics", "error_kinds",
-            "class_confusion", "confidence_sweep", "best_operating_point",
+            "class_confusion", "confusion_matrix", "confidence_sweep",
+            "best_operating_point",
         ),
     }
 
@@ -581,7 +592,8 @@ async def get_evaluation(
     row = _load_evaluation(evaluation_id, current_user)
     return _decode(
         row, "metrics", "per_class_metrics", "error_kinds",
-        "class_confusion", "confidence_sweep", "best_operating_point",
+        "class_confusion", "confusion_matrix", "confidence_sweep",
+        "best_operating_point",
     )
 
 

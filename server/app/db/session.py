@@ -251,6 +251,36 @@ def migrate_auto_retrain_configs(connection) -> None:
         raise
 
 
+def migrate_evaluations(connection) -> None:
+    """Add columns `evaluations` gained after it first shipped.
+
+    CREATE TABLE IF NOT EXISTS does not add columns to a table that already
+    exists, so a deployment that ran the first version of the evaluation
+    workbench has the table without these. Every reader treats them as
+    optional, but the writer names them in an UPDATE, which would fail
+    outright with "Unknown column".
+    """
+    wanted = {
+        "confusion_matrix": "JSON",
+    }
+    try:
+        cur = connection.cursor()
+        cur.execute("SHOW TABLES LIKE 'evaluations'")
+        if not cur.fetchone():
+            cur.close()
+            return
+        for column, ddl in wanted.items():
+            cur.execute(f"SHOW COLUMNS FROM evaluations LIKE '{column}'")
+            if not cur.fetchone():
+                cur.execute(f"ALTER TABLE evaluations ADD COLUMN {column} {ddl}")
+                logger.info(f"Migrated: added evaluations.{column}")
+        connection.commit()
+        cur.close()
+    except Error as e:
+        logger.error(f"migrate_evaluations: {e}")
+        raise
+
+
 def create_tables():
     """Create all required tables"""
     connection = get_db_connection()
@@ -658,6 +688,7 @@ def create_tables():
                 per_class_metrics JSON,
                 error_kinds JSON,
                 class_confusion JSON,
+                confusion_matrix JSON,
                 confidence_sweep JSON,
                 best_operating_point JSON,
                 error_message TEXT,
@@ -669,6 +700,7 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'evaluations' ready")
+        migrate_evaluations(connection)
 
         # Per-image evaluation detail
         #
