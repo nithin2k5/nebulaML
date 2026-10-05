@@ -131,12 +131,14 @@ NebulaML/
 ├── server/
 │   ├── app/
 │   │   ├── api/v1/endpoints/   # auth, annotations, training, inference,
-│   │   │                       # models, active_learning, monitoring,
-│   │   │                       # collaboration, smart_annotation, video, chat
+│   │   │                       # models, evaluation, active_learning,
+│   │   │                       # monitoring, collaboration,
+│   │   │                       # smart_annotation, video, chat
 │   │   ├── core/               # config, rbac, access, logging, email, headers
 │   │   ├── db/session.py       # schema, migrations, connection pool
-│   │   └── services/           # trainers, inference, dataset analysis,
-│   │                           # versioning, export, model registry
+│   │   └── services/           # trainers, inference, evaluation,
+│   │                           # dataset analysis, versioning, export,
+│   │                           # model registry
 │   ├── scripts/
 │   ├── main.py
 │   └── requirements.txt
@@ -164,6 +166,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/models` | List, info, download, export, delete |
 | `/api/smart` | Segment-assisted and zero-shot annotation |
 | `/api/active-learning` | Uncertainty collection, review, approve/reject |
+| `/api/evaluation` | Score a model on a version split, failure explorer, run comparison |
 | `/api/monitoring` | Inference logging, stats, drift |
 | `/api/datasets` | Project members, invitations, activity log |
 | `/api/video` | Frame extraction |
@@ -176,6 +179,8 @@ A few of the most used:
 - `GET  /api/training/status/{job_id}` — poll one job
 - `POST /api/training/start-from-dataset` — train from a dataset version
 - `GET  /api/models/export/{model_name}?format=onnx` — export a trained model
+- `POST /api/evaluation/run` — score a trained model against a version's test split
+- `GET  /api/evaluation/compare?runs=a,b` — compare finished runs, with per-class deltas
 
 ## 🧪 Development
 
