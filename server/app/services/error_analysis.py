@@ -86,6 +86,45 @@ def gt_boxes_to_xyxy(boxes: Sequence[Dict[str, Any]]) -> Dict[str, np.ndarray]:
     }
 
 
+def version_boxes_to_annotations(
+    boxes: Sequence[Dict[str, Any]], width: int, height: int
+) -> List[Dict[str, Any]]:
+    """
+    Convert a version snapshot's boxes into the annotation shape.
+
+    `dataset_version_images.boxes` stores YOLO's normalised centre format —
+    ``{"class_id": int, "bbox_normalized": [cx, cy, w, h]}`` — because that is
+    what the label .txt files beside the images contain. Live annotations are
+    ``{x, y, width, height}`` in absolute pixels.
+
+    Converting to the annotation shape rather than straight to arrays means the
+    snapshot and the live table feed the identical downstream path, so there is
+    one definition of how ground truth becomes metrics instead of two that can
+    drift apart.
+    """
+    converted: List[Dict[str, Any]] = []
+    for box in boxes or []:
+        norm = box.get("bbox_normalized")
+        if not norm or len(norm) < 4:
+            continue
+        try:
+            cx, cy, bw, bh = (float(v) for v in norm[:4])
+        except (TypeError, ValueError):
+            continue
+        pixel_width = bw * width
+        pixel_height = bh * height
+        if pixel_width <= 0 or pixel_height <= 0:
+            continue
+        converted.append({
+            "x": (cx - bw / 2.0) * width,
+            "y": (cy - bh / 2.0) * height,
+            "width": pixel_width,
+            "height": pixel_height,
+            "class_id": int(box.get("class_id", 0)),
+        })
+    return converted
+
+
 def detections_to_arrays(detections: Sequence[Dict[str, Any]]) -> Dict[str, np.ndarray]:
     """Convert inference output (`bbox` xyxy pixels) into metric arrays."""
     xyxy: List[List[float]] = []

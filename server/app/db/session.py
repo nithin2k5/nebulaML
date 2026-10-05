@@ -262,6 +262,7 @@ def migrate_evaluations(connection) -> None:
     """
     wanted = {
         "confusion_matrix": "JSON",
+        "version_id": "VARCHAR(255) NULL",
     }
     try:
         cur = connection.cursor()
@@ -679,6 +680,7 @@ def create_tables():
                 id VARCHAR(255) PRIMARY KEY,
                 job_id VARCHAR(255) NOT NULL,
                 dataset_id VARCHAR(255),
+                version_id VARCHAR(255) NULL,
                 split VARCHAR(20) NOT NULL,
                 iou_threshold FLOAT NOT NULL DEFAULT 0.5,
                 conf_threshold FLOAT NOT NULL DEFAULT 0.25,

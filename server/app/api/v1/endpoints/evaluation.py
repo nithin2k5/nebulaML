@@ -86,6 +86,16 @@ def _prune_finished_jobs(jobs: Dict[str, Dict], keep: int = _FINISHED_JOB_RETENT
 
 class EvaluateRequest(BaseModel):
     job_id: str
+    # Score against a frozen version's snapshot instead of the live dataset.
+    #
+    # The snapshot is what training actually consumed — after preprocessing and
+    # augmentation, with the split already fixed — so it is the only ground
+    # truth that stays put. The live annotations table keeps moving: relabel an
+    # image tomorrow and yesterday's number is no longer reproducible, and it
+    # was never measured on the pixels the model saw either. Left unset, the
+    # live dataset is used, which is the right question when what you want to
+    # know is how the model does on today's labels.
+    version_id: Optional[str] = None
     # Which split to score against. "test" is the honest choice — val was used
     # for early stopping during training, so it is no longer truly held out —
     # but small datasets often have no test split, hence the fallback.
@@ -142,6 +152,88 @@ def _split_images(dataset: Dict, split: str) -> Tuple[List[Dict], str]:
             return chosen, candidate
 
     return [img for img in images if img.get("annotated")], "all-annotated"
+
+
+def _version_dataset_id(version_id: str) -> Optional[str]:
+    """The dataset a version belongs to, or None if there is no such version."""
+    try:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT dataset_id FROM dataset_versions WHERE id = %s", (version_id,)
+            )
+            row = cursor.fetchone()
+            return row["dataset_id"] if row else None
+    except Exception as e:
+        logger.error(f"Could not read version {version_id}: {e}")
+        return None
+
+
+def _snapshot_split(
+    version_id: str, split: str
+) -> Tuple[List[Dict], Dict[str, List[Dict]], str]:
+    """
+    One split of a version snapshot, as (images, annotations, split used).
+
+    Shaped to match `_split_images` plus the live annotations map, so the
+    scoring pass is identical either way. Paths come from the snapshot rows and
+    are absolute, which is why `_score_split` uses them as-is.
+
+    The same test -> val -> everything fallback applies, so a version frozen
+    without a test split still gets an answer and the caller still reports
+    which split the number came from.
+    """
+    try:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT id, original_image_id, filename, path, split, width, height, boxes "
+                "FROM dataset_version_images WHERE version_id = %s ORDER BY filename",
+                (version_id,),
+            )
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Could not read snapshot for version {version_id}: {e}")
+        return [], {}, split
+
+    def rows_for(candidate: str) -> List[Dict]:
+        return [row for row in rows if (row.get("split") or "") == candidate]
+
+    chosen, split_used = [], split
+    for candidate in (split, "val", "valid"):
+        chosen = rows_for(candidate)
+        if chosen:
+            split_used = candidate
+            break
+    if not chosen:
+        chosen, split_used = rows, "all-snapshot"
+
+    images: List[Dict] = []
+    annotations: Dict[str, List[Dict]] = {}
+    for row in chosen:
+        width = int(row.get("width") or 0)
+        height = int(row.get("height") or 0)
+        if width <= 0 or height <= 0:
+            # Normalised boxes cannot be placed without the dimensions.
+            logger.warning(f"Evaluation: snapshot row {row['id']} has no dimensions")
+            continue
+        boxes = row.get("boxes")
+        if isinstance(boxes, (str, bytes)):
+            try:
+                boxes = json.loads(boxes)
+            except (ValueError, TypeError):
+                boxes = []
+        images.append({
+            "id": row["id"],
+            # The original image id, so the client can still deep-link into the
+            # annotator from a snapshot result.
+            "source_image_id": row.get("original_image_id"),
+            "filename": row["filename"],
+            "path": row.get("path"),
+        })
+        annotations[row["id"]] = ea.version_boxes_to_annotations(
+            boxes or [], width, height
+        )
+
+    return images, annotations, split_used
 
 
 def _store_evaluation(evaluation_id: str, fields: Dict[str, Any]) -> None:
@@ -342,6 +434,37 @@ def _persist_results(
     })
 
 
+def _ground_truth_for(
+    request: "EvaluateRequest", dataset: Dict, dataset_id: str
+) -> Tuple[List[Dict], Dict[str, List[Dict]], str]:
+    """
+    Pick the ground truth to score against, snapshot or live.
+
+    Both branches return the same three things, so everything downstream is
+    unaware of which source it got.
+    """
+    if request.version_id:
+        images, annotations, split_used = _snapshot_split(
+            request.version_id, request.split
+        )
+        if not images:
+            raise RuntimeError(
+                "This version's snapshot has no usable images. Generate a "
+                "version with the split you want to score against."
+            )
+        return images, annotations, split_used
+
+    images, split_used = _split_images(dataset, request.split)
+    # Ground truth keyed by image, so a missing annotation is an empty target
+    # rather than a skipped image: a model predicting boxes on an unlabelled
+    # image is making false positives and should be charged for them.
+    annotations = {
+        row["image_id"]: row.get("boxes") or []
+        for row in AnnotationService.get_all_dataset_annotations(dataset_id)
+    }
+    return images, annotations, split_used
+
+
 def _evaluate_task(
     evaluation_id: str,
     job_id: str,
@@ -370,19 +493,13 @@ def _evaluate_task(
             raise RuntimeError("Dataset not found")
 
         class_names = _class_names_for(dataset)
-        images, split_used = _split_images(dataset, request.split)
+
+        images, annotations, split_used = _ground_truth_for(
+            request, dataset, dataset_id
+        )
         images = images[: request.max_images]
         if not images:
             raise RuntimeError("No images in this split to evaluate")
-
-        # Ground truth, keyed by image, so a missing annotation is an empty
-        # target rather than a skipped image: a model predicting boxes on an
-        # unlabelled image is making false positives and should be charged for
-        # them.
-        annotations = {
-            row["image_id"]: row.get("boxes") or []
-            for row in AnnotationService.get_all_dataset_annotations(dataset_id)
-        }
 
         # The backend has to come from the job. Loading every checkpoint with
         # YOLOInference worked only for YOLO runs — an RT-DETR or torchvision
@@ -451,6 +568,18 @@ async def run_evaluation(
         raise HTTPException(status_code=404, detail="Dataset not found")
     require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
 
+    if request.version_id:
+        owner = _version_dataset_id(request.version_id)
+        if owner is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found")
+        if owner != dataset_id:
+            # Otherwise access to one project would let you score a model
+            # against another project's snapshot.
+            raise HTTPException(
+                status_code=400,
+                detail="That version belongs to a different project",
+            )
+
     if _resolve_weights(request.job_id) is None:
         raise HTTPException(
             status_code=409,
@@ -462,12 +591,14 @@ async def run_evaluation(
         with db_cursor(commit=True) as cursor:
             cursor.execute(
                 "INSERT INTO evaluations "
-                "(id, job_id, dataset_id, split, iou_threshold, conf_threshold, status) "
-                "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
+                "(id, job_id, dataset_id, version_id, split, iou_threshold, "
+                " conf_threshold, status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')",
                 (
                     evaluation_id,
                     request.job_id,
                     dataset_id,
+                    request.version_id,
                     request.split,
                     request.iou_threshold,
                     request.conf_threshold,
@@ -793,8 +924,8 @@ async def evaluation_history(
     try:
         with db_cursor(dictionary=True) as cursor:
             cursor.execute(
-                "SELECT id, split, iou_threshold, conf_threshold, status, "
-                "       images_evaluated, metrics, created_at "
+                "SELECT id, version_id, split, iou_threshold, conf_threshold, "
+                "       status, images_evaluated, metrics, created_at "
                 "FROM evaluations WHERE job_id = %s ORDER BY created_at DESC",
                 (job_id,),
             )
