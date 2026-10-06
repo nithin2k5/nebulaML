@@ -93,6 +93,40 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
         fetchVersions();
     }, [dataset.id, token, versionRefreshKey]);
 
+    // The task comes from the versions, not from a separate control: the
+    // label files were already written one way or the other when the version
+    // was frozen, so the version is the thing that decides which models can
+    // train against it.
+    const selectedVersions = versions.filter(v => selectedVersionIds.includes(v.id.toString()));
+    const selectedTasks = [...new Set(selectedVersions.map(v => v.task || "detect"))];
+    const versionTask = selectedTasks.length === 1 ? selectedTasks[0] : null;
+    const mixedTasks = selectedTasks.length > 1;
+    const trainableModels = versionTask
+        ? modelRegistry.filter(m => (m.task || "detect") === versionTask)
+        : modelRegistry;
+
+    // Switching to a segmentation version leaves a detection model selected,
+    // which the server would refuse at submit. Move to that task's default
+    // instead of letting someone discover it from an error.
+    useEffect(() => {
+        if (!versionTask || modelRegistry.length === 0) return;
+        const current = modelRegistry.find(m => m.key === config.model_name);
+        if (current && (current.task || "detect") === versionTask) return;
+        const fallback =
+            versionTask === "segment"
+                ? modelRegistry.find(m => m.key === "yolov8s-seg.pt")
+                : modelRegistry.find(m => m.key === "yolov8s.pt");
+        const replacement = fallback || modelRegistry.find(m => (m.task || "detect") === versionTask);
+        if (replacement) {
+            setConfig(prev => ({
+                ...prev,
+                model_name: replacement.key,
+                img_size: replacement.default_imgsz || prev.img_size,
+            }));
+            setActivePreset(null);
+        }
+    }, [versionTask, modelRegistry, config.model_name]);
+
     useEffect(() => {
         if (!dataset?.id) return;
         runPreflight();
@@ -420,6 +454,16 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                         </Button>
                                     )}
                                 </div>
+                                {mixedTasks && (
+                                    <div className="flex items-start text-amber-500 text-sm mt-2">
+                                        <AlertCircle className="w-4 h-4 mr-2 mt-0.5 shrink-0" />
+                                        <span>
+                                            These versions hold different label types (detection and
+                                            segmentation). One model cannot train both — pick versions
+                                            of a single task.
+                                        </span>
+                                    </div>
+                                )}
                                 {versions.length === 0 ? (
                                     <div className="flex items-center text-amber-500 text-sm mt-2">
                                         <AlertCircle className="w-4 h-4 mr-2" />
@@ -445,6 +489,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                                                 <div className="font-semibold text-sm truncate">{ver.name}</div>
                                                                 <div className="text-xs text-muted-foreground font-mono">
                                                                     {new Date(ver.created_at).toLocaleDateString()} • {ver.images_count} imgs
+                                                                    {(ver.task || "detect") === "segment" && " • segmentation"}
                                                                 </div>
                                                             </div>
                                                             <input
@@ -482,9 +527,9 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {modelRegistry.length > 0 ? (
+                                            {trainableModels.length > 0 ? (
                                                 Object.entries(
-                                                    modelRegistry.reduce((acc, m) => {
+                                                    trainableModels.reduce((acc, m) => {
                                                         const family = m.family || m.backend;
                                                         if (!acc[family]) acc[family] = [];
                                                         acc[family].push(m);
@@ -640,7 +685,7 @@ export default function ProjectTrain({ dataset, onTrainingStarted, onDeploy, ver
                             <Button
                                 className="w-full mt-6"
                                 onClick={startTraining}
-                                disabled={training || selectedClasses.length === 0 || (selectedVersionIds.length === 0) || (preflight && !preflight.can_train)}
+                                disabled={training || selectedClasses.length === 0 || (selectedVersionIds.length === 0) || mixedTasks || (preflight && !preflight.can_train)}
                             >
                                 {training ? "Starting..." : "Start Training"}
                                 {!training && <Play className="ml-2" />}

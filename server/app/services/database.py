@@ -619,8 +619,9 @@ class DatasetVersionService:
     
     @staticmethod
     def create_version(version_id: str, dataset_id: str, version_number: int,
-                       name: str = "", preprocessing: Dict = None, 
-                       augmentations: Dict = None, yaml_path: str = "") -> bool:
+                       name: str = "", preprocessing: Dict = None,
+                       augmentations: Dict = None, yaml_path: str = "",
+                       task: str = "detect") -> bool:
         """Create a new dataset version snapshot"""
         if preprocessing is None: preprocessing = {}
         if augmentations is None: augmentations = {}
@@ -631,9 +632,9 @@ class DatasetVersionService:
         try:
             cursor = connection.cursor()
             cursor.execute("""
-                INSERT INTO dataset_versions (id, dataset_id, version_number, name, preprocessing, augmentations, total_images, yaml_path)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (version_id, dataset_id, version_number, name, json.dumps(preprocessing), json.dumps(augmentations), 0, yaml_path))
+                INSERT INTO dataset_versions (id, dataset_id, version_number, name, preprocessing, augmentations, total_images, yaml_path, task)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (version_id, dataset_id, version_number, name, json.dumps(preprocessing), json.dumps(augmentations), 0, yaml_path, task))
             connection.commit()
             cursor.close()
             return True
@@ -694,7 +695,7 @@ class DatasetVersionService:
         try:
             cursor = connection.cursor(dictionary=True)
             cursor.execute("""
-                SELECT id, dataset_id, version_number, name, preprocessing, augmentations, total_images, yaml_path, created_at
+                SELECT id, dataset_id, version_number, name, preprocessing, augmentations, total_images, yaml_path, task, created_at
                 FROM dataset_versions WHERE id = %s
             """, (version_id,))
             version = cursor.fetchone()
@@ -734,7 +735,7 @@ class DatasetVersionService:
         try:
             cursor = connection.cursor(dictionary=True)
             cursor.execute("""
-                SELECT id, dataset_id, version_number, name, preprocessing, augmentations, total_images, yaml_path, created_at
+                SELECT id, dataset_id, version_number, name, preprocessing, augmentations, total_images, yaml_path, task, created_at
                 FROM dataset_versions WHERE dataset_id = %s ORDER BY version_number ASC
             """, (dataset_id,))
             versions = cursor.fetchall()

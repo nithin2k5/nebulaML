@@ -11,6 +11,7 @@ import albumentations as A
 import shutil
 
 from app.services.database import DatasetService, DatasetVersionService, AnnotationService
+from app.services import segmentation_labels as seglabels
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,8 +34,16 @@ class VersioningEngine:
         self.versions_dir = Path("uploads/versions")
         self.versions_dir.mkdir(parents=True, exist_ok=True)
         
-    def _build_augmentation_pipeline(self, preprocessing: Dict, augmentations: Dict) -> A.Compose:
-        """Builds an Albumentations pipeline from requested config"""
+    def _build_augmentation_pipeline(
+        self, preprocessing: Dict, augmentations: Dict, task: str = "detect"
+    ) -> A.Compose:
+        """Builds an Albumentations pipeline from requested config.
+
+        A segmentation version transforms polygon *vertices*, so the pipeline
+        is declared with keypoint params instead of bbox params. The transforms
+        themselves are identical — what differs is what albumentations is asked
+        to carry through them.
+        """
         transforms = []
         
         # Preprocessing operations
@@ -56,13 +65,36 @@ class VersioningEngine:
         if augmentations.get("grayscale", False) or augmentations.get("noise", False):
             transforms.append(A.ToGray(p=0.5))
             
+        if task == "segment":
+            # remove_invisible=False keeps a vertex that a rotation pushed off
+            # the canvas, so the polygon survives with its shape intact and is
+            # clamped back to the frame on the way out. Dropping it instead
+            # would silently deform the mask.
+            return A.Compose(
+                transforms,
+                keypoint_params=A.KeypointParams(
+                    format='xy',
+                    label_fields=['kp_instance'],
+                    remove_invisible=False,
+                ),
+            )
+
         return A.Compose(transforms, bbox_params=A.BboxParams(format='yolo', label_fields=['class_labels']))
 
-    def generate_version(self, dataset_id: str, name: str, preprocessing: Dict, augmentations: Dict, split_ratio: Dict = None, force: bool = False) -> Optional[str]:
+    def generate_version(self, dataset_id: str, name: str, preprocessing: Dict, augmentations: Dict, split_ratio: Dict = None, force: bool = False, task: str = "detect") -> Optional[str]:
         """
-        Takes the base dataset, applies preprocessing and augmentations, 
+        Takes the base dataset, applies preprocessing and augmentations,
         and saves an immutable YOLO-format folder for training.
+
+        `task` fixes what the label files contain: "detect" writes one
+        `class cx cy w h` line per instance, "segment" writes
+        `class x1 y1 x2 y2 …` polygons. It is recorded on the version because
+        a run has to be refused if its model trains the other one — a
+        segmentation checkpoint pointed at box labels does not error, it just
+        learns rectangles and reports metrics that look fine.
         """
+        if task not in ("detect", "segment"):
+            raise ValueError(f"Unsupported task '{task}' (expected 'detect' or 'segment')")
         from app.services.dataset_manifest import compute_manifest, PreflightResultService
         import datetime
         import logging
@@ -105,6 +137,25 @@ class VersioningEngine:
         annotated_images = [img for img in dataset.get('images', []) if img.get('annotated')]
         if not annotated_images:
             raise ValueError("No annotated images found in the dataset. Please annotate some images before generating a version.")
+
+        if task == "segment":
+            # Boxes do become 4-point polygons below, so a segment version is
+            # technically producible from a box-only dataset — but it would
+            # train masks that are all rectangles, which is worse than
+            # detection at the same cost. Refuse it rather than let someone
+            # discover that from the metrics.
+            all_annotations = AnnotationService.get_all_dataset_annotations(dataset_id)
+            polygon_count = seglabels.count_polygon_instances(all_annotations)
+            if polygon_count == 0:
+                raise ValueError(
+                    "This dataset has no polygon annotations, so a segmentation "
+                    "version would contain nothing but rectangular masks. Draw "
+                    "polygons in the annotator, or generate a detection version."
+                )
+            logger.info(
+                "Generating segment version for %s from %d polygon instances",
+                dataset_id, polygon_count,
+            )
         
         if exported_without_current_preflight:
             augmentations["_exported_without_current_preflight"] = True
@@ -120,7 +171,8 @@ class VersioningEngine:
             version_number=version_num, 
             name=name, 
             preprocessing=preprocessing, 
-            augmentations=augmentations
+            augmentations=augmentations,
+            task=task
         )
         
         # 2. Setup Version Output Directory (YOLO format)
@@ -130,7 +182,7 @@ class VersioningEngine:
             (version_dir / split / 'labels').mkdir(parents=True, exist_ok=True)
             
         # 3. Apply Transformations & Save
-        pipeline = self._build_augmentation_pipeline(preprocessing, augmentations)
+        pipeline = self._build_augmentation_pipeline(preprocessing, augmentations, task)
         images = dataset['images']
         
         images = list(images)
@@ -160,77 +212,150 @@ class VersioningEngine:
             image = cv2.imread(orig_path)
             if image is None: continue
             
-            # Prepare bounding boxes for Albumentations (YOLO format: x_center, y_center, width, height)
+            img_w = annotation.get('width', 1)
+            img_h = annotation.get('height', 1)
+            if img_w <= 0 or img_h <= 0:
+                continue
+
+            # Prepare the instances for Albumentations. Detection carries
+            # boxes in YOLO format; segmentation carries polygon vertices as
+            # keypoints, since that is the only way albumentations will apply
+            # a geometric transform to a shape with more than four corners.
             bboxes = []
             class_labels = []
-            
-            for box in annotation['boxes']:
-                img_w = annotation.get('width', 1)
-                img_h = annotation.get('height', 1)
-                
-                if img_w <= 0 or img_h <= 0:
+            instances = []
+
+            if task == "segment":
+                for box in annotation['boxes']:
+                    polygon = seglabels.instance_polygon(box, img_w, img_h)
+                    if polygon is None:
+                        continue
+                    instances.append((int(box.get('class_id', 0)), polygon))
+                if not instances:
                     continue
-                    
-                # First calculate min/max coordinates
-                x_min = box.get("x", 0) / img_w
-                y_min = box.get("y", 0) / img_h
-                x_max = (box.get("x", 0) + box.get("width", 0)) / img_w
-                y_max = (box.get("y", 0) + box.get("height", 0)) / img_h
-                
-                # Clamp strict bounds [0, 1]
-                x_min = max(0.0, min(1.0, x_min))
-                y_min = max(0.0, min(1.0, y_min))
-                x_max = max(0.0, min(1.0, x_max))
-                y_max = max(0.0, min(1.0, y_max))
-                
-                # Re-calculate YOLO format
-                norm_width = x_max - x_min
-                norm_height = y_max - y_min
-                center_x = x_min + (norm_width / 2.0)
-                center_y = y_min + (norm_height / 2.0)
-                
-                # Skip invalid tiny boxes
-                if norm_width < 0.001 or norm_height < 0.001:
-                    continue
-                
-                bboxes.append([center_x, center_y, norm_width, norm_height])
-                class_labels.append(box.get('class_id', 0))
-                
+            else:
+                for box in annotation['boxes']:
+                    # First calculate min/max coordinates
+                    x_min = box.get("x", 0) / img_w
+                    y_min = box.get("y", 0) / img_h
+                    x_max = (box.get("x", 0) + box.get("width", 0)) / img_w
+                    y_max = (box.get("y", 0) + box.get("height", 0)) / img_h
+
+                    # Clamp strict bounds [0, 1]
+                    x_min = max(0.0, min(1.0, x_min))
+                    y_min = max(0.0, min(1.0, y_min))
+                    x_max = max(0.0, min(1.0, x_max))
+                    y_max = max(0.0, min(1.0, y_max))
+
+                    # Re-calculate YOLO format
+                    norm_width = x_max - x_min
+                    norm_height = y_max - y_min
+                    center_x = x_min + (norm_width / 2.0)
+                    center_y = y_min + (norm_height / 2.0)
+
+                    # Skip invalid tiny boxes
+                    if norm_width < 0.001 or norm_height < 0.001:
+                        continue
+
+                    bboxes.append([center_x, center_y, norm_width, norm_height])
+                    class_labels.append(box.get('class_id', 0))
+
             # Apply Transformation
             try:
-                transformed = pipeline(image=image, bboxes=bboxes, class_labels=class_labels)
-                processed_image = transformed['image']
-                processed_bboxes = transformed['bboxes']
-                processed_labels = transformed['class_labels']
-                
-                h, w = processed_image.shape[:2]
-                
+                if task == "segment":
+                    # Vertices go in as pixels against the image actually on
+                    # disk, not the dimensions recorded on the annotation, so
+                    # a row whose stored size drifted cannot shift the mask.
+                    in_h, in_w = image.shape[:2]
+                    keypoints = []
+                    kp_instance = []
+                    for idx, (_cid, polygon) in enumerate(instances):
+                        for nx, ny in polygon:
+                            keypoints.append((nx * in_w, ny * in_h))
+                            kp_instance.append(idx)
+
+                    transformed = pipeline(
+                        image=image, keypoints=keypoints, kp_instance=kp_instance
+                    )
+                    processed_image = transformed['image']
+                    h, w = processed_image.shape[:2]
+
+                    # Regroup by instance label rather than by original order:
+                    # a transform is free to reorder what it returns.
+                    regrouped = {}
+                    for (kx, ky), idx in zip(
+                        transformed['keypoints'], transformed['kp_instance']
+                    ):
+                        regrouped.setdefault(int(idx), []).append(
+                            (float(kx) / w, float(ky) / h)
+                        )
+
+                    processed_instances = []
+                    for idx, (class_id, _original) in enumerate(instances):
+                        points = regrouped.get(idx) or []
+                        if len(points) < 3:
+                            continue
+                        clamped = [
+                            (max(0.0, min(1.0, x)), max(0.0, min(1.0, y)))
+                            for x, y in points
+                        ]
+                        bx, by, bw, bh = seglabels.polygon_bbox(clamped)
+                        if bw < seglabels.MIN_EXTENT or bh < seglabels.MIN_EXTENT:
+                            # The transform flattened it out of the frame.
+                            continue
+                        processed_instances.append((class_id, clamped, (bx, by, bw, bh)))
+
+                    if not processed_instances:
+                        continue
+                else:
+                    transformed = pipeline(image=image, bboxes=bboxes, class_labels=class_labels)
+                    processed_image = transformed['image']
+                    processed_bboxes = transformed['bboxes']
+                    processed_labels = transformed['class_labels']
+                    h, w = processed_image.shape[:2]
+
                 # Save Image
                 out_img_name = f"{img_data['id']}_{uuid.uuid4().hex[:6]}.jpg"
                 out_img_path = version_dir / split / 'images' / out_img_name
                 cv2.imwrite(str(out_img_path), processed_image)
-                
+
                 # Save YOLO Label TXT
                 out_lbl_path = version_dir / split / 'labels' / out_img_name.replace('.jpg', '.txt')
-                
+
                 db_boxes = []
                 # Reconstruct pixel coords for Stage A validation
                 pixel_boxes = []
                 with open(out_lbl_path, 'w') as f:
-                    for bbox, label in zip(processed_bboxes, processed_labels):
-                        f.write(f"{label} {bbox[0]:.6f} {bbox[1]:.6f} {bbox[2]:.6f} {bbox[3]:.6f}\n")
-                        db_boxes.append({
-                            "class_id": label,
-                            "bbox_normalized": [bbox[0], bbox[1], bbox[2], bbox[3]]
-                        })
-                        # Convert YOLO normalized back to top-left pixel format
-                        cx, cy, bw, bh = bbox[0], bbox[1], bbox[2], bbox[3]
-                        px = (cx - bw / 2.0) * w
-                        py = (cy - bh / 2.0) * h
-                        pixel_boxes.append({
-                            "x": px, "y": py, "width": bw * w, "height": bh * h
-                        })
-                
+                    if task == "segment":
+                        for class_id, points, (bx, by, bw, bh) in processed_instances:
+                            f.write(seglabels.format_segment_line(class_id, points) + "\n")
+                            # The snapshot keeps a box alongside the polygon:
+                            # preflight and the evaluation workbench both read
+                            # boxes, and deriving it here means the two cannot
+                            # drift apart.
+                            db_boxes.append({
+                                "class_id": class_id,
+                                "bbox_normalized": [bx + bw / 2.0, by + bh / 2.0, bw, bh],
+                                "polygon_normalized": [coord for p in points for coord in p],
+                            })
+                            pixel_boxes.append({
+                                "x": bx * w, "y": by * h, "width": bw * w, "height": bh * h
+                            })
+                    else:
+                        for bbox, label in zip(processed_bboxes, processed_labels):
+                            f.write(f"{label} {bbox[0]:.6f} {bbox[1]:.6f} {bbox[2]:.6f} {bbox[3]:.6f}\n")
+                            db_boxes.append({
+                                "class_id": label,
+                                "bbox_normalized": [bbox[0], bbox[1], bbox[2], bbox[3]]
+                            })
+                            # Convert YOLO normalized back to top-left pixel format
+                            cx, cy, bw, bh = bbox[0], bbox[1], bbox[2], bbox[3]
+                            px = (cx - bw / 2.0) * w
+                            py = (cy - bh / 2.0) * h
+                            pixel_boxes.append({
+                                "x": px, "y": py, "width": bw * w, "height": bh * h
+                            })
+
                 # Store Processed Image record in immutable DB snapshot
                 unique_img_id = str(uuid.uuid4())
                 DatasetVersionService.add_version_image(

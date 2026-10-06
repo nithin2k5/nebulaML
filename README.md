@@ -14,6 +14,10 @@ backends behind one workflow.
   augmentation settings, so a training run is reproducible
 - **Training**: YOLO, RT-DETR and torchvision backends, with preflight checks,
   a job queue, live metrics, confusion matrices and per-class breakdowns
+- **Instance segmentation**: Freeze a version as `detect` or `segment`. A
+  segment version writes polygon labels and trains on YOLO `-seg` checkpoints,
+  reporting mask metrics alongside box metrics. A model and a version that
+  disagree on the task are refused rather than trained
 - **Dataset health**: Class balance, duplicate and near-duplicate detection,
   blur and corruption checks, scored and tracked over time
 - **Evaluation**: Scores a finished model against a split through one shared
@@ -43,7 +47,7 @@ backends behind one workflow.
 - Python 3.9+
 - FastAPI
 - MySQL 8 (via mysql-connector, pooled)
-- Ultralytics YOLO (YOLOv8), RT-DETR, torchvision
+- Ultralytics YOLO (detection and segmentation), RT-DETR, torchvision
 - PyTorch
 - OpenCV, albumentations
 
@@ -111,9 +115,16 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 4. **Health** — class balance, duplicates, blur and corruption, scored and
    tracked across snapshots
 5. **Generate** — freeze a version with its own preprocessing and augmentation
-   settings; training always runs against a version, not the live dataset
+   settings; training always runs against a version, not the live dataset.
+   Pick the task here: detection freezes box labels, segmentation freezes
+   polygon labels drawn from your polygons (a box comes through as its four
+   corners). The choice is fixed at freeze time because it decides what the
+   label files contain, and a version is immutable
 6. **Train** — pick a backend and version, run preflight, start the job.
-   Progress, metrics, confusion matrix and per-class results stream live
+   Progress, metrics, confusion matrix and per-class results stream live.
+   The model list is filtered to the selected version's task, since a
+   segmentation checkpoint trained on box labels does not fail — it quietly
+   learns rectangles
 7. **Registry** — every version and run, with its metrics
 8. **Evaluate** — score a finished model and browse what it got wrong. Every
    prediction is classed as hallucinated, wrong-class, loose-box, duplicate or

@@ -161,18 +161,34 @@ class YOLOTrainer(BaseTrainer):
         except Exception:
             pass
 
+        # Ultralytics suffixes every metric with the head that produced it:
+        # (B) for boxes, (M) for masks. A segmentation run emits both, and the
+        # box numbers are the less interesting half — a model can place boxes
+        # well while its masks are poor. Report the box metrics as the headline
+        # either way so runs stay comparable with detection runs through the
+        # same shared metric path, and carry the mask metrics alongside.
+        metrics = {
+            "map50": float(results.results_dict.get("metrics/mAP50(B)", 0)),
+            "map50-95": float(results.results_dict.get("metrics/mAP50-95(B)", 0)),
+            "precision": float(results.results_dict.get("metrics/precision(B)", 0)),
+            "recall": float(results.results_dict.get("metrics/recall(B)", 0)),
+        }
+        if any(k.endswith("(M)") for k in results.results_dict):
+            metrics.update({
+                "mask_map50": float(results.results_dict.get("metrics/mAP50(M)", 0)),
+                "mask_map50-95": float(results.results_dict.get("metrics/mAP50-95(M)", 0)),
+                "mask_precision": float(results.results_dict.get("metrics/precision(M)", 0)),
+                "mask_recall": float(results.results_dict.get("metrics/recall(M)", 0)),
+            })
+
         return {
             "success": True,
             "epochs_completed": epochs_completed,
             "model_path": best_model_path,
             "results_dir": str(results.save_dir),
             "onnx_export_status": onnx_export_status,
-            "metrics": {
-                "map50": float(results.results_dict.get("metrics/mAP50(B)", 0)),
-                "map50-95": float(results.results_dict.get("metrics/mAP50-95(B)", 0)),
-                "precision": float(results.results_dict.get("metrics/precision(B)", 0)),
-                "recall": float(results.results_dict.get("metrics/recall(B)", 0)),
-            },
+            "task": getattr(self.model, "task", "detect"),
+            "metrics": metrics,
             "per_class_metrics": per_class_metrics,
             "confusion_matrix_path": confusion_matrix_path,
         }
@@ -188,13 +204,22 @@ class YOLOTrainer(BaseTrainer):
             Validation metrics
         """
         metrics = self.model.val(data=data_yaml, device=self.device)
-        
-        return {
+
+        out = {
             "map50": float(metrics.box.map50),
             "map50-95": float(metrics.box.map),
             "precision": float(metrics.box.mp),
             "recall": float(metrics.box.mr)
         }
+        seg = getattr(metrics, "seg", None)
+        if seg is not None:
+            out.update({
+                "mask_map50": float(seg.map50),
+                "mask_map50-95": float(seg.map),
+                "mask_precision": float(seg.mp),
+                "mask_recall": float(seg.mr),
+            })
+        return out
     
     def export(self, format: str = "onnx") -> str:
         """

@@ -19,7 +19,7 @@ import shutil
 # Import trainer
 from app.services.base_trainer import TrainingCancelledException
 from app.services.trainer_factory import create_trainer
-from app.services.model_registry import get_allowed_model_keys, get_backend, get_model_info, get_registry_for_api
+from app.services.model_registry import get_allowed_model_keys, get_backend, get_model_info, get_registry_for_api, get_task
 from app.services.dataset_analyzer import DatasetAnalyzer
 from app.services.database import DatasetService, DatasetVersionService, TrainingJobService, AutoRetrainConfigService
 from app.services.versioning import VersioningEngine
@@ -273,6 +273,15 @@ class GenerateVersionRequest(BaseModel):
     preprocessing: Dict[str, Any] = {}
     augmentations: Dict[str, Any] = {}
     force: bool = False
+    # "detect" writes box labels, "segment" writes polygon labels. Defaulted so
+    # every existing caller keeps producing detection versions.
+    task: str = "detect"
+
+    @validator('task')
+    def validate_task(cls, v):
+        if v not in ("detect", "segment"):
+            raise ValueError("task must be 'detect' or 'segment'")
+        return v
 
 class AutoRetrainConfig(BaseModel):
     dataset_id: str
@@ -304,13 +313,17 @@ async def generate_dataset_version(
             name=request.name,
             preprocessing=request.preprocessing,
             augmentations=request.augmentations,
-            force=request.force
+            force=request.force,
+            task=request.task
         )
     except DatasetDriftError as e:
         return JSONResponse(
             status_code=409,
             content={"detail": str(e), "diff_summary": e.diff_summary}
         )
+    except ValueError as e:
+        # No polygons for a segment version, or an unsupported task.
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -992,7 +1005,26 @@ async def start_training_from_dataset(
         train_images_dir = yaml_path.parent / 'train' / 'images'
         if not train_images_dir.exists() or not any(train_images_dir.iterdir()):
             raise HTTPException(status_code=400, detail="This dataset version has no training images. Please annotate some images and generate a new version before training.")
-            
+
+        # A model and the labels it is pointed at have to train the same task.
+        # Neither mismatch fails loudly on its own: a segmentation checkpoint
+        # given box labels trains on rectangular masks, and a detection
+        # checkpoint given polygon labels reads the first two vertices as a
+        # centre and the next two as a size. Both report metrics that look
+        # ordinary, which is why this is refused here rather than left to be
+        # noticed in the results.
+        version_task = version.get('task') or 'detect'
+        model_task = get_task(request.config.model_name)
+        if model_task != version_task:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{request.config.model_name} trains {model_task}, but version "
+                    f"{version.get('version_number', '?')} holds {version_task} labels. "
+                    f"Pick a {version_task} model, or generate a {model_task} version."
+                ),
+            )
+
         
         # Generate job ID
         job_id = str(uuid.uuid4())

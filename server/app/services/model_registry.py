@@ -9,6 +9,13 @@ Each model entry includes:
 - description: short description
 - default_imgsz: recommended image size
 - checkpoint: the checkpoint identifier (e.g. HuggingFace model id or .pt filename)
+- task: "detect" or "segment"
+
+`task` is what keeps a model and the data it is pointed at in agreement. A
+segmentation checkpoint trained against box labels does not fail loudly — it
+trains on degenerate masks and reports metrics that look plausible — so the
+task is recorded here, recorded on each frozen version, and checked before a
+run starts.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Optional
@@ -24,6 +31,7 @@ class ModelInfo:
     default_imgsz: int = 640
     checkpoint: str = ""        # backend-specific checkpoint id
     family: str = ""            # grouping label for UI (e.g. "YOLOv8", "RT-DETR", "Faster R-CNN")
+    task: str = "detect"        # "detect" | "segment"
 
 MODEL_REGISTRY: Dict[str, ModelInfo] = {}
 
@@ -62,6 +70,28 @@ for variant, params in [("n", "2.6M"), ("s", "9.4M"), ("m", "20.1M"), ("l", "25.
         description=f"YOLO11 {variant.upper()}",
         checkpoint=f"yolo11{variant}.pt", family="YOLO11"
     ))
+
+# ── YOLO instance segmentation (AGPL-3.0) ───────────────────────────
+#
+# The annotator has always been able to draw polygons, and the export path has
+# always written them in YOLO segmentation format — but the version generator
+# reduced every instance to a bounding box, so polygon work could never reach
+# training. These are the checkpoints that make it trainable; a `segment`
+# version writes polygon label files and only these models accept it.
+for family, prefix in [("YOLOv8-seg", "yolov8"), ("YOLO11-seg", "yolo11")]:
+    for variant, params in [
+        ("n", "3.4M"), ("s", "11.8M"), ("m", "27.3M"), ("l", "46.0M"), ("x", "71.8M")
+    ]:
+        _register(ModelInfo(
+            key=f"{prefix}{variant}-seg.pt",
+            display_name=f"{family.replace('-seg', '')} {variant.upper()} Segmentation",
+            backend="yolo", license="AGPL-3.0", params=params,
+            description=(
+                f"{family.replace('-seg', '')} {variant.upper()} instance segmentation — "
+                "predicts a mask per object, not just a box"
+            ),
+            checkpoint=f"{prefix}{variant}-seg.pt", family=family, task="segment"
+        ))
 
 # ── RT-DETR models (Apache 2.0) ─────────────────────────────────────
 _register(ModelInfo(
@@ -137,6 +167,26 @@ def get_backend(model_name: str) -> str:
         return "yolo"
     return "unknown"
 
+def get_task(model_name: str) -> str:
+    """Return the task a model key trains. Unknown keys are treated as detection.
+
+    The name is the fallback signal because Ultralytics itself derives the task
+    from the checkpoint filename, so an unregistered `*-seg.pt` really is a
+    segmentation model.
+    """
+    info = MODEL_REGISTRY.get(model_name)
+    if info:
+        return info.task
+    if "-seg" in model_name:
+        return "segment"
+    return "detect"
+
+
+def get_models_by_task(task: str) -> list:
+    """Return all models that train a given task."""
+    return [m for m in MODEL_REGISTRY.values() if m.task == task]
+
+
 def get_allowed_model_keys() -> set:
     """Return the set of all valid model keys."""
     return set(MODEL_REGISTRY.keys())
@@ -167,6 +217,7 @@ def get_registry_for_api() -> list:
             "description": m.description,
             "default_imgsz": m.default_imgsz,
             "family": m.family,
+            "task": m.task,
         }
         for m in MODEL_REGISTRY.values()
     ]

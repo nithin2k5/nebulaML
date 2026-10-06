@@ -22,6 +22,10 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
         blur: false,
         grayscale: false
     });
+    // "detect" freezes box labels, "segment" freezes polygon labels. The
+    // choice is fixed at freeze time because it decides what the label files
+    // on disk contain, and a version is immutable once written.
+    const [task, setTask] = useState("detect");
     const [generating, setGenerating] = useState(false);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewData, setPreviewData] = useState(null);
@@ -138,7 +142,9 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
 
         if (!(await confirm({
           title: "Generate dataset version",
-          description: "This creates an immutable snapshot of the dataset as it stands now.",
+          description: task === "segment"
+            ? "This freezes an immutable snapshot with polygon labels, trainable only by a segmentation model."
+            : "This creates an immutable snapshot of the dataset as it stands now.",
           confirmLabel: "Generate",
           variant: "default",
         }))) return;
@@ -155,7 +161,8 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                     dataset_id: dataset.id,
                     name: `Version ${new Date().toLocaleDateString()}`,
                     preprocessing: {},
-                    augmentations: augmentations
+                    augmentations: augmentations,
+                    task: task
                 })
             });
 
@@ -163,7 +170,10 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                 toast.success("Version generated successfully! Head to Train tab.");
                 if (onGenerate) onGenerate();
             } else {
-                toast.error("Failed to generate version");
+                // The server explains a refused segment version ("no polygon
+                // annotations"), which is the whole content of the error.
+                const err = await response.json().catch(() => ({}));
+                toast.error(err.detail || "Failed to generate version");
             }
         } catch (e) {
             toast.error("Error: " + e.message);
@@ -380,6 +390,54 @@ export default function ProjectGenerate({ dataset, stats, onGenerate }) {
                             <Label>Resize</Label>
                             <Badge variant="outline">640x640 (Stretch)</Badge>
                         </div>
+                    </CardContent>
+                </Card>
+
+                {/* Task */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Task</CardTitle>
+                        <CardDescription>What the labels in this version describe</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        {[
+                            {
+                                id: "detect",
+                                label: "Object detection",
+                                desc: "A box per object. Every annotation becomes one.",
+                            },
+                            {
+                                id: "segment",
+                                label: "Instance segmentation",
+                                desc: "A mask per object, from your polygons. Boxes come through as rectangles.",
+                            },
+                        ].map(option => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => setTask(option.id)}
+                                aria-pressed={task === option.id}
+                                className={`w-full text-left p-3 border transition-colors ${
+                                    task === option.id
+                                        ? "border-primary bg-primary/10"
+                                        : "border-border hover:border-primary/50"
+                                }`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="font-medium text-sm">{option.label}</span>
+                                    {task === option.id && (
+                                        <Badge variant="secondary" className="shrink-0">Selected</Badge>
+                                    )}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">{option.desc}</p>
+                            </button>
+                        ))}
+                        {task === "segment" && (
+                            <p className="text-xs text-amber-400">
+                                Needs polygon annotations — a dataset with only boxes is refused,
+                                because its masks would all be rectangles.
+                            </p>
+                        )}
                     </CardContent>
                 </Card>
 
