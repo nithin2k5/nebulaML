@@ -65,6 +65,9 @@ export default function ProjectEvaluate({ dataset }) {
 
     const [jobs, setJobs] = useState([]);
     const [selectedJob, setSelectedJob] = useState("");
+    const [versions, setVersions] = useState([]);
+    // "" means the live annotations table; otherwise a frozen version's id.
+    const [source, setSource] = useState("");
     const [evaluation, setEvaluation] = useState(null);
     const [runningId, setRunningId] = useState(null);
     const [progress, setProgress] = useState(null);
@@ -105,9 +108,25 @@ export default function ProjectEvaluate({ dataset }) {
         }
     }, [token, authHeaders, dataset?.id]);
 
+    // --- frozen versions available to score against -----------------------
+    const fetchVersions = useCallback(async () => {
+        if (!token || !dataset?.id) return;
+        try {
+            const res = await fetch(API_ENDPOINTS.TRAINING.VERSIONS_LIST(dataset.id), {
+                headers: authHeaders,
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            setVersions(data.versions || []);
+        } catch {
+            // Without versions the picker offers live labels only, which works.
+        }
+    }, [token, authHeaders, dataset?.id]);
+
     useEffect(() => {
         fetchJobs();
-    }, [fetchJobs]);
+        fetchVersions();
+    }, [fetchJobs, fetchVersions]);
 
     // --- the latest evaluation for the selected run -----------------------
     const fetchLatest = useCallback(async () => {
@@ -161,7 +180,13 @@ export default function ProjectEvaluate({ dataset }) {
             const res = await fetch(API_ENDPOINTS.EVALUATION.RUN, {
                 method: "POST",
                 headers: { ...authHeaders, "Content-Type": "application/json" },
-                body: JSON.stringify({ job_id: selectedJob, split: "test" }),
+                body: JSON.stringify({
+                    job_id: selectedJob,
+                    split: "test",
+                    // Omitted entirely when scoring live labels, so the server
+                    // keeps its own default rather than being sent an empty id.
+                    ...(source ? { version_id: source } : {}),
+                }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -270,6 +295,9 @@ export default function ProjectEvaluate({ dataset }) {
     const sweep = evaluation?.confidence_sweep || [];
     const best = evaluation?.best_operating_point || null;
     const confusion = evaluation?.class_confusion || [];
+    const matrix = evaluation?.confusion_matrix?.matrix || [];
+    const matrixLabels = [...(dataset?.classes || []), "background"];
+    const matrixMax = Math.max(1, ...matrix.flat());
     const perClass = evaluation?.per_class_metrics || [];
     const maxSweepF1 = Math.max(...sweep.map((p) => p.f1 || 0), 0.0001);
 
@@ -296,6 +324,22 @@ export default function ProjectEvaluate({ dataset }) {
                             </option>
                         ))}
                     </select>
+                    {versions.length > 0 && (
+                        <select
+                            value={source}
+                            onChange={(e) => setSource(e.target.value)}
+                            title="Which ground truth to score against"
+                            className="text-sm bg-background border border-input rounded-none px-2 py-1.5"
+                        >
+                            <option value="">Live labels</option>
+                            {versions.map((version) => (
+                                <option key={version.id} value={version.id}>
+                                    v{version.version_number} snapshot
+                                    {version.name ? ` · ${version.name}` : ""}
+                                </option>
+                            ))}
+                        </select>
+                    )}
                     <Button size="sm" onClick={runEvaluation} disabled={!!runningId}>
                         <RefreshCw
                             className={`w-4 h-4 mr-2 ${runningId ? "animate-spin" : ""}`}
@@ -356,7 +400,15 @@ export default function ProjectEvaluate({ dataset }) {
                         Scored on {evaluation.images_evaluated} image(s) of the{" "}
                         <span className="text-foreground">{evaluation.split}</span> split
                         at IoU {evaluation.iou_threshold} and confidence{" "}
-                        {evaluation.conf_threshold}.
+                        {evaluation.conf_threshold}
+                        {evaluation.version_id ? (
+                            <>
+                                , against a <span className="text-foreground">frozen
+                                snapshot</span> — the data training actually consumed.
+                            </>
+                        ) : (
+                            <>, against the current labels.</>
+                        )}
                         {evaluation.split === "all-annotated" && (
                             <span className="text-yellow-500">
                                 {" "}
@@ -487,6 +539,80 @@ export default function ProjectEvaluate({ dataset }) {
                                         </span>
                                     </div>
                                 ))}
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Full confusion matrix */}
+                    {matrix.length > 0 && (
+                        <Card className="rounded-none">
+                            <CardHeader>
+                                <CardTitle className="text-base">
+                                    Confusion matrix
+                                </CardTitle>
+                                <CardDescription>
+                                    The whole picture, including what was missed outright
+                                    versus invented. Rows sum to the labelled boxes per
+                                    class, columns to the predictions.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="overflow-x-auto">
+                                    <table className="text-xs font-mono border-collapse">
+                                        <thead>
+                                            <tr>
+                                                <th className="p-1.5 text-right font-normal text-muted-foreground">
+                                                    actual ↓ / predicted →
+                                                </th>
+                                                {matrixLabels.map((label) => (
+                                                    <th
+                                                        key={label}
+                                                        className="p-1.5 font-normal text-muted-foreground whitespace-nowrap"
+                                                    >
+                                                        {label}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {matrix.map((row, rowIndex) => (
+                                                <tr key={matrixLabels[rowIndex] || rowIndex}>
+                                                    <th className="p-1.5 text-right font-normal text-muted-foreground whitespace-nowrap">
+                                                        {matrixLabels[rowIndex]}
+                                                    </th>
+                                                    {row.map((value, colIndex) => (
+                                                        <td
+                                                            key={colIndex}
+                                                            title={`${matrixLabels[rowIndex]} predicted as ${matrixLabels[colIndex]}: ${value}`}
+                                                            className={`p-1.5 text-center border border-background min-w-[44px] ${
+                                                                rowIndex === colIndex
+                                                                    ? "ring-1 ring-inset ring-foreground/20"
+                                                                    : ""
+                                                            }`}
+                                                            style={{
+                                                                // One hue, intensity by magnitude. The
+                                                                // count is printed in every cell, so the
+                                                                // reading never rests on colour alone.
+                                                                background: value
+                                                                    ? `rgba(139, 92, 246, ${
+                                                                          0.12 + (value / matrixMax) * 0.68
+                                                                      })`
+                                                                    : "transparent",
+                                                            }}
+                                                        >
+                                                            {value || "·"}
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2">
+                                    Boxes are paired ignoring their label here, so a dog
+                                    called a cat lands at dog → cat rather than as a missed
+                                    dog plus an invented cat.
+                                </p>
                             </CardContent>
                         </Card>
                     )}

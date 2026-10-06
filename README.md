@@ -16,10 +16,10 @@ backends behind one workflow.
   a job queue, live metrics, confusion matrices and per-class breakdowns
 - **Dataset health**: Class balance, duplicate and near-duplicate detection,
   blur and corruption checks, scored and tracked over time
-- **Evaluation**: Score a finished model against a version's held-out split
-  through one shared metric path, so runs from different backends are
-  comparable; per-class table, confusion matrix, confidence sweep, a per-image
-  failure explorer, and side-by-side run comparison with per-class deltas
+- **Evaluation**: Scores a finished model against a split through one shared
+  metric path, so runs from different backends are comparable. Per-class
+  table, class confusion, a full confusion matrix, a confidence sweep, and a
+  per-image error browser that says *how* each box is wrong
 - **Active learning**: Surfaces low-confidence predictions for review and can
   retrain automatically once enough new annotations land
 - **Monitoring**: Inference logging and drift detection per project
@@ -112,13 +112,14 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 6. **Train** — pick a backend and version, run preflight, start the job.
    Progress, metrics, confusion matrix and per-class results stream live
 7. **Registry** — every version and run, with its metrics
-8. **Evaluate** — score a finished model against a version's split. mAP is
-   measured across the whole curve; precision, recall and the error breakdown
-   are at the confidence you pick. Shows a per-class table worst-first, a
-   confusion matrix, a confidence sweep for choosing a deployment threshold,
-   and the images the model did worst on with every box diagnosed as a
-   duplicate, a loose box, a wrong label, an invention or a miss. Tick two runs
-   to compare them
+8. **Evaluate** — score a finished model and browse what it got wrong. Every
+   prediction is classed as hallucinated, wrong-class, loose-box, duplicate or
+   missed, because the fixes differ; a confidence sweep says where to set the
+   deployment threshold, and two runs can be diffed per class. Score against
+   the current labels, or against a frozen version's snapshot — the data
+   training actually consumed, which is the only ground truth that stays put.
+   mAP is measured across the whole curve, so it does not move with the
+   confidence setting; precision, recall and the error mix do
 9. **Test** — run the trained model against new images or a webcam
 10. **Deploy** — export the model (`pt`, `onnx`, `engine`, `coreml`) or call it
     through the API with an API key
@@ -142,14 +143,12 @@ NebulaML/
 ├── server/
 │   ├── app/
 │   │   ├── api/v1/endpoints/   # auth, annotations, training, inference,
-│   │   │                       # models, evaluation, active_learning,
-│   │   │                       # monitoring, collaboration,
-│   │   │                       # smart_annotation, video, chat
+│   │   │                       # models, active_learning, monitoring,
+│   │   │                       # collaboration, smart_annotation, video, chat
 │   │   ├── core/               # config, rbac, access, logging, email, headers
 │   │   ├── db/session.py       # schema, migrations, connection pool
-│   │   └── services/           # trainers, inference, evaluation,
-│   │                           # dataset analysis, versioning, export,
-│   │                           # model registry
+│   │   └── services/           # trainers, inference, dataset analysis,
+│   │                           # versioning, export, model registry
 │   ├── scripts/
 │   ├── main.py
 │   └── requirements.txt
@@ -177,7 +176,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/models` | List, info, download, export, delete |
 | `/api/smart` | Segment-assisted and zero-shot annotation |
 | `/api/active-learning` | Uncertainty collection, review, approve/reject |
-| `/api/evaluation` | Score a model on a version split, failure explorer, run comparison |
+| `/api/evaluation` | Score a model on a split, error browser, confidence sweep, run diff |
 | `/api/monitoring` | Inference logging, stats, drift |
 | `/api/datasets` | Project members, invitations, activity log |
 | `/api/video` | Frame extraction |
@@ -190,8 +189,6 @@ A few of the most used:
 - `GET  /api/training/status/{job_id}` — poll one job
 - `POST /api/training/start-from-dataset` — train from a dataset version
 - `GET  /api/models/export/{model_name}?format=onnx` — export a trained model
-- `POST /api/evaluation/run` — score a trained model against a version's test split
-- `GET  /api/evaluation/compare?runs=a,b` — compare finished runs, with per-class deltas
 
 ## 🧪 Development
 
@@ -220,4 +217,4 @@ This project is licensed under the MIT License.
 - FastAPI for the backend framework
 
 ## Last Updated
-- 2026-10-05
+- 2026-09-25

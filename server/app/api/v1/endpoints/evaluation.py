@@ -47,6 +47,15 @@ _FINISHED_JOB_RETENTION = 20
 # would otherwise tie up a worker for an hour by accident.
 DEFAULT_MAX_IMAGES = 500
 
+# Images per forward pass. One call per image left the GPU idle between
+# launches; a batch amortises that over sixteen.
+_BATCH_SIZE = 16
+
+# Inference floor for the metric pass. mAP is threshold-free, so the curve has
+# to be built from predictions well below the operating point — filtering to
+# conf_threshold first would truncate it and understate AP.
+_SCORE_FLOOR = 0.01
+
 _SORTABLE = {
     # Worst-first is the useful default, so precision ascending comes first.
     "precision": "precision_score ASC, fp DESC",
@@ -77,6 +86,16 @@ def _prune_finished_jobs(jobs: Dict[str, Dict], keep: int = _FINISHED_JOB_RETENT
 
 class EvaluateRequest(BaseModel):
     job_id: str
+    # Score against a frozen version's snapshot instead of the live dataset.
+    #
+    # The snapshot is what training actually consumed — after preprocessing and
+    # augmentation, with the split already fixed — so it is the only ground
+    # truth that stays put. The live annotations table keeps moving: relabel an
+    # image tomorrow and yesterday's number is no longer reproducible, and it
+    # was never measured on the pixels the model saw either. Left unset, the
+    # live dataset is used, which is the right question when what you want to
+    # know is how the model does on today's labels.
+    version_id: Optional[str] = None
     # Which split to score against. "test" is the honest choice — val was used
     # for early stopping during training, so it is no longer truly held out —
     # but small datasets often have no test split, hence the fallback.
@@ -135,6 +154,88 @@ def _split_images(dataset: Dict, split: str) -> Tuple[List[Dict], str]:
     return [img for img in images if img.get("annotated")], "all-annotated"
 
 
+def _version_dataset_id(version_id: str) -> Optional[str]:
+    """The dataset a version belongs to, or None if there is no such version."""
+    try:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT dataset_id FROM dataset_versions WHERE id = %s", (version_id,)
+            )
+            row = cursor.fetchone()
+            return row["dataset_id"] if row else None
+    except Exception as e:
+        logger.error(f"Could not read version {version_id}: {e}")
+        return None
+
+
+def _snapshot_split(
+    version_id: str, split: str
+) -> Tuple[List[Dict], Dict[str, List[Dict]], str]:
+    """
+    One split of a version snapshot, as (images, annotations, split used).
+
+    Shaped to match `_split_images` plus the live annotations map, so the
+    scoring pass is identical either way. Paths come from the snapshot rows and
+    are absolute, which is why `_score_split` uses them as-is.
+
+    The same test -> val -> everything fallback applies, so a version frozen
+    without a test split still gets an answer and the caller still reports
+    which split the number came from.
+    """
+    try:
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT id, original_image_id, filename, path, split, width, height, boxes "
+                "FROM dataset_version_images WHERE version_id = %s ORDER BY filename",
+                (version_id,),
+            )
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Could not read snapshot for version {version_id}: {e}")
+        return [], {}, split
+
+    def rows_for(candidate: str) -> List[Dict]:
+        return [row for row in rows if (row.get("split") or "") == candidate]
+
+    chosen, split_used = [], split
+    for candidate in (split, "val", "valid"):
+        chosen = rows_for(candidate)
+        if chosen:
+            split_used = candidate
+            break
+    if not chosen:
+        chosen, split_used = rows, "all-snapshot"
+
+    images: List[Dict] = []
+    annotations: Dict[str, List[Dict]] = {}
+    for row in chosen:
+        width = int(row.get("width") or 0)
+        height = int(row.get("height") or 0)
+        if width <= 0 or height <= 0:
+            # Normalised boxes cannot be placed without the dimensions.
+            logger.warning(f"Evaluation: snapshot row {row['id']} has no dimensions")
+            continue
+        boxes = row.get("boxes")
+        if isinstance(boxes, (str, bytes)):
+            try:
+                boxes = json.loads(boxes)
+            except (ValueError, TypeError):
+                boxes = []
+        images.append({
+            "id": row["id"],
+            # The original image id, so the client can still deep-link into the
+            # annotator from a snapshot result.
+            "source_image_id": row.get("original_image_id"),
+            "filename": row["filename"],
+            "path": row.get("path"),
+        })
+        annotations[row["id"]] = ea.version_boxes_to_annotations(
+            boxes or [], width, height
+        )
+
+    return images, annotations, split_used
+
+
 def _store_evaluation(evaluation_id: str, fields: Dict[str, Any]) -> None:
     """Update one evaluation row with whatever fields are given."""
     if not fields:
@@ -148,6 +249,38 @@ def _store_evaluation(evaluation_id: str, fields: Dict[str, Any]) -> None:
             )
     except Exception as e:
         logger.error(f"Could not update evaluation {evaluation_id}: {e}")
+
+
+def _predict_batch(model: Any, paths: List[str]) -> List[Optional[List[Dict]]]:
+    """
+    Predict a batch, falling back to one image at a time.
+
+    A whole batch failing on a single unreadable file would cost the other
+    fifteen, so a batch error retries individually and an image that still
+    fails comes back as None for the caller to skip. A backend returning a
+    short list is padded rather than zipped against the wrong images.
+    """
+    try:
+        detections = model.predict_batch(paths, conf_threshold=_SCORE_FLOOR)
+        if len(detections) == len(paths):
+            return list(detections)
+        logger.error(
+            f"Evaluation: backend returned {len(detections)} results for "
+            f"{len(paths)} images; padding the difference"
+        )
+        padded = list(detections)[: len(paths)]
+        return padded + [None] * (len(paths) - len(padded))
+    except Exception as e:
+        logger.warning(f"Evaluation: a batch failed ({e}); retrying per image")
+
+    results: List[Optional[List[Dict]]] = []
+    for path in paths:
+        try:
+            results.append(model.predict(path, conf_threshold=_SCORE_FLOOR))
+        except Exception as e:
+            logger.warning(f"Evaluation: inference failed on {path}: {e}")
+            results.append(None)
+    return results
 
 
 def _score_split(
@@ -172,57 +305,64 @@ def _score_split(
     targets: List[Dict[str, Any]] = []
     per_image_rows: List[Tuple] = []
 
-    for index, image in enumerate(images):
+    # Readable files only, so a batch is never short and the zip below cannot
+    # drift out of step with its images.
+    readable: List[Tuple[Dict, Path]] = []
+    for image in images:
         path = Path(image.get("path") or "")
         if not path.is_absolute():
             path = Path("datasets") / dataset_id / "images" / image["filename"]
         if not path.exists():
             logger.warning(f"Evaluation: missing file for image {image['id']}")
             continue
+        readable.append((image, path))
 
-        try:
-            # Predict at a low floor and threshold afterwards, so one pass
-            # serves both the chosen operating point and the full sweep.
-            detections = model.predict(str(path), conf_threshold=0.01)
-        except Exception as e:
-            logger.warning(f"Evaluation: inference failed on {path}: {e}")
-            continue
+    index = -1
+    for start in range(0, len(readable), _BATCH_SIZE):
+        batch = readable[start:start + _BATCH_SIZE]
+        batch_detections = _predict_batch(model, [str(path) for _, path in batch])
 
-        prediction = ea.detections_to_arrays(detections)
-        target = ea.gt_boxes_to_xyxy(annotations.get(image["id"], []))
+        for (image, path), detections in zip(batch, batch_detections):
+            index += 1
+            if detections is None:
+                logger.warning(f"Evaluation: inference failed on {path}")
+                continue
 
-        predictions.append(prediction)
-        targets.append(target)
+            prediction = ea.detections_to_arrays(detections)
+            target = ea.gt_boxes_to_xyxy(annotations.get(image["id"], []))
 
-        detail = ea.classify_image_errors(
-            prediction,
-            target,
-            iou_threshold=request.iou_threshold,
-            conf_threshold=request.conf_threshold,
-            class_names=class_names,
-        )
-        counts = detail["counts"]
-        by_kind = counts["by_kind"]
+            predictions.append(prediction)
+            targets.append(target)
 
-        per_image_rows.append((
-            evaluation_id,
-            image["id"],
-            image.get("filename"),
-            counts["tp"],
-            counts["fp"],
-            counts["fn"],
-            counts["precision"],
-            counts["recall"],
-            by_kind.get("background", 0),
-            by_kind.get("wrong_class", 0),
-            by_kind.get("poor_localisation", 0),
-            by_kind.get("duplicate", 0),
-            by_kind.get("missed", 0),
-            json.dumps(detail),
-        ))
+            detail = ea.classify_image_errors(
+                prediction,
+                target,
+                iou_threshold=request.iou_threshold,
+                conf_threshold=request.conf_threshold,
+                class_names=class_names,
+            )
+            counts = detail["counts"]
+            by_kind = counts["by_kind"]
 
-        if progress is not None:
-            progress["progress"] = index + 1
+            per_image_rows.append((
+                evaluation_id,
+                image["id"],
+                image.get("filename"),
+                counts["tp"],
+                counts["fp"],
+                counts["fn"],
+                counts["precision"],
+                counts["recall"],
+                by_kind.get("background", 0),
+                by_kind.get("wrong_class", 0),
+                by_kind.get("poor_localisation", 0),
+                by_kind.get("duplicate", 0),
+                by_kind.get("missed", 0),
+                json.dumps(detail),
+            ))
+
+            if progress is not None:
+                progress["progress"] = index + 1
 
     return predictions, targets, per_image_rows
 
@@ -235,6 +375,7 @@ def _persist_results(
     per_image_rows: List[Tuple],
     class_names: Dict[int, str],
     iou_threshold: float,
+    conf_threshold: float,
 ) -> None:
     """
     Compute the aggregates and write both the summary and the per-image rows.
@@ -246,6 +387,13 @@ def _persist_results(
     summary = evaluate_detections(predictions, targets, class_names)
     per_image_details = [json.loads(row[-1]) for row in per_image_rows]
     sweep = ea.confidence_sweep(predictions, targets, iou_threshold=iou_threshold)
+    matrix = ea.confusion_matrix(
+        predictions,
+        targets,
+        n_classes=len(class_names),
+        iou_threshold=iou_threshold,
+        conf_threshold=conf_threshold,
+    )
 
     if per_image_rows:
         try:
@@ -280,9 +428,41 @@ def _persist_results(
         "per_class_metrics": json.dumps(summary.get("per_class_metrics", [])),
         "error_kinds": json.dumps(ea.aggregate_error_kinds(per_image_details)),
         "class_confusion": json.dumps(ea.class_confusion(per_image_details)),
+        "confusion_matrix": json.dumps(matrix),
         "confidence_sweep": json.dumps(sweep),
         "best_operating_point": json.dumps(ea.best_operating_point(sweep) or {}),
     })
+
+
+def _ground_truth_for(
+    request: "EvaluateRequest", dataset: Dict, dataset_id: str
+) -> Tuple[List[Dict], Dict[str, List[Dict]], str]:
+    """
+    Pick the ground truth to score against, snapshot or live.
+
+    Both branches return the same three things, so everything downstream is
+    unaware of which source it got.
+    """
+    if request.version_id:
+        images, annotations, split_used = _snapshot_split(
+            request.version_id, request.split
+        )
+        if not images:
+            raise RuntimeError(
+                "This version's snapshot has no usable images. Generate a "
+                "version with the split you want to score against."
+            )
+        return images, annotations, split_used
+
+    images, split_used = _split_images(dataset, request.split)
+    # Ground truth keyed by image, so a missing annotation is an empty target
+    # rather than a skipped image: a model predicting boxes on an unlabelled
+    # image is making false positives and should be charged for them.
+    annotations = {
+        row["image_id"]: row.get("boxes") or []
+        for row in AnnotationService.get_all_dataset_annotations(dataset_id)
+    }
+    return images, annotations, split_used
 
 
 def _evaluate_task(
@@ -301,7 +481,8 @@ def _evaluate_task(
 
     mark("running")
     try:
-        from app.services.inference import YOLOInference
+        from app.api.v1.endpoints.inference import _get_job_model_type
+        from app.services.trainer_factory import create_inference
 
         weights = _resolve_weights(job_id)
         if weights is None:
@@ -312,21 +493,19 @@ def _evaluate_task(
             raise RuntimeError("Dataset not found")
 
         class_names = _class_names_for(dataset)
-        images, split_used = _split_images(dataset, request.split)
+
+        images, annotations, split_used = _ground_truth_for(
+            request, dataset, dataset_id
+        )
         images = images[: request.max_images]
         if not images:
             raise RuntimeError("No images in this split to evaluate")
 
-        # Ground truth, keyed by image, so a missing annotation is an empty
-        # target rather than a skipped image: a model predicting boxes on an
-        # unlabelled image is making false positives and should be charged for
-        # them.
-        annotations = {
-            row["image_id"]: row.get("boxes") or []
-            for row in AnnotationService.get_all_dataset_annotations(dataset_id)
-        }
-
-        model = YOLOInference(str(weights))
+        # The backend has to come from the job. Loading every checkpoint with
+        # YOLOInference worked only for YOLO runs — an RT-DETR or torchvision
+        # checkpoint is a different format, so those evaluations either threw
+        # or, worse, scored whatever ultralytics managed to coerce.
+        model = create_inference(str(weights), _get_job_model_type(job_id))
 
         if progress is not None:
             progress["total"] = len(images)
@@ -353,6 +532,7 @@ def _evaluate_task(
             per_image_rows=per_image_rows,
             class_names=class_names,
             iou_threshold=request.iou_threshold,
+            conf_threshold=request.conf_threshold,
         )
 
         mark("completed", evaluation_id=evaluation_id, images_evaluated=len(predictions))
@@ -388,6 +568,18 @@ async def run_evaluation(
         raise HTTPException(status_code=404, detail="Dataset not found")
     require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
 
+    if request.version_id:
+        owner = _version_dataset_id(request.version_id)
+        if owner is None:
+            raise HTTPException(status_code=404, detail="Dataset version not found")
+        if owner != dataset_id:
+            # Otherwise access to one project would let you score a model
+            # against another project's snapshot.
+            raise HTTPException(
+                status_code=400,
+                detail="That version belongs to a different project",
+            )
+
     if _resolve_weights(request.job_id) is None:
         raise HTTPException(
             status_code=409,
@@ -399,12 +591,14 @@ async def run_evaluation(
         with db_cursor(commit=True) as cursor:
             cursor.execute(
                 "INSERT INTO evaluations "
-                "(id, job_id, dataset_id, split, iou_threshold, conf_threshold, status) "
-                "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
+                "(id, job_id, dataset_id, version_id, split, iou_threshold, "
+                " conf_threshold, status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')",
                 (
                     evaluation_id,
                     request.job_id,
                     dataset_id,
+                    request.version_id,
                     request.split,
                     request.iou_threshold,
                     request.conf_threshold,
@@ -515,7 +709,8 @@ async def latest_evaluation(job_id: str, current_user: dict = Depends(get_curren
         "job_id": job_id,
         "evaluation": _decode(
             row, "metrics", "per_class_metrics", "error_kinds",
-            "class_confusion", "confidence_sweep", "best_operating_point",
+            "class_confusion", "confusion_matrix", "confidence_sweep",
+            "best_operating_point",
         ),
     }
 
@@ -528,7 +723,8 @@ async def get_evaluation(
     row = _load_evaluation(evaluation_id, current_user)
     return _decode(
         row, "metrics", "per_class_metrics", "error_kinds",
-        "class_confusion", "confidence_sweep", "best_operating_point",
+        "class_confusion", "confusion_matrix", "confidence_sweep",
+        "best_operating_point",
     )
 
 
@@ -728,8 +924,8 @@ async def evaluation_history(
     try:
         with db_cursor(dictionary=True) as cursor:
             cursor.execute(
-                "SELECT id, split, iou_threshold, conf_threshold, status, "
-                "       images_evaluated, metrics, created_at "
+                "SELECT id, version_id, split, iou_threshold, conf_threshold, "
+                "       status, images_evaluated, metrics, created_at "
                 "FROM evaluations WHERE job_id = %s ORDER BY created_at DESC",
                 (job_id,),
             )

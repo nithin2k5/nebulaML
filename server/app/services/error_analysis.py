@@ -86,6 +86,45 @@ def gt_boxes_to_xyxy(boxes: Sequence[Dict[str, Any]]) -> Dict[str, np.ndarray]:
     }
 
 
+def version_boxes_to_annotations(
+    boxes: Sequence[Dict[str, Any]], width: int, height: int
+) -> List[Dict[str, Any]]:
+    """
+    Convert a version snapshot's boxes into the annotation shape.
+
+    `dataset_version_images.boxes` stores YOLO's normalised centre format —
+    ``{"class_id": int, "bbox_normalized": [cx, cy, w, h]}`` — because that is
+    what the label .txt files beside the images contain. Live annotations are
+    ``{x, y, width, height}`` in absolute pixels.
+
+    Converting to the annotation shape rather than straight to arrays means the
+    snapshot and the live table feed the identical downstream path, so there is
+    one definition of how ground truth becomes metrics instead of two that can
+    drift apart.
+    """
+    converted: List[Dict[str, Any]] = []
+    for box in boxes or []:
+        norm = box.get("bbox_normalized")
+        if not norm or len(norm) < 4:
+            continue
+        try:
+            cx, cy, bw, bh = (float(v) for v in norm[:4])
+        except (TypeError, ValueError):
+            continue
+        pixel_width = bw * width
+        pixel_height = bh * height
+        if pixel_width <= 0 or pixel_height <= 0:
+            continue
+        converted.append({
+            "x": (cx - bw / 2.0) * width,
+            "y": (cy - bh / 2.0) * height,
+            "width": pixel_width,
+            "height": pixel_height,
+            "class_id": int(box.get("class_id", 0)),
+        })
+    return converted
+
+
 def detections_to_arrays(detections: Sequence[Dict[str, Any]]) -> Dict[str, np.ndarray]:
     """Convert inference output (`bbox` xyxy pixels) into metric arrays."""
     xyxy: List[List[float]] = []
@@ -435,3 +474,108 @@ def class_confusion(
     ]
     rows.sort(key=lambda row: -row["count"])
     return rows
+
+
+def _match_class_agnostic(
+    pred_boxes: np.ndarray,
+    pred_scores: np.ndarray,
+    gt_boxes: np.ndarray,
+    iou_threshold: float,
+) -> Dict[str, np.ndarray]:
+    """
+    Pair predictions to ground truth ignoring labels, best score first.
+
+    Returns `pred_to_gt` and `gt_to_pred` index maps, -1 where unpaired.
+
+    Deliberately label-blind, unlike `classify_image_errors`: scoring must
+    treat a wrong label as a miss, but the confusion matrix exists to say
+    *which* label was used instead, and that is only knowable by pairing the
+    boxes first and comparing the labels afterwards.
+    """
+    pred_to_gt = np.full(len(pred_boxes), -1, dtype=int)
+    gt_to_pred = np.full(len(gt_boxes), -1, dtype=int)
+    if len(pred_boxes) == 0 or len(gt_boxes) == 0:
+        return {"pred_to_gt": pred_to_gt, "gt_to_pred": gt_to_pred}
+
+    iou = box_iou(pred_boxes, gt_boxes)
+    for p in np.argsort(-pred_scores):
+        candidates = iou[p]
+        # Highest overlap first, stopping at the threshold or the first free box.
+        for g in np.argsort(-candidates):
+            if float(candidates[g]) < iou_threshold:
+                break
+            if gt_to_pred[g] == -1:
+                pred_to_gt[p] = int(g)
+                gt_to_pred[g] = int(p)
+                break
+    return {"pred_to_gt": pred_to_gt, "gt_to_pred": gt_to_pred}
+
+
+def confusion_matrix(
+    predictions: Sequence[Dict[str, np.ndarray]],
+    targets: Sequence[Dict[str, np.ndarray]],
+    n_classes: int,
+    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.25,
+) -> Dict[str, Any]:
+    """
+    A full confusion matrix over the split, with a background row and column.
+
+    `matrix[actual][predicted]`, where index `n_classes` means background: the
+    last column counts ground truth nothing found, the last row counts
+    predictions with no object behind them. A row reads as "what this class
+    gets called"; a column as "what gets called this class".
+
+    This complements `class_confusion`, which ranks only the pairs that
+    actually collide and is the better thing to read first. The matrix is for
+    when the question is the whole picture — including what was missed outright
+    versus invented, which a pair list cannot show.
+
+    Every ground-truth box and every prediction lands in exactly one cell, so
+    rows sum to the ground truth per class and columns to the predictions. That
+    is what the class-agnostic pairing buys: pairing by label instead would
+    count a mislabelled object twice, once as a miss of its real class and
+    again as an invention of the predicted one.
+    """
+    size = n_classes + 1
+    background = n_classes
+    matrix = [[0] * size for _ in range(size)]
+
+    def slot(label: Any) -> int:
+        try:
+            value = int(label)
+        except (TypeError, ValueError):
+            return background
+        return value if 0 <= value < n_classes else background
+
+    for prediction, target in zip(predictions, targets):
+        pred_boxes = _as_xyxy(prediction.get("boxes", []))
+        pred_scores = np.asarray(prediction.get("scores", []), dtype=np.float32).reshape(-1)
+        pred_labels = np.asarray(prediction.get("labels", []), dtype=int).reshape(-1)
+        gt_boxes = _as_xyxy(target.get("boxes", []))
+        gt_labels = np.asarray(target.get("labels", []), dtype=int).reshape(-1)
+
+        # The matrix describes one operating point, so it sees only the
+        # predictions the deployed model would surface.
+        keep = pred_scores >= conf_threshold
+        pred_boxes, pred_scores, pred_labels = (
+            pred_boxes[keep], pred_scores[keep], pred_labels[keep]
+        )
+
+        paired = _match_class_agnostic(pred_boxes, pred_scores, gt_boxes, iou_threshold)
+        pred_to_gt, gt_to_pred = paired["pred_to_gt"], paired["gt_to_pred"]
+
+        for p in range(len(pred_boxes)):
+            gt_index = int(pred_to_gt[p])
+            row = slot(gt_labels[gt_index]) if gt_index >= 0 else background
+            matrix[row][slot(pred_labels[p])] += 1
+
+        for g in range(len(gt_boxes)):
+            if gt_to_pred[g] < 0:
+                matrix[slot(gt_labels[g])][background] += 1
+
+    return {
+        "matrix": matrix,
+        "n_classes": n_classes,
+        "background_index": background,
+    }
