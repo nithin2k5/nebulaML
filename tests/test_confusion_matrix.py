@@ -14,6 +14,7 @@ The fixture image is 100x100 with two ground-truth boxes:
 
 import numpy as np
 import pytest
+
 from app.services.error_analysis import confusion_matrix
 
 CLASS_NAMES = {0: "cat", 1: "dog"}

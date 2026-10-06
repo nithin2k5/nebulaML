@@ -38,6 +38,13 @@ export default function ChatbotWidget() {
   if (pathname === "/" || pathname === "/home" || pathname === "/login" || pathname === "/register") {
     return null;
   }
+  // Every call this widget makes is authenticated, so offering it to a
+  // signed-out visitor — on a published dataset page, say — would only
+  // produce 401s. The token is the real condition; the paths above are the
+  // marketing pages, where a signed-in user should not see it either.
+  if (!token) {
+    return null;
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();

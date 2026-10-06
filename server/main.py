@@ -25,7 +25,7 @@ if platform.system() == "Darwin":
         except OSError:
             pass
 
-from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration, chat, search, evaluation
+from app.api.v1.endpoints import inference, training, models as model_routes, annotations, auth, annotations_analyze, smart_annotation, video, active_learning, monitoring, collaboration, chat, search, evaluation, publishing
 from app.db.session import initialize_database
 from app.core.config import settings
 from app.core.logging import logger
@@ -90,6 +90,12 @@ app.include_router(collaboration.router, prefix="/api/datasets", tags=["Collabor
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(search.router, prefix="/api/search", tags=["Semantic Search"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
+app.include_router(publishing.router, prefix="/api/publish", tags=["Publishing"])
+# The only anonymous router in the application: no auth dependency anywhere
+# in it, and the slug in the URL is the whole credential. Mounted under its
+# own /api/public prefix so the boundary shows up in the route table rather
+# than only in the module.
+app.include_router(publishing.public_router, prefix="/api/public", tags=["Public"])
 
 @app.get("/")
 async def root():

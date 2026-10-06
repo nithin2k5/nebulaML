@@ -10,6 +10,7 @@ import {
     LayoutDashboard,
     Microscope,
     Package,
+    Share2,
     TestTube2,
     Upload,
     Users,
@@ -178,6 +179,18 @@ export const STEPS = [
         requires: ["train"],
         minRole: "admin",
         blurb: "Inference volume, confidence distribution and drift.",
+    },
+    {
+        // A sibling of Deploy: that one releases the model, this one releases
+        // the data. It needs a frozen version and nothing else — a dataset is
+        // worth publishing whether or not anyone ever trained on it.
+        id: "publish",
+        label: "Publish",
+        phase: "operate",
+        icon: Share2,
+        requires: ["generate"],
+        minRole: "admin",
+        blurb: "Share a frozen version on a public, revocable link.",
     },
     {
         // Not a terminus: its output is annotation work, so it loops back to
@@ -391,6 +404,19 @@ export function deriveStates(facts = {}) {
     );
 
     // --- Operate ----------------------------------------------------------
+    // Publishing releases data, not a model, so it waits on a frozen version
+    // rather than on training. Nothing records that a publication exists in
+    // the facts this runs on, so it stops at `ready` rather than claiming
+    // `done` — the same rule test and deploy follow.
+    set(
+        "publish",
+        hasVersion ? STATE.READY : STATE.LOCKED,
+        hasVersion
+            ? "Share a frozen version on a public link."
+            : "Publishing needs a frozen version — a public link to a moving dataset would not stay true.",
+        hasVersion ? null : "generate"
+    );
+
     const needsModel = "Needs a trained model.";
     if (!hasModel) {
         set("test", STATE.LOCKED, needsModel, "train");

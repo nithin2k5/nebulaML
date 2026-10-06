@@ -125,6 +125,22 @@ export const API_ENDPOINTS = {
         CLUSTERS: (datasetId, clusters = 8) =>
             `${API_BASE_URL}/api/search/clusters/${datasetId}?clusters=${clusters}`,
     },
+    PUBLISH: {
+        CREATE: `${API_BASE_URL}/api/publish`,
+        LIST: (datasetId) => `${API_BASE_URL}/api/publish/dataset/${datasetId}`,
+        UPDATE: (publicationId) => `${API_BASE_URL}/api/publish/${publicationId}`,
+        REVOKE: (publicationId) => `${API_BASE_URL}/api/publish/${publicationId}`,
+    },
+    // Anonymous endpoints. No Authorization header belongs on any of these —
+    // the slug in the path is the whole credential, and sending a token would
+    // only put one in a log that does not need it.
+    PUBLIC: {
+        CARD: (slug) => `${API_BASE_URL}/api/public/datasets/${slug}`,
+        IMAGE: (slug, index) =>
+            `${API_BASE_URL}/api/public/datasets/${slug}/image/${index}`,
+        DOWNLOAD: (slug, format) =>
+            `${API_BASE_URL}/api/public/datasets/${slug}/download?format=${format}`,
+    },
     MONITORING: {
         LOG: `${API_BASE_URL}/api/monitoring/log`,
         STATS: (datasetId) => `${API_BASE_URL}/api/monitoring/stats/${datasetId}`,

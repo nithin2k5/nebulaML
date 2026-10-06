@@ -26,6 +26,10 @@ backends behind one workflow.
 - **Collaboration**: Per-project roles (admin / annotator / viewer), email
   invitations and an activity log
 - **Export**: YOLO, COCO and Pascal VOC, plus model export for deployment
+- **Publishing**: Share a frozen version on a public, revocable link
+  (`/d/<slug>`) — a dataset card with classes, counts and samples, plus YOLO
+  and COCO downloads. No account needed to view it; downloads can be turned
+  off without taking the link down, and revoking is immediate and permanent
 
 ## 🛠️ Tech Stack
 
@@ -126,7 +130,12 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 11. **Active Learning** — review low-confidence predictions; optionally retrain
     automatically once enough new annotations accumulate
 12. **Monitoring** — inference volume, confidence distribution and drift
-13. **Team** — invite collaborators as admin, annotator or viewer
+13. **Publish** — put a frozen version on a public link anyone can open
+    without an account. Admin only, since it exposes project data; the link is
+    an unguessable token rather than the version id, the project's own name
+    never leaves (only the title you choose), and revoking both kills the link
+    and deletes the prepared downloads
+14. **Team** — invite collaborators as admin, annotator or viewer
 
 ## 🎨 Theme
 
@@ -165,7 +174,9 @@ NebulaML/
 ## 🔧 API Endpoints
 
 Full interactive reference at `http://localhost:8000/docs`. Every route below
-requires either a `Bearer` access token or an `X-API-Key` header.
+requires either a `Bearer` access token or an `X-API-Key` header — except
+`/api/public`, which is anonymous by design: the slug in the URL is the whole
+credential, and those routes are rate limited per IP.
 
 | Prefix | Covers |
 | --- | --- |
@@ -177,6 +188,8 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/smart` | Segment-assisted and zero-shot annotation |
 | `/api/active-learning` | Uncertainty collection, review, approve/reject |
 | `/api/evaluation` | Score a model on a split, error browser, confidence sweep, run diff |
+| `/api/publish` | Publish a version, list links, edit a card, revoke |
+| `/api/public` | **Unauthenticated.** Dataset card, previews and downloads by slug |
 | `/api/monitoring` | Inference logging, stats, drift |
 | `/api/datasets` | Project members, invitations, activity log |
 | `/api/video` | Frame extraction |
@@ -189,6 +202,8 @@ A few of the most used:
 - `GET  /api/training/status/{job_id}` — poll one job
 - `POST /api/training/start-from-dataset` — train from a dataset version
 - `GET  /api/models/export/{model_name}?format=onnx` — export a trained model
+- `POST /api/publish` — publish a frozen version behind a public link
+- `GET  /api/public/datasets/{slug}` — the public dataset card (no auth)
 
 ## 🧪 Development
 
