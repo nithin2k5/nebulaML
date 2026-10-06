@@ -27,6 +27,7 @@ import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth";
 import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
 import ProjectMonitoring from "@/components/project/ProjectMonitoring";
+import ProjectPublish from "@/components/project/ProjectPublish";
 import ProjectTeam from "@/components/project/ProjectTeam";
 
 export default function ProjectPage() {
@@ -344,6 +345,10 @@ export default function ProjectPage() {
 
                         <TabsContent value="monitoring" className="mt-0 h-full">
                             <ProjectMonitoring dataset={dataset} />
+                        </TabsContent>
+
+                        <TabsContent value="publish" className="mt-0 h-full overflow-y-auto">
+                            <ProjectPublish dataset={dataset} onNavigate={handleTabChange} />
                         </TabsContent>
 
                         <TabsContent value="team" className="mt-0 h-full">
