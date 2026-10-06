@@ -731,6 +731,32 @@ def create_tables():
             )
         """)
         logger.info("✓ Table 'evaluations' ready")
+        # Outbound webhooks
+        #
+        # `secret` is the HMAC key a receiver verifies deliveries with. It is
+        # stored in the clear because signing requires the original key — it is
+        # a shared secret, not a credential to be checked against — so it is
+        # never returned by any read path.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id VARCHAR(36) PRIMARY KEY,
+                dataset_id VARCHAR(255) NOT NULL,
+                url VARCHAR(2048) NOT NULL,
+                secret VARCHAR(128) NOT NULL,
+                events JSON NOT NULL,
+                enabled BOOLEAN DEFAULT TRUE,
+                last_status INT NULL,
+                last_error VARCHAR(500) NULL,
+                last_attempt_at TIMESTAMP NULL,
+                consecutive_failures INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                INDEX idx_webhooks_dataset (dataset_id),
+                INDEX idx_webhooks_enabled (dataset_id, enabled)
+            )
+        """)
+        logger.info("✓ Table 'webhooks' ready")
+
         migrate_evaluations(connection)
 
         # Per-image evaluation detail

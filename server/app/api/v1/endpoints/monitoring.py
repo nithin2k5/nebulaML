@@ -17,6 +17,7 @@ from app.db.session import get_db_connection
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.access import require_role
 from app.services.database import DatasetService
+from app.services import webhooks as webhook_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -253,14 +254,34 @@ async def check_drift(
 
     drift_detected = max_shift > 15 or conf_shift < -0.10
 
+    severity = (
+        "high" if max_shift > 25 or conf_shift < -0.20
+        else "medium" if drift_detected
+        else "low"
+    )
+
+    if drift_detected:
+        # Throttled, because this endpoint is polled by the monitoring tab:
+        # the drift condition persists across reads, so an unthrottled emit
+        # would send one delivery per poll until the drift cleared.
+        webhook_service.emit_throttled(
+            dataset_id,
+            "drift.detected",
+            {
+                "dataset_id": dataset_id,
+                "severity": severity,
+                "confidence_shift": round(conf_shift, 4),
+                "max_class_shift": round(max_shift, 2),
+                "old_avg_confidence": round(old_avg_conf, 4),
+                "new_avg_confidence": round(new_avg_conf, 4),
+            },
+            webhook_service.DRIFT_COOLDOWN_SECONDS,
+        )
+
     return {
         "dataset_id": dataset_id,
         "drift_detected": drift_detected,
-        "severity": (
-            "high" if max_shift > 25 or conf_shift < -0.20
-            else "medium" if drift_detected
-            else "low"
-        ),
+        "severity": severity,
         "confidence_shift": round(conf_shift, 4),
         "old_avg_confidence": round(old_avg_conf, 4),
         "new_avg_confidence": round(new_avg_conf, 4),

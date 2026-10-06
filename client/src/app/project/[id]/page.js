@@ -28,6 +28,7 @@ import ProjectHealth from "@/components/project/ProjectHealth";
 import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
 import ProjectMonitoring from "@/components/project/ProjectMonitoring";
 import ProjectClasses from "@/components/project/ProjectClasses";
+import ProjectWebhooks from "@/components/project/ProjectWebhooks";
 import ProjectTeam from "@/components/project/ProjectTeam";
 
 export default function ProjectPage() {
@@ -349,6 +350,10 @@ export default function ProjectPage() {
 
                         <TabsContent value="classes" className="mt-0 h-full">
                             <ProjectClasses dataset={dataset} onRefresh={() => { fetchDataset(dataset.id); fetchStats(dataset.id); }} />
+                        </TabsContent>
+
+                        <TabsContent value="webhooks" className="mt-0 h-full">
+                            <ProjectWebhooks dataset={dataset} />
                         </TabsContent>
 
                         <TabsContent value="team" className="mt-0 h-full">

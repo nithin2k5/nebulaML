@@ -14,6 +14,7 @@ import {
     TestTube2,
     Upload,
     Users,
+    Webhook,
 } from "lucide-react";
 
 // The one description of the project pipeline.
@@ -214,6 +215,17 @@ export const STEPS = [
         minRole: "viewer",
         blurb: "Per-project roles, invitations and the activity log.",
     },
+    {
+        // Integrations rather than a pipeline step. Admin-only: a hook
+        // receives this project's event payloads.
+        id: "webhooks",
+        label: "Webhooks",
+        phase: "project",
+        icon: Webhook,
+        requires: [],
+        minRole: "admin",
+        blurb: "Get told when training finishes, drift appears or retraining starts.",
+    },
 ];
 
 export const STEP_IDS = STEPS.map((s) => s.id);
@@ -322,6 +334,7 @@ export function deriveStates(facts = {}) {
     set("overview", STATE.READY, null);
     set("team", STATE.READY, null);
     set("classes", STATE.READY, null);
+    set("webhooks", STATE.READY, null);
 
     // --- Data -------------------------------------------------------------
     set(

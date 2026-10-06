@@ -139,6 +139,16 @@ export default function ProjectTeam({ dataset }) {
                 return `Added ${log.details?.target_email} as ${log.details?.role}`;
             case 'member_removed':
                 return `Removed user ID ${log.details?.target_user_id} from project`;
+            case 'class_added':
+                return `Added the class "${log.details?.name}"`;
+            case 'class_renamed':
+                return `Renamed the class "${log.details?.from}" to "${log.details?.to}"`;
+            case 'class_deleted':
+                return `Deleted the class "${log.details?.name}" and ${log.details?.result?.boxes_dropped ?? 0} of its boxes`;
+            case 'classes_merged':
+                return `Merged ${(log.details?.sources || []).join(", ")} into "${log.details?.target}"`;
+            case 'project_updated':
+                return `Updated the project ${(log.details?.fields || []).join(" and ")}`;
             default:
                 return log.action.replace(/_/g, " ");
         }

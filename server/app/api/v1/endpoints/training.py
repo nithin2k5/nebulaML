@@ -20,6 +20,7 @@ import shutil
 from app.services.base_trainer import TrainingCancelledException
 from app.services.trainer_factory import create_trainer
 from app.services.model_registry import get_allowed_model_keys, get_backend, get_model_info, get_registry_for_api, get_task
+from app.services import webhooks as webhook_service
 from app.services.dataset_analyzer import DatasetAnalyzer
 from app.services.database import DatasetService, DatasetVersionService, TrainingJobService, AutoRetrainConfigService
 from app.services.versioning import VersioningEngine
@@ -705,8 +706,37 @@ async def run_training(job_id: str, data_yaml: str, config: TrainingConfig):
         # downstream reads this after the run.
         _cleanup_job_workspace(job_id)
 
+        # Notify subscribers. A run takes minutes to hours and nothing was
+        # watching it except a browser tab, so this is the first point at
+        # which finishing is observable from outside the app.
+        job = training_jobs.get(job_id, {})
         if final_status == "completed":
             logger.info(f"Training job {job_id} completed successfully")
+            webhook_service.emit(
+                job.get("dataset_id"),
+                "training.completed",
+                {
+                    "job_id": job_id,
+                    "dataset_id": job.get("dataset_id"),
+                    "version_id": job.get("version_id"),
+                    "model_name": config.model_name,
+                    "epochs_completed": results.get("epochs_completed"),
+                    "metrics": results.get("metrics", {}),
+                    "model_path": results.get("model_path", ""),
+                },
+            )
+        elif final_status == "failed":
+            webhook_service.emit(
+                job.get("dataset_id"),
+                "training.failed",
+                {
+                    "job_id": job_id,
+                    "dataset_id": job.get("dataset_id"),
+                    "version_id": job.get("version_id"),
+                    "model_name": config.model_name,
+                    "error": error_msg,
+                },
+            )
 
 @router.get("/status/{job_id}")
 async def get_training_status(job_id: str, current_user: dict = Depends(get_current_user)):

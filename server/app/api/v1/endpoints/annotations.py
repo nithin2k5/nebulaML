@@ -25,6 +25,7 @@ import random
 from app.services.database import DatasetService, AnnotationService
 from app.services.dataset_importer import DatasetImporter
 from app.services import class_manager
+from app.services import webhooks as webhook_service
 from app.services.class_manager import ClassOperationError
 from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection, db_cursor
@@ -701,6 +702,20 @@ async def save_annotation(
                                     )
                                     logger.info(
                                         f"Auto-retrain job {job_id} queued for dataset {dataset_id}"
+                                    )
+                                    # Auto-retrain fires from somebody else's
+                                    # annotation save, so without this nobody
+                                    # learns a run started until it finishes.
+                                    webhook_service.emit(
+                                        dataset_id,
+                                        "autoretrain.triggered",
+                                        {
+                                            "job_id": job_id,
+                                            "dataset_id": dataset_id,
+                                            "version_id": new_version_id,
+                                            "model_name": auto_config.model_name,
+                                            "triggered_by_annotations": auto_config.min_new_annotations,
+                                        },
                                     )
                                 else:
                                     logger.warning(

@@ -27,6 +27,10 @@ backends behind one workflow.
 - **Active learning**: Surfaces low-confidence predictions for review and can
   retrain automatically once enough new annotations land
 - **Monitoring**: Inference logging and drift detection per project
+- **Webhooks**: A signed POST when training finishes or fails, drift appears or
+  auto-retrain starts — the three things that previously happened where nobody
+  could see them. HMAC-SHA256 over the delivered body, bounded retries, and a
+  hook that keeps failing switches itself off
 - **Class management**: Rename, add, merge or remove a class after the fact.
   A merge retargets every box rather than dropping it, and frozen versions keep
   the names they were created with, so finished runs stay reproducible
@@ -146,6 +150,12 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
     makes "was this class a mistake?" answerable. Admin only, and the index
     rewrite runs in one transaction so the dataset is never half-reindexed
 14. **Team** — invite collaborators as admin, annotator or viewer
+15. **Webhooks** — subscribe an endpoint to project events. Each delivery is
+    signed with HMAC-SHA256 over the exact body sent, in
+    `X-NebulaML-Signature`; the secret is shown once at creation because
+    signing needs the original key. Admin only, https and public addresses
+    only — the server fetches whatever URL is registered, so a private or
+    link-local target is refused
 
 ## 🎨 Theme
 
@@ -197,6 +207,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/active-learning` | Uncertainty collection, review, approve/reject |
 | `/api/evaluation` | Score a model on a split, error browser, confidence sweep, run diff |
 | `/api/monitoring` | Inference logging, stats, drift |
+| `/api/webhooks` | Event subscriptions, test delivery |
 | `/api/datasets` | Project members, invitations, activity log |
 | `/api/video` | Frame extraction |
 | `/api/chat` | In-app assistant |

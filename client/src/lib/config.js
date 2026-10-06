@@ -26,6 +26,14 @@ export const API_ENDPOINTS = {
         ACTIVITY: (id) => `${API_BASE_URL}/api/datasets/${id}/activity`,
         ACCEPT_INVITE: `${API_BASE_URL}/api/datasets/invites/accept`,
     },
+    WEBHOOKS: {
+        EVENTS: `${API_BASE_URL}/api/webhooks/events`,
+        LIST: (datasetId) => `${API_BASE_URL}/api/webhooks/${datasetId}`,
+        CREATE: `${API_BASE_URL}/api/webhooks`,
+        UPDATE: (id) => `${API_BASE_URL}/api/webhooks/${id}`,
+        DELETE: (id) => `${API_BASE_URL}/api/webhooks/${id}`,
+        TEST: (id) => `${API_BASE_URL}/api/webhooks/${id}/test`,
+    },
     ANNOTATIONS: {
         GET_IMAGE: (datasetId, filename, token) => `${API_BASE_URL}/api/annotations/image/${datasetId}/${filename}${token ? `?token=${token}` : ''}`,
         // Downscaled copy for grids and filmstrips, cached on disk server-side.
