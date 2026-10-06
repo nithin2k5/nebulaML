@@ -9,6 +9,12 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { API_ENDPOINTS } from "@/lib/config";
 
+/** The project id when the user is looking at a project, else null. */
+function projectIdFromPath(pathname) {
+  const match = /^\/project\/([^/?#]+)/.exec(pathname || "");
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export default function ChatbotWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
@@ -56,7 +62,14 @@ export default function ChatbotWidget() {
           "Content-Type": "application/json",
           "Authorization": token ? `Bearer ${token}` : ""
         },
-        body: JSON.stringify({ messages: currentMessages })
+        body: JSON.stringify({
+          messages: currentMessages,
+          // Taken from the route rather than passed in: the widget is mounted
+          // once globally, so the URL is the only thing that knows which
+          // project the question is being asked from. The server re-checks
+          // that the caller may read it.
+          dataset_id: projectIdFromPath(pathname),
+        })
       });
 
       if (!response.ok) throw new Error("Failed to get response");

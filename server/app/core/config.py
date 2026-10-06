@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     # Frontend URL (for invites/password resets)
     frontend_url: str = "http://localhost:3000"
 
+    # In-app assistant. With no key set the assistant falls back to canned
+    # answers and says so, so this stays optional for a self-hosted install.
+    # The SDK also reads ANTHROPIC_API_KEY from the environment directly;
+    # setting it here is for deployments that keep config in server/.env.
+    anthropic_api_key: str = ""
+    assistant_model: str = "claude-opus-5"
+
     # Send Strict-Transport-Security. Off by default: over plain HTTP in local
     # development it pins the browser to https://localhost, which then refuses
     # to connect. Turn it on wherever the API is served over TLS.

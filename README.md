@@ -27,6 +27,10 @@ backends behind one workflow.
 - **Active learning**: Surfaces low-confidence predictions for review and can
   retrain automatically once enough new annotations land
 - **Monitoring**: Inference logging and drift detection per project
+- **Assistant**: An in-app assistant grounded in the project you are asking
+  from — its class balance, health findings, latest run metrics and weakest
+  classes go into the prompt, so "why is my mAP low" is answered with your
+  numbers. Optional: with no API key it falls back to canned answers and says so
 - **Webhooks**: A signed POST when training finishes or fails, drift appears or
   auto-retrain starts — the three things that previously happened where nobody
   could see them. HMAC-SHA256 over the delivered body, bounded retries, and a
@@ -210,7 +214,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | `/api/webhooks` | Event subscriptions, test delivery |
 | `/api/datasets` | Project members, invitations, activity log |
 | `/api/video` | Frame extraction |
-| `/api/chat` | In-app assistant |
+| `/api/chat` | In-app assistant, grounded in a project's own data |
 
 A few of the most used:
 
@@ -219,6 +223,24 @@ A few of the most used:
 - `GET  /api/training/status/{job_id}` — poll one job
 - `POST /api/training/start-from-dataset` — train from a dataset version
 - `GET  /api/models/export/{model_name}?format=onnx` — export a trained model
+
+## 🤖 Assistant configuration
+
+The in-app assistant calls the Claude API. Set a key in `server/.env` (or the
+environment) to enable it:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+# Optional; defaults to claude-opus-5
+ASSISTANT_MODEL=claude-opus-5
+```
+
+With no key set the assistant still answers the handful of questions its
+rule-based fallback covers, and each reply says that is what happened rather
+than implying a model was consulted. When you ask from inside a project, that
+project's facts are read fresh and put in the prompt — but only if your role
+lets you read the project, so the assistant cannot be used to read one you have
+no access to.
 
 ## 🧪 Development
 
