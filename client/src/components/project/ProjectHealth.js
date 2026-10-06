@@ -24,6 +24,13 @@ export default function ProjectHealth({ params }) {
     // depends on the search index, which a project may simply not have built.
     const [clusters, setClusters] = useState(null);
     const [clustersError, setClustersError] = useState(null);
+    // Embedding-space near-duplicates. The server has computed these all
+    // along; nothing in the UI asked for them. Kept separate from the pHash
+    // pass above because the two find different things, not the same thing
+    // twice: pHash is exact about pixel layout and catches re-saves and
+    // re-crops, while this catches the same subject photographed twice, which
+    // pHash scores as unrelated.
+    const [semanticDups, setSemanticDups] = useState(null);
 
     const fetchAnalysis = async (forceRefresh = false) => {
         if (!analysis && !isPolling) setLoading(true);
@@ -83,9 +90,27 @@ export default function ProjectHealth({ params }) {
         }
     };
 
+    const fetchSemanticDuplicates = async () => {
+        try {
+            const res = await fetch(API_ENDPOINTS.SEARCH.DUPLICATES(params.id, 0.95), {
+                headers: { "Authorization": `Bearer ${token}` },
+            });
+            if (!res.ok) {
+                // 409 means no index yet. The coverage panel below already
+                // prompts for that, so this stays quiet rather than showing a
+                // second copy of the same message.
+                return;
+            }
+            setSemanticDups(await res.json());
+        } catch (e) {
+            console.error("Semantic duplicate scan unavailable:", e);
+        }
+    };
+
     useEffect(() => {
         fetchAnalysis();
         fetchClusters();
+        fetchSemanticDuplicates();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [params.id]);
 
@@ -269,6 +294,38 @@ export default function ProjectHealth({ params }) {
                             <AlertTitle className="text-orange-400">Near-Duplicate Images</AlertTitle>
                             <AlertDescription className="text-orange-200/80">
                                 {nearDups.length} visually similar pair{nearDups.length !== 1 ? "s" : ""} detected (perceptual hash distance ≤ 10). Consider deduplication.
+                            </AlertDescription>
+                        </Alert>
+                    )}
+
+                    {semanticDups?.count > 0 && (
+                        <Alert className="bg-orange-950/20 border-orange-900/50">
+                            <Layers className="h-4 w-4 text-orange-400" />
+                            <AlertTitle className="text-orange-300">
+                                Same Subject, Different Shot
+                            </AlertTitle>
+                            <AlertDescription className="text-orange-200/80 space-y-1">
+                                <p className="text-xs opacity-80">
+                                    {semanticDups.count} pair
+                                    {semanticDups.count !== 1 ? "s" : ""} the perceptual-hash
+                                    pass cannot see: near-identical in embedding space
+                                    (similarity ≥ {semanticDups.threshold}), but different
+                                    enough pixel-wise to score as unrelated. Duplicates
+                                    across a train/val split leak the answer.
+                                </p>
+                                {semanticDups.pairs.slice(0, 5).map((pair) => (
+                                    <div key={`${pair.image_a}-${pair.image_b}`} className="font-mono text-xs">
+                                        • {pair.filename_a} ↔ {pair.filename_b}
+                                        {typeof pair.similarity === "number" &&
+                                            ` (${(pair.similarity * 100).toFixed(1)}%)`}
+                                    </div>
+                                ))}
+                                {semanticDups.count > 5 && (
+                                    <div className="text-xs opacity-70">
+                                        …and {semanticDups.count - 5} more. Find and remove them
+                                        with reverse-image search in the Images tab.
+                                    </div>
+                                )}
                             </AlertDescription>
                         </Alert>
                     )}

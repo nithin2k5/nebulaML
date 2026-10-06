@@ -18,8 +18,10 @@ backends behind one workflow.
   segment version writes polygon labels and trains on YOLO `-seg` checkpoints,
   reporting mask metrics alongside box metrics. A model and a version that
   disagree on the task are refused rather than trained
-- **Dataset health**: Class balance, duplicate and near-duplicate detection,
-  blur and corruption checks, scored and tracked over time
+- **Dataset health**: Class balance, blur and corruption checks, scored and
+  tracked over time, plus two independent duplicate passes — perceptual hash
+  for re-saves and re-crops, and embedding similarity for the same subject shot
+  twice, which a hash scores as unrelated
 - **Evaluation**: Scores a finished model against a split through one shared
   metric path, so runs from different backends are comparable. Per-class
   table, class confusion, a full confusion matrix, a confidence sweep, and a
@@ -120,8 +122,11 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 3. **Annotate** — draw boxes by hand, or auto-label from an existing model and
    correct the results; `propagate` copies boxes across images, rescaled to
    each target's dimensions
-4. **Health** — class balance, duplicates, blur and corruption, scored and
-   tracked across snapshots
+4. **Health** — class balance, blur and corruption, scored and tracked across
+   snapshots. Duplicates are found two ways, because they are different
+   problems: perceptual hash catches a re-saved or re-cropped file, embedding
+   similarity catches the same subject photographed twice. The second needs the
+   search index built from the Images tab
 5. **Generate** — freeze a version with its own preprocessing and augmentation
    settings; training always runs against a version, not the live dataset.
    Pick the task here: detection freezes box labels, segmentation freezes
