@@ -10,6 +10,7 @@ import {
     LayoutDashboard,
     Microscope,
     Package,
+    Tags,
     TestTube2,
     Upload,
     Users,
@@ -193,6 +194,18 @@ export const STEPS = [
     },
 
     {
+        // Project configuration rather than a pipeline step: the class list is
+        // editable at any point, and a dataset is never "finished" having
+        // classes. Admin-only because a delete discards boxes.
+        id: "classes",
+        label: "Classes",
+        phase: "project",
+        icon: Tags,
+        requires: [],
+        minRole: "admin",
+        blurb: "Rename, merge or remove a class across the whole dataset.",
+    },
+    {
         id: "team",
         label: "Team",
         phase: "project",
@@ -308,6 +321,7 @@ export function deriveStates(facts = {}) {
     // Ambient — always available, never "complete".
     set("overview", STATE.READY, null);
     set("team", STATE.READY, null);
+    set("classes", STATE.READY, null);
 
     // --- Data -------------------------------------------------------------
     set(

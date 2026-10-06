@@ -23,6 +23,9 @@ backends behind one workflow.
 - **Active learning**: Surfaces low-confidence predictions for review and can
   retrain automatically once enough new annotations land
 - **Monitoring**: Inference logging and drift detection per project
+- **Class management**: Rename, add, merge or remove a class after the fact.
+  A merge retargets every box rather than dropping it, and frozen versions keep
+  the names they were created with, so finished runs stay reproducible
 - **Collaboration**: Per-project roles (admin / annotator / viewer), email
   invitations and an activity log
 - **Export**: YOLO, COCO and Pascal VOC, plus model export for deployment
@@ -126,7 +129,12 @@ pipeline left to right. Each is also reachable directly via `?tab=<name>`.
 11. **Active Learning** — review low-confidence predictions; optionally retrain
     automatically once enough new annotations accumulate
 12. **Monitoring** — inference volume, confidence distribution and drift
-13. **Team** — invite collaborators as admin, annotator or viewer
+13. **Classes** — edit the label taxonomy: rename a class, add one, fold two
+    that turned out to mean the same thing into one, or delete one along with
+    its boxes. Each class shows how many boxes use it, because that is what
+    makes "was this class a mistake?" answerable. Admin only, and the index
+    rewrite runs in one transaction so the dataset is never half-reindexed
+14. **Team** — invite collaborators as admin, annotator or viewer
 
 ## 🎨 Theme
 
@@ -170,7 +178,7 @@ requires either a `Bearer` access token or an `X-API-Key` header.
 | Prefix | Covers |
 | --- | --- |
 | `/api/auth` | OTP sign-in, refresh/rotate, profile, API keys, user admin |
-| `/api/annotations` | Datasets, images, annotations, splits, export, image serving |
+| `/api/annotations` | Datasets, images, annotations, classes, splits, export, image serving |
 | `/api/training` | Jobs, queue, versions, preflight, metrics, auto-retrain config |
 | `/api/inference` | Single and batch prediction, model listing |
 | `/api/models` | List, info, download, export, delete |

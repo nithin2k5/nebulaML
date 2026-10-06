@@ -24,6 +24,8 @@ import random
 # sys.path.append(str(Path(__file__).parent.parent.parent))
 from app.services.database import DatasetService, AnnotationService
 from app.services.dataset_importer import DatasetImporter
+from app.services import class_manager
+from app.services.class_manager import ClassOperationError
 from app.api.v1.endpoints.auth import get_current_user
 from app.db.session import get_db_connection, db_cursor
 from app.core.access import require_role, effective_role
@@ -97,6 +99,25 @@ def safe_name_stem(name: str, fallback: str = "dataset") -> str:
     return stem[:100] or fallback
 
 
+def _validate_project_name(v: str) -> str:
+    """Shared by create and the rename PATCH, which must agree on what is legal.
+
+    A project name reaches the filesystem through export and download naming,
+    which is why separators and dot-only names are rejected here rather than
+    at the point of use.
+    """
+    v = (v or "").strip()
+    if not v:
+        raise ValueError("Dataset name cannot be empty")
+    if len(v) > 100:
+        raise ValueError("Dataset name must be 100 characters or fewer")
+    if any(sep in v for sep in ("/", "\\", "\x00")):
+        raise ValueError("Dataset name may not contain path separators")
+    if v.strip(". ") == "":
+        raise ValueError("Dataset name must contain more than dots and spaces")
+    return v
+
+
 class Dataset(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -105,16 +126,7 @@ class Dataset(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        v = (v or "").strip()
-        if not v:
-            raise ValueError("Dataset name cannot be empty")
-        if len(v) > 100:
-            raise ValueError("Dataset name must be 100 characters or fewer")
-        if any(sep in v for sep in ("/", "\\", "\x00")):
-            raise ValueError("Dataset name may not contain path separators")
-        if v.strip(". ") == "":
-            raise ValueError("Dataset name must contain more than dots and spaces")
-        return v
+        return _validate_project_name(v)
 
 class ExportRequest(BaseModel):
     split_ratio: float = 0.8
@@ -1305,6 +1317,209 @@ async def get_dataset_stats(
 
     stats = AnnotationService.get_dataset_stats(dataset_id)
     return stats
+
+# ---------------------------------------------------------------------------
+# Project and class editing
+#
+# `datasets.classes` was write-once until now: it was set at create time and
+# `DatasetService.update_dataset` existed but had no caller, so correcting a
+# typo in a class name or folding two labels that turned out to mean the same
+# thing meant editing MySQL by hand. The index rewrite that makes deletes and
+# merges safe lives in `services/class_manager.py`.
+#
+# These all require `admin` rather than `annotator`: a delete discards every
+# box of that class across the dataset, and a merge is not reversible from the
+# UI either.
+# ---------------------------------------------------------------------------
+
+
+class DatasetPatch(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is None else _validate_project_name(v)
+
+
+class ClassNameBody(BaseModel):
+    name: str
+
+
+class ClassMergeBody(BaseModel):
+    sources: List[int]
+    target: int
+
+
+def _require_class_admin(dataset_id: str, current_user: dict) -> dict:
+    """Load the dataset and assert the caller may reshape its class list."""
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "admin")
+    return db_dataset
+
+
+def _log_class_activity(dataset_id: str, user_id: int, action: str, details: dict) -> None:
+    """Record a class edit on the project activity log.
+
+    Best-effort: a class change that already committed should not report
+    failure because its audit line did not insert.
+    """
+    try:
+        with db_cursor(commit=True) as cursor:
+            cursor.execute(
+                "INSERT INTO activity_logs (dataset_id, user_id, action, details) "
+                "VALUES (%s, %s, %s, %s)",
+                (dataset_id, user_id, action, json.dumps(details)),
+            )
+    except Exception as e:  # noqa: BLE001 - audit must never break the write
+        logger.warning("Could not log %s on dataset %s: %s", action, dataset_id, e)
+
+
+def _run_class_plan(dataset_id: str, current_user: dict, action: str, planner, details: dict):
+    """Plan, apply and log one class operation.
+
+    `planner` is a zero-argument callable so the planner's validation errors
+    are raised inside this one try block and turn into a 400 in one place,
+    rather than every route repeating the same handler.
+    """
+    try:
+        new_classes, mapping = planner()
+    except ClassOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    stats = class_manager.apply(dataset_id, new_classes, mapping)
+    _log_class_activity(
+        dataset_id, current_user["id"], action, {**details, "result": stats}
+    )
+    return {"success": True, "classes": new_classes, **stats}
+
+
+@router.patch("/datasets/{dataset_id}")
+async def update_dataset_details(
+    dataset_id: str,
+    patch: DatasetPatch,
+    current_user: dict = Depends(get_current_user),
+):
+    """Rename a project or edit its description."""
+    _require_class_admin(dataset_id, current_user)
+
+    fields = {
+        k: v for k, v in patch.model_dump(exclude_unset=True).items() if v is not None
+    }
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if not DatasetService.update_dataset(dataset_id, **fields):
+        raise HTTPException(status_code=500, detail="Failed to update project")
+
+    _log_class_activity(
+        dataset_id, current_user["id"], "project_updated", {"fields": sorted(fields)}
+    )
+    return {"success": True, "dataset": DatasetService.get_dataset(dataset_id)}
+
+
+@router.get("/datasets/{dataset_id}/classes")
+async def list_dataset_classes(
+    dataset_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """The class list with how many boxes use each one.
+
+    The counts are what make a delete decidable — "background: 4 instances" is
+    the signal that a class was a mistake.
+    """
+    db_dataset = DatasetService.get_dataset(dataset_id)
+    if not db_dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], db_dataset["user_id"], "viewer")
+
+    classes = db_dataset.get("classes", []) or []
+    counts = class_manager.instance_counts(dataset_id, len(classes))
+    return {
+        "classes": [
+            {"index": i, "name": name, "instances": counts[i]}
+            for i, name in enumerate(classes)
+        ]
+    }
+
+
+@router.post("/datasets/{dataset_id}/classes")
+async def add_dataset_class(
+    dataset_id: str,
+    body: ClassNameBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Append a class. Existing annotations keep their indices."""
+    classes = _require_class_admin(dataset_id, current_user).get("classes", []) or []
+    return _run_class_plan(
+        dataset_id,
+        current_user,
+        "class_added",
+        lambda: class_manager.plan_add(classes, body.name),
+        {"name": (body.name or "").strip()},
+    )
+
+
+@router.patch("/datasets/{dataset_id}/classes/{index}")
+async def rename_dataset_class(
+    dataset_id: str,
+    index: int,
+    body: ClassNameBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Rename one class. Indices stay put; stored box names are refreshed."""
+    classes = _require_class_admin(dataset_id, current_user).get("classes", []) or []
+    return _run_class_plan(
+        dataset_id,
+        current_user,
+        "class_renamed",
+        lambda: class_manager.plan_rename(classes, index, body.name),
+        {
+            "from": classes[index] if 0 <= index < len(classes) else None,
+            "to": (body.name or "").strip(),
+        },
+    )
+
+
+@router.post("/datasets/{dataset_id}/classes/merge")
+async def merge_dataset_classes(
+    dataset_id: str,
+    body: ClassMergeBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fold one or more classes into another, keeping all of their boxes."""
+    classes = _require_class_admin(dataset_id, current_user).get("classes", []) or []
+    return _run_class_plan(
+        dataset_id,
+        current_user,
+        "classes_merged",
+        lambda: class_manager.plan_merge(classes, body.sources, body.target),
+        {
+            "sources": [classes[i] for i in body.sources if 0 <= i < len(classes)],
+            "target": classes[body.target] if 0 <= body.target < len(classes) else None,
+        },
+    )
+
+
+@router.delete("/datasets/{dataset_id}/classes/{index}")
+async def delete_dataset_class(
+    dataset_id: str,
+    index: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Remove a class and every box that used it."""
+    classes = _require_class_admin(dataset_id, current_user).get("classes", []) or []
+    return _run_class_plan(
+        dataset_id,
+        current_user,
+        "class_deleted",
+        lambda: class_manager.plan_delete(classes, index),
+        {"name": classes[index] if 0 <= index < len(classes) else None},
+    )
+
 
 @router.put("/datasets/{dataset_id}/images/{image_id}/split")
 async def update_image_split(
