@@ -10,6 +10,7 @@ import {
     LayoutDashboard,
     Microscope,
     Package,
+    Target,
     TestTube2,
     Upload,
     Users,
@@ -153,6 +154,21 @@ export const STEPS = [
     },
 
     {
+        // Between Registry and Test on purpose. Registry lists what training
+        // reported about itself; Evaluate re-scores a finished model through
+        // one shared metric path, which is what makes two runs comparable.
+        // Deciding what to deploy belongs here, before Test's ad-hoc spot
+        // checks and Deploy's export.
+        id: "evaluate",
+        label: "Evaluate",
+        phase: "build",
+        icon: Target,
+        requires: ["train"],
+        minRole: "admin",
+        blurb: "Score a model on the held-out split and see where it fails.",
+    },
+
+    {
         id: "test",
         label: "Test",
         phase: "operate",
@@ -290,6 +306,8 @@ export function deriveStates(facts = {}) {
         runningJobs = 0,
         failedJobs = 0,
         monitoringTotal = 0,
+        evaluationCount = 0,
+        runningEvaluations = 0,
     } = facts;
 
     const hasImages = totalImages > 0;
@@ -368,6 +386,23 @@ export function deriveStates(facts = {}) {
         set("train", STATE.FAILED, "The last run failed — see the log.");
     } else {
         set("train", STATE.READY, "Pick a backend and version, then run preflight.");
+    }
+
+    if (!hasModel) {
+        set(
+            "evaluate",
+            STATE.LOCKED,
+            "Scoring needs a finished model to score.",
+            "train"
+        );
+    } else if (runningEvaluations > 0) {
+        set("evaluate", STATE.ACTIVE, `${plural(runningEvaluations, "run")} scoring.`);
+    } else if (evaluationCount > 0) {
+        // Unlike test and deploy, this one can honestly reach `done`: a stored
+        // run is the evidence that the work happened.
+        set("evaluate", STATE.DONE, `${plural(evaluationCount, "evaluation")} recorded.`);
+    } else {
+        set("evaluate", STATE.READY, "Score a model against the held-out split.");
     }
 
     set(
