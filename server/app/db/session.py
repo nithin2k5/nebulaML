@@ -701,6 +701,45 @@ def create_tables():
                 INDEX idx_evaluation_created (created_at)
             )
         """)
+        # Dataset publications
+        #
+        # A public, revocable link to one frozen version. Publishing targets a
+        # version rather than the live dataset on purpose: a public link has to
+        # keep meaning the same thing, and the live dataset moves every time
+        # somebody draws a box.
+        #
+        # `slug` is the whole credential for anonymous access, so it is a
+        # random token rather than the version's uuid — ids appear in
+        # authenticated URLs and logs, and reusing one here would turn any
+        # leaked id into a public download. Deleting the version cascades, since
+        # a snapshot that no longer exists cannot be served.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dataset_publications (
+                id VARCHAR(255) PRIMARY KEY,
+                slug VARCHAR(64) NOT NULL,
+                dataset_id VARCHAR(255) NOT NULL,
+                version_id VARCHAR(255) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                license VARCHAR(100) DEFAULT 'CC BY 4.0',
+                status ENUM('live', 'revoked') DEFAULT 'live',
+                allow_downloads BOOLEAN DEFAULT TRUE,
+                formats JSON,
+                view_count INT DEFAULT 0,
+                download_count INT DEFAULT 0,
+                published_by INT NULL,
+                published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                revoked_at TIMESTAMP NULL,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                FOREIGN KEY (version_id) REFERENCES dataset_versions(id) ON DELETE CASCADE,
+                FOREIGN KEY (published_by) REFERENCES users(id) ON DELETE SET NULL,
+                UNIQUE KEY unique_publication_slug (slug),
+                INDEX idx_publication_dataset (dataset_id),
+                INDEX idx_publication_status (status)
+            )
+        """)
+        logger.info("✓ Table 'dataset_publications' ready")
+
         logger.info("✓ Table 'evaluations' ready")
         migrate_evaluations(connection)
 
