@@ -1,77 +1,468 @@
 """
-Evaluation Endpoint
+Evaluation workbench: run a trained model against a held-out split and make
+its mistakes browsable.
 
-Scores a finished model against a dataset version's split and serves the
-results: aggregate metrics, a per-class table, a confusion matrix, a confidence
-sweep, and a per-image failure explorer.
+The training tab already reports mAP and ships YOLO's confusion-matrix PNG.
+Neither tells you *which* images are wrong or *how*, which is the question that
+leads to a fix. This module runs the model over a split, classifies every
+prediction and every miss, and stores the result so the client can ask:
 
-This is the step that was missing between Train and Deploy. Training jobs report
-their own validation numbers, computed differently per backend, so "is this
-model better than the last one?" had no answer. An evaluation run re-scores
-through one shared metric path, which makes two runs comparable — and because
-every run records the split and thresholds it used, the comparison stays honest.
+    show me images where the model hallucinated a truck, worst first
+
+It also serves the two readings a single mAP number cannot give: a
+confidence sweep (where should the threshold sit for deployment?) and a
+per-class diff between two runs (what did the last change actually cost?).
 """
 
 import json
 import logging
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, validator
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.access import require_role
-from app.db.session import get_db_connection
-from app.services.database import DatasetService, DatasetVersionService
-from app.services.evaluation import create_run, run_evaluation
+from app.db.session import db_cursor
+from app.services import error_analysis as ea
+from app.services.database import AnnotationService, DatasetService
+from app.services.detection_metrics import evaluate_detections
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _SERVER_ROOT = Path(__file__).resolve().parents[4]
-# Version snapshots live here; the failure explorer serves images from inside it.
-_VERSIONS_BASE = (_SERVER_ROOT / "uploads" / "versions").resolve()
+_RUNS_BASE = (_SERVER_ROOT / "runs" / "detect").resolve()
 
-_VALID_SPLITS = ("train", "val", "test")
-_VALID_ERROR_TYPES = (
-    "correct", "duplicate", "wrong_class", "poor_localization", "background", "missed",
-)
-_MAX_PAGE_SIZE = 200
+# Evaluating a split means one forward pass per image, so it runs in the
+# background with the same in-memory progress dict the other long jobs use.
+evaluation_jobs: Dict[str, Dict[str, Any]] = {}
+
+_TERMINAL_STATUSES = {"completed", "failed"}
+_FINISHED_JOB_RETENTION = 20
+
+# A guard on the default run rather than a hard limit: a 50k-image test split
+# would otherwise tie up a worker for an hour by accident.
+DEFAULT_MAX_IMAGES = 500
+
+_SORTABLE = {
+    # Worst-first is the useful default, so precision ascending comes first.
+    "precision": "precision_score ASC, fp DESC",
+    "recall": "recall_score ASC, fn DESC",
+    "errors": "(fp + fn) DESC",
+    "false_positives": "fp DESC",
+    "false_negatives": "fn DESC",
+}
+
+_KIND_COLUMNS = {
+    "background": "n_background",
+    "wrong_class": "n_wrong_class",
+    "poor_localisation": "n_poor_localisation",
+    "duplicate": "n_duplicate",
+    "missed": "n_missed",
+}
+
+
+def _prune_finished_jobs(jobs: Dict[str, Dict], keep: int = _FINISHED_JOB_RETENTION) -> None:
+    """Drop all but the most recent `keep` finished jobs, oldest first."""
+    finished = [
+        job_id for job_id, job in jobs.items()
+        if job.get("status") in _TERMINAL_STATUSES
+    ]
+    for job_id in finished[:-keep] if keep else finished:
+        jobs.pop(job_id, None)
 
 
 class EvaluateRequest(BaseModel):
-    dataset_id: str
-    version_id: str
     job_id: str
-    split: str = "test"
-    conf_threshold: float = Field(0.25, ge=0.0, le=1.0)
-    iou_threshold: float = Field(0.5, gt=0.0, le=1.0)
-
-    @validator("split")
-    def _known_split(cls, value):
-        if value not in _VALID_SPLITS:
-            raise ValueError(f"split must be one of {_VALID_SPLITS}")
-        return value
+    # Which split to score against. "test" is the honest choice — val was used
+    # for early stopping during training, so it is no longer truly held out —
+    # but small datasets often have no test split, hence the fallback.
+    split: str = Field("test", pattern="^(test|val|train)$")
+    iou_threshold: float = Field(0.5, ge=0.05, le=0.95)
+    conf_threshold: float = Field(0.25, ge=0.0, le=0.99)
+    max_images: int = Field(DEFAULT_MAX_IMAGES, ge=1, le=5000)
 
 
-# ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
+def _resolve_weights(job_id: str) -> Optional[Path]:
+    """Locate a job's best weights, preferring the native .pt checkpoint."""
+    weights_dir = (_RUNS_BASE / f"job_{job_id}" / "weights").resolve()
+    # Containment check: job_id reaches this from the request body.
+    if not str(weights_dir).startswith(str(_RUNS_BASE)):
+        return None
+    for name in ("best.pt", "best.onnx", "last.pt"):
+        candidate = weights_dir / name
+        if candidate.exists():
+            return candidate
+    return None
 
-_JSON_COLUMNS = ("metrics", "per_class_metrics", "confusion_matrix", "class_names")
 
-
-def _decode_json_columns(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse the JSON columns of an evaluation_runs row in place.
-
-    mysql-connector returns JSON columns as str on some versions and as the
-    decoded object on others, so both are handled rather than assuming one.
+def _owned_job(job_id: str, current_user: dict) -> Dict[str, Any]:
     """
-    for column in _JSON_COLUMNS:
+    Fetch a training job the caller may see.
+
+    Delegates to the training module so there is exactly one definition of
+    "may this user see this job", including the persisted-job reload that
+    makes pre-restart jobs addressable.
+    """
+    from app.api.v1.endpoints.training import _get_owned_job
+
+    return _get_owned_job(job_id, current_user)
+
+
+def _class_names_for(dataset: Dict) -> Dict[int, str]:
+    """Label id -> name, in the dataset's own class order."""
+    return dict(enumerate(dataset.get("classes") or []))
+
+
+def _split_images(dataset: Dict, split: str) -> Tuple[List[Dict], str]:
+    """
+    Images in a split, with the split actually used.
+
+    Falls back test -> val -> every annotated image, because a project that
+    never ran the split step still deserves an answer. The caller reports
+    which one it got, so a number is never silently from the training data.
+    """
+    images = dataset.get("images") or []
+
+    for candidate in (split, "val", "valid"):
+        chosen = [img for img in images if (img.get("split") or "") == candidate]
+        if chosen:
+            return chosen, candidate
+
+    return [img for img in images if img.get("annotated")], "all-annotated"
+
+
+def _store_evaluation(evaluation_id: str, fields: Dict[str, Any]) -> None:
+    """Update one evaluation row with whatever fields are given."""
+    if not fields:
+        return
+    assignments = ", ".join(f"{column} = %s" for column in fields)
+    values = list(fields.values()) + [evaluation_id]
+    try:
+        with db_cursor(commit=True) as cursor:
+            cursor.execute(
+                f"UPDATE evaluations SET {assignments} WHERE id = %s", values
+            )
+    except Exception as e:
+        logger.error(f"Could not update evaluation {evaluation_id}: {e}")
+
+
+def _score_split(
+    model: Any,
+    evaluation_id: str,
+    dataset_id: str,
+    images: List[Dict],
+    annotations: Dict[str, List[Dict]],
+    class_names: Dict[int, str],
+    request: EvaluateRequest,
+    progress: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Tuple]]:
+    """
+    Run the model over a split and classify each image's errors.
+
+    Returns (predictions, targets, per_image_rows) where the first two feed the
+    aggregate metrics and the third is ready for a bulk insert. An image that
+    cannot be read or inferred is skipped rather than aborting the run — one
+    corrupt file should not cost a 500-image evaluation.
+    """
+    predictions: List[Dict[str, Any]] = []
+    targets: List[Dict[str, Any]] = []
+    per_image_rows: List[Tuple] = []
+
+    for index, image in enumerate(images):
+        path = Path(image.get("path") or "")
+        if not path.is_absolute():
+            path = Path("datasets") / dataset_id / "images" / image["filename"]
+        if not path.exists():
+            logger.warning(f"Evaluation: missing file for image {image['id']}")
+            continue
+
+        try:
+            # Predict at a low floor and threshold afterwards, so one pass
+            # serves both the chosen operating point and the full sweep.
+            detections = model.predict(str(path), conf_threshold=0.01)
+        except Exception as e:
+            logger.warning(f"Evaluation: inference failed on {path}: {e}")
+            continue
+
+        prediction = ea.detections_to_arrays(detections)
+        target = ea.gt_boxes_to_xyxy(annotations.get(image["id"], []))
+
+        predictions.append(prediction)
+        targets.append(target)
+
+        detail = ea.classify_image_errors(
+            prediction,
+            target,
+            iou_threshold=request.iou_threshold,
+            conf_threshold=request.conf_threshold,
+            class_names=class_names,
+        )
+        counts = detail["counts"]
+        by_kind = counts["by_kind"]
+
+        per_image_rows.append((
+            evaluation_id,
+            image["id"],
+            image.get("filename"),
+            counts["tp"],
+            counts["fp"],
+            counts["fn"],
+            counts["precision"],
+            counts["recall"],
+            by_kind.get("background", 0),
+            by_kind.get("wrong_class", 0),
+            by_kind.get("poor_localisation", 0),
+            by_kind.get("duplicate", 0),
+            by_kind.get("missed", 0),
+            json.dumps(detail),
+        ))
+
+        if progress is not None:
+            progress["progress"] = index + 1
+
+    return predictions, targets, per_image_rows
+
+
+def _persist_results(
+    evaluation_id: str,
+    split_used: str,
+    predictions: List[Dict[str, Any]],
+    targets: List[Dict[str, Any]],
+    per_image_rows: List[Tuple],
+    class_names: Dict[int, str],
+    iou_threshold: float,
+) -> None:
+    """
+    Compute the aggregates and write both the summary and the per-image rows.
+
+    `evaluate_detections` gives the COCO-style numbers; the error analysis gives
+    the breakdown you can act on. The detail insert is allowed to fail without
+    failing the evaluation — the aggregates are still worth keeping.
+    """
+    summary = evaluate_detections(predictions, targets, class_names)
+    per_image_details = [json.loads(row[-1]) for row in per_image_rows]
+    sweep = ea.confidence_sweep(predictions, targets, iou_threshold=iou_threshold)
+
+    if per_image_rows:
+        try:
+            with db_cursor(commit=True) as cursor:
+                cursor.executemany(
+                    "INSERT INTO evaluation_images "
+                    "(evaluation_id, image_id, filename, tp, fp, fn, "
+                    " precision_score, recall_score, n_background, "
+                    " n_wrong_class, n_poor_localisation, n_duplicate, "
+                    " n_missed, details) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE "
+                    "  tp = VALUES(tp), fp = VALUES(fp), fn = VALUES(fn), "
+                    "  precision_score = VALUES(precision_score), "
+                    "  recall_score = VALUES(recall_score), "
+                    "  n_background = VALUES(n_background), "
+                    "  n_wrong_class = VALUES(n_wrong_class), "
+                    "  n_poor_localisation = VALUES(n_poor_localisation), "
+                    "  n_duplicate = VALUES(n_duplicate), "
+                    "  n_missed = VALUES(n_missed), "
+                    "  details = VALUES(details)",
+                    per_image_rows,
+                )
+        except Exception as e:
+            logger.error(f"Could not store per-image evaluation detail: {e}")
+
+    _store_evaluation(evaluation_id, {
+        "status": "completed",
+        "split": split_used,
+        "images_evaluated": len(predictions),
+        "metrics": json.dumps(summary.get("metrics", {})),
+        "per_class_metrics": json.dumps(summary.get("per_class_metrics", [])),
+        "error_kinds": json.dumps(ea.aggregate_error_kinds(per_image_details)),
+        "class_confusion": json.dumps(ea.class_confusion(per_image_details)),
+        "confidence_sweep": json.dumps(sweep),
+        "best_operating_point": json.dumps(ea.best_operating_point(sweep) or {}),
+    })
+
+
+def _evaluate_task(
+    evaluation_id: str,
+    job_id: str,
+    dataset_id: str,
+    request: EvaluateRequest,
+) -> None:
+    """Score a split and persist per-image error detail. Runs in the background."""
+    progress = evaluation_jobs.get(evaluation_id)
+
+    def mark(status: str, **extra: Any) -> None:
+        if progress is not None:
+            progress["status"] = status
+            progress.update(extra)
+
+    mark("running")
+    try:
+        from app.services.inference import YOLOInference
+
+        weights = _resolve_weights(job_id)
+        if weights is None:
+            raise RuntimeError("No trained weights found for this job")
+
+        dataset = DatasetService.get_dataset(dataset_id)
+        if not dataset:
+            raise RuntimeError("Dataset not found")
+
+        class_names = _class_names_for(dataset)
+        images, split_used = _split_images(dataset, request.split)
+        images = images[: request.max_images]
+        if not images:
+            raise RuntimeError("No images in this split to evaluate")
+
+        # Ground truth, keyed by image, so a missing annotation is an empty
+        # target rather than a skipped image: a model predicting boxes on an
+        # unlabelled image is making false positives and should be charged for
+        # them.
+        annotations = {
+            row["image_id"]: row.get("boxes") or []
+            for row in AnnotationService.get_all_dataset_annotations(dataset_id)
+        }
+
+        model = YOLOInference(str(weights))
+
+        if progress is not None:
+            progress["total"] = len(images)
+
+        predictions, targets, per_image_rows = _score_split(
+            model=model,
+            evaluation_id=evaluation_id,
+            dataset_id=dataset_id,
+            images=images,
+            annotations=annotations,
+            class_names=class_names,
+            request=request,
+            progress=progress,
+        )
+
+        if not predictions:
+            raise RuntimeError("No images could be read for evaluation")
+
+        _persist_results(
+            evaluation_id=evaluation_id,
+            split_used=split_used,
+            predictions=predictions,
+            targets=targets,
+            per_image_rows=per_image_rows,
+            class_names=class_names,
+            iou_threshold=request.iou_threshold,
+        )
+
+        mark("completed", evaluation_id=evaluation_id, images_evaluated=len(predictions))
+        logger.info(
+            f"Evaluated job {job_id} on {len(predictions)} {split_used} image(s)"
+        )
+    except Exception as e:
+        logger.error(f"Evaluation {evaluation_id} failed: {e}")
+        _store_evaluation(evaluation_id, {
+            "status": "failed",
+            "error_message": str(e),
+        })
+        mark("failed", error=str(e))
+
+
+@router.post("/run")
+async def run_evaluation(
+    request: EvaluateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    """Evaluate a trained model against a split and index its mistakes."""
+    job = _owned_job(request.job_id, current_user)
+
+    dataset_id = job.get("dataset_id")
+    if not dataset_id:
+        raise HTTPException(
+            status_code=400, detail="This job is not linked to a dataset"
+        )
+
+    dataset = DatasetService.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
+
+    if _resolve_weights(request.job_id) is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No trained weights for this job yet. Wait for training to finish.",
+        )
+
+    evaluation_id = str(uuid.uuid4())
+    try:
+        with db_cursor(commit=True) as cursor:
+            cursor.execute(
+                "INSERT INTO evaluations "
+                "(id, job_id, dataset_id, split, iou_threshold, conf_threshold, status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
+                (
+                    evaluation_id,
+                    request.job_id,
+                    dataset_id,
+                    request.split,
+                    request.iou_threshold,
+                    request.conf_threshold,
+                ),
+            )
+    except Exception as e:
+        logger.error(f"Could not create evaluation row: {e}")
+        raise HTTPException(
+            status_code=500, detail="Could not start evaluation"
+        ) from None
+
+    _prune_finished_jobs(evaluation_jobs)
+    evaluation_jobs[evaluation_id] = {
+        "status": "pending",
+        "progress": 0,
+        "total": 0,
+        "job_id": request.job_id,
+        "evaluation_id": evaluation_id,
+    }
+
+    background_tasks.add_task(
+        _evaluate_task, evaluation_id, request.job_id, dataset_id, request
+    )
+
+    return {
+        "success": True,
+        "evaluation_id": evaluation_id,
+        "message": "Evaluation started in the background",
+    }
+
+
+@router.get("/status/{evaluation_id}")
+async def evaluation_status(
+    evaluation_id: str, current_user: dict = Depends(get_current_user)
+):
+    """Poll a running evaluation."""
+    in_memory = evaluation_jobs.get(evaluation_id)
+    row = _load_evaluation(evaluation_id, current_user)
+
+    return {
+        "evaluation_id": evaluation_id,
+        "status": row.get("status"),
+        "progress": (in_memory or {}).get("progress", row.get("images_evaluated", 0)),
+        "total": (in_memory or {}).get("total", row.get("images_evaluated", 0)),
+        "error": row.get("error_message"),
+    }
+
+
+def _decode(row: Dict[str, Any], *columns: str) -> Dict[str, Any]:
+    """
+    Parse the JSON columns of an evaluation row in place.
+
+    mysql-connector returns JSON columns as str on some versions and as parsed
+    objects on others, so both have to be tolerated.
+    """
+    for column in columns:
         value = row.get(column)
-        if isinstance(value, (str, bytes)):
+        if isinstance(value, (str, bytes, bytearray)):
             try:
                 row[column] = json.loads(value)
             except (ValueError, TypeError):
@@ -79,536 +470,275 @@ def _decode_json_columns(row: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
-def _fetch_run(run_id: str) -> Optional[Dict[str, Any]]:
-    connection = get_db_connection()
-    if not connection:
-        raise HTTPException(status_code=503, detail="Database unavailable")
+def _load_evaluation(evaluation_id: str, current_user: dict) -> Dict[str, Any]:
+    """Fetch an evaluation, asserting the caller may see its training job."""
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM evaluation_runs WHERE id = %s", (run_id,))
-        row = cursor.fetchone()
-        cursor.close()
-        return _decode_json_columns(row) if row else None
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT * FROM evaluations WHERE id = %s", (evaluation_id,)
+            )
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Could not load evaluation {evaluation_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not load evaluation") from None
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    # Authorisation rides on the training job, which is the thing that has an
+    # owner; an evaluation is just a view of it.
+    _owned_job(row["job_id"], current_user)
+    return row
 
 
-def _authorize_run(run_id: str, current_user: dict, minimum: str = "viewer") -> Dict[str, Any]:
-    """Load a run and confirm the caller may see the project behind it.
+@router.get("/latest/{job_id}")
+async def latest_evaluation(job_id: str, current_user: dict = Depends(get_current_user)):
+    """The most recent completed evaluation for a training job, if any."""
+    _owned_job(job_id, current_user)
 
-    Runs are addressed by their own id, so permission has to be resolved
-    through the dataset each one belongs to — otherwise a run id would be a
-    bearer token for someone else's metrics.
-    """
-    run = _fetch_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Evaluation run not found")
-    dataset = DatasetService.get_dataset(run["dataset_id"])
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    require_role(run["dataset_id"], current_user["id"], dataset["user_id"], minimum)
-    return run
-
-
-def _error_type_counts(run_id: str) -> Dict[str, int]:
-    """How many boxes fell into each error bucket, for the run summary."""
-    connection = get_db_connection()
-    if not connection:
-        return {}
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT error_type, COUNT(*) AS n
-            FROM evaluation_predictions
-            WHERE run_id = %s
-            GROUP BY error_type
-            """,
-            (run_id,),
-        )
-        counts = {row["error_type"]: int(row["n"]) for row in cursor.fetchall()}
-        cursor.close()
-        return counts
-    except Exception as exc:
-        logger.error(f"evaluation: error-type counts failed for {run_id}: {exc}")
-        return {}
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT * FROM evaluations WHERE job_id = %s "
+                "ORDER BY created_at DESC LIMIT 1",
+                (job_id,),
+            )
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Could not load latest evaluation for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not load evaluation") from None
+
+    if not row:
+        return {"job_id": job_id, "evaluation": None}
+
+    return {
+        "job_id": job_id,
+        "evaluation": _decode(
+            row, "metrics", "per_class_metrics", "error_kinds",
+            "class_confusion", "confidence_sweep", "best_operating_point",
+        ),
+    }
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+@router.get("/{evaluation_id}")
+async def get_evaluation(
+    evaluation_id: str, current_user: dict = Depends(get_current_user)
+):
+    """Aggregate results: metrics, per-class, error kinds, confusion, sweep."""
+    row = _load_evaluation(evaluation_id, current_user)
+    return _decode(
+        row, "metrics", "per_class_metrics", "error_kinds",
+        "class_confusion", "confidence_sweep", "best_operating_point",
+    )
 
 
-@router.post("/run")
-async def start_evaluation(
-    request: EvaluateRequest,
-    background_tasks: BackgroundTasks,
+@router.get("/{evaluation_id}/images")
+async def list_evaluation_images(
+    evaluation_id: str,
+    kind: Optional[str] = None,
+    class_name: Optional[str] = None,
+    sort: str = "precision",
+    limit: int = 50,
+    offset: int = 0,
     current_user: dict = Depends(get_current_user),
 ):
-    """Queue an evaluation of a trained model against one split of a version."""
-    from app.api.v1.endpoints.inference import _get_job_model_type, _resolve_job_weights
+    """
+    Browse the per-image results.
 
-    dataset = DatasetService.get_dataset(request.dataset_id)
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    require_role(request.dataset_id, current_user["id"], dataset["user_id"], "annotator")
+    `kind` filters to images carrying at least one error of that kind, which is
+    the whole point of the feature: "show me every image where a truck was
+    called a car" is one query, not a scan.
+    """
+    _load_evaluation(evaluation_id, current_user)
 
-    version = DatasetVersionService.get_version(request.version_id)
-    if not version:
-        raise HTTPException(status_code=404, detail="Dataset version not found")
-    if version["dataset_id"] != request.dataset_id:
-        # Otherwise a caller with access to one project could score a model
-        # against a version belonging to another.
-        raise HTTPException(status_code=400, detail="Version does not belong to this dataset")
-
-    in_split = [img for img in version.get("images", []) if img.get("split") == request.split]
-    if not in_split:
+    if sort not in _SORTABLE:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"This version has no images in the '{request.split}' split. "
-                f"Generate a version that reserves one, or evaluate a different split."
-            ),
+            detail=f"sort must be one of {', '.join(sorted(_SORTABLE))}",
         )
-
-    # Raises 400/404 itself if the job is unknown or its weights are missing.
-    model_path = _resolve_job_weights(request.job_id)
-    model_type = _get_job_model_type(request.job_id)
-
-    run_id = create_run(
-        dataset_id=request.dataset_id,
-        version_id=request.version_id,
-        model_name=request.job_id,
-        job_id=request.job_id,
-        split=request.split,
-        conf_threshold=request.conf_threshold,
-        iou_threshold=request.iou_threshold,
-        created_by=current_user["id"],
-    )
-    if not run_id:
-        raise HTTPException(status_code=500, detail="Could not create the evaluation run")
-
-    background_tasks.add_task(
-        run_evaluation,
-        run_id,
-        model_path,
-        model_type,
-        request.version_id,
-        request.split,
-        dataset.get("classes", []),
-        request.conf_threshold,
-        request.iou_threshold,
-    )
-
-    return {
-        "run_id": run_id,
-        "status": "pending",
-        "total_images": len(in_split),
-        "message": f"Evaluating {len(in_split)} {request.split} images in the background",
-    }
-
-
-@router.get("/runs/{dataset_id}")
-async def list_evaluation_runs(
-    dataset_id: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """Every evaluation run for a project, newest first."""
-    dataset = DatasetService.get_dataset(dataset_id)
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    require_role(dataset_id, current_user["id"], dataset["user_id"], "viewer")
-
-    connection = get_db_connection()
-    if not connection:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT r.id, r.dataset_id, r.version_id, r.model_name, r.job_id, r.split,
-                   r.status, r.progress, r.conf_threshold, r.iou_threshold,
-                   r.total_images, r.gt_count, r.pred_count, r.metrics,
-                   r.error_message, r.created_at,
-                   v.version_number, v.name AS version_name
-            FROM evaluation_runs r
-            LEFT JOIN dataset_versions v ON v.id = r.version_id
-            WHERE r.dataset_id = %s
-            ORDER BY r.created_at DESC
-            """,
-            (dataset_id,),
-        )
-        runs = [_decode_json_columns(row) for row in cursor.fetchall()]
-        cursor.close()
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
-
-    # The sweep is long and the list view never plots it.
-    for run in runs:
-        if isinstance(run.get("metrics"), dict):
-            run["metrics"] = {k: v for k, v in run["metrics"].items() if k != "sweep"}
-
-    return {"dataset_id": dataset_id, "total": len(runs), "runs": runs}
-
-
-@router.get("/run/{run_id}")
-async def get_evaluation_run(run_id: str, current_user: dict = Depends(get_current_user)):
-    """One run in full: metrics, per-class table, confusion matrix, error mix."""
-    run = _authorize_run(run_id, current_user)
-    sweep = []
-    if isinstance(run.get("metrics"), dict):
-        sweep = run["metrics"].pop("sweep", [])
-    return {
-        **run,
-        "error_types": _error_type_counts(run_id) if run["status"] == "completed" else {},
-        "has_sweep": bool(sweep),
-    }
-
-
-@router.get("/run/{run_id}/threshold-sweep")
-async def get_threshold_sweep(run_id: str, current_user: dict = Depends(get_current_user)):
-    """Precision/recall/F1 across confidence levels.
-
-    This is what turns the deployment threshold from a guess into a choice:
-    every level is the whole split re-counted with weaker predictions dropped.
-    """
-    run = _authorize_run(run_id, current_user)
-    metrics = run.get("metrics") or {}
-    sweep = metrics.get("sweep") or []
-    best = max(sweep, key=lambda entry: entry["f1"]) if sweep else None
-    return {
-        "run_id": run_id,
-        "iou_threshold": run["iou_threshold"],
-        "conf_threshold": run["conf_threshold"],
-        "sweep": sweep,
-        "best_f1": best,
-    }
-
-
-@router.get("/run/{run_id}/errors")
-async def list_error_images(
-    run_id: str,
-    error_type: Optional[str] = Query(None),
-    limit: int = Query(50, ge=1, le=_MAX_PAGE_SIZE),
-    offset: int = Query(0, ge=0),
-    current_user: dict = Depends(get_current_user),
-):
-    """Images ranked by how badly the model did on them.
-
-    Ranked by false positives plus false negatives, so the first page is the
-    most informative place to start looking — and with `error_type`, the images
-    exhibiting one specific kind of mistake.
-    """
-    _authorize_run(run_id, current_user)
-    if error_type is not None and error_type not in _VALID_ERROR_TYPES:
+    if kind and kind not in _KIND_COLUMNS:
         raise HTTPException(
-            status_code=400, detail=f"error_type must be one of {_VALID_ERROR_TYPES}"
+            status_code=400,
+            detail=f"kind must be one of {', '.join(sorted(_KIND_COLUMNS))}",
         )
 
-    where = "WHERE i.run_id = %s"
-    params: List[Any] = [run_id]
-    if error_type:
-        where += (
-            " AND EXISTS (SELECT 1 FROM evaluation_predictions p"
-            " WHERE p.run_id = i.run_id AND p.filename = i.filename"
-            " AND p.error_type = %s)"
-        )
-        params.append(error_type)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
 
-    connection = get_db_connection()
-    if not connection:
-        raise HTTPException(status_code=503, detail="Database unavailable")
+    where = ["evaluation_id = %s"]
+    params: List[Any] = [evaluation_id]
+    if kind:
+        # Column name comes from a fixed map, never from the request string.
+        where.append(f"{_KIND_COLUMNS[kind]} > 0")
+
+    sql = (
+        "SELECT image_id, filename, tp, fp, fn, precision_score, recall_score, "
+        "       n_background, n_wrong_class, n_poor_localisation, "
+        "       n_duplicate, n_missed "
+        f"FROM evaluation_images WHERE {' AND '.join(where)} "
+        f"ORDER BY {_SORTABLE[sort]} LIMIT %s OFFSET %s"
+    )
+
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(f"SELECT COUNT(*) AS n FROM evaluation_images i {where}", tuple(params))
-        total = int(cursor.fetchone()["n"])
-        cursor.execute(
-            f"""
-            SELECT i.image_id, i.filename, i.width, i.height,
-                   i.tp_count, i.fp_count, i.fn_count, i.gt_count, i.pred_count,
-                   i.error_score
-            FROM evaluation_images i
-            {where}
-            ORDER BY i.error_score DESC, i.fn_count DESC, i.filename ASC
-            LIMIT %s OFFSET %s
-            """,
-            (*params, limit, offset),
-        )
-        images = cursor.fetchall()
-        cursor.close()
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(sql, (*params, limit, offset))
+            rows = cursor.fetchall() or []
+            cursor.execute(
+                f"SELECT COUNT(*) AS total FROM evaluation_images "
+                f"WHERE {' AND '.join(where)}",
+                params,
+            )
+            total = (cursor.fetchone() or {}).get("total", 0)
+    except Exception as e:
+        logger.error(f"Could not list evaluation images: {e}")
+        raise HTTPException(status_code=500, detail="Could not list images") from None
+
+    # Class filtering needs the detail blob, so it happens after the SQL page.
+    # It is a refinement of an already-narrow list, not a primary filter.
+    if class_name:
+        rows = [row for row in rows if _touches_class(evaluation_id, row["image_id"], class_name)]
 
     return {
-        "run_id": run_id,
-        "error_type": error_type,
+        "evaluation_id": evaluation_id,
         "total": total,
         "limit": limit,
         "offset": offset,
-        "images": images,
+        "images": rows,
     }
 
 
-@router.get("/run/{run_id}/image/{filename}")
-async def get_image_detail(
-    run_id: str,
-    filename: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """Every box on one image, predictions and ground truth, with its diagnosis.
+def _touches_class(evaluation_id: str, image_id: str, class_name: str) -> bool:
+    """True when an image's errors or hits involve the named class."""
+    detail = _load_image_detail(evaluation_id, image_id)
+    if not detail:
+        return False
+    for bucket in ("true_positives", "false_positives", "false_negatives"):
+        for record in detail.get(bucket) or []:
+            if class_name in (record.get("class_name"), record.get("gt_class_name")):
+                return True
+    return False
 
-    What the failure explorer overlays when an image is opened.
-    """
-    _authorize_run(run_id, current_user)
-    safe_filename = Path(filename).name
-    if safe_filename != filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
 
-    connection = get_db_connection()
-    if not connection:
-        raise HTTPException(status_code=503, detail="Database unavailable")
+def _load_image_detail(evaluation_id: str, image_id: str) -> Optional[Dict[str, Any]]:
+    """The stored TP/FP/FN boxes for one evaluated image."""
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT image_id, filename, width, height, tp_count, fp_count,
-                   fn_count, gt_count, pred_count
-            FROM evaluation_images WHERE run_id = %s AND filename = %s
-            """,
-            (run_id, safe_filename),
-        )
-        summary = cursor.fetchone()
-        if not summary:
-            cursor.close()
-            raise HTTPException(status_code=404, detail="Image not found in this run")
-        cursor.execute(
-            """
-            SELECT outcome, error_type, pred_class, pred_class_name,
-                   gt_class, gt_class_name, confidence, iou, box, gt_box
-            FROM evaluation_predictions
-            WHERE run_id = %s AND filename = %s
-            ORDER BY FIELD(outcome, 'fn', 'fp', 'tp'), confidence DESC
-            """,
-            (run_id, safe_filename),
-        )
-        boxes = cursor.fetchall()
-        cursor.close()
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT details FROM evaluation_images "
+                "WHERE evaluation_id = %s AND image_id = %s",
+                (evaluation_id, image_id),
+            )
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Could not load image detail: {e}")
+        return None
 
-    for box in boxes:
-        for column in ("box", "gt_box"):
-            value = box.get(column)
-            if isinstance(value, (str, bytes)):
-                try:
-                    box[column] = json.loads(value)
-                except (ValueError, TypeError):
-                    box[column] = None
-
-    return {"run_id": run_id, **summary, "boxes": boxes}
+    if not row:
+        return None
+    return _decode(row, "details").get("details")
 
 
-@router.get("/compare")
-async def compare_runs(
-    runs: str = Query(..., description="Comma-separated evaluation run ids"),
+@router.get("/{evaluation_id}/image/{image_id}")
+async def get_evaluation_image(
+    evaluation_id: str,
+    image_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Put runs side by side, with per-class deltas against the first.
-
-    Only runs scored on the same version and split are really comparable, so
-    the response says whether they were rather than quietly presenting
-    different measurements as a ranking.
     """
-    run_ids = [part.strip() for part in runs.split(",") if part.strip()]
-    if len(run_ids) < 2:
-        raise HTTPException(status_code=400, detail="Give at least two run ids to compare")
-    if len(run_ids) > 5:
-        raise HTTPException(status_code=400, detail="Compare at most five runs at a time")
+    Full detail for one image: every true positive, false positive and miss,
+    with boxes, so the client can draw them over the image.
+    """
+    _load_evaluation(evaluation_id, current_user)
 
-    # Authorised one by one, so a comparison cannot straddle a project the
-    # caller only partly has access to.
-    loaded = [_authorize_run(run_id, current_user) for run_id in run_ids]
-    incomplete = [run["id"] for run in loaded if run["status"] != "completed"]
-    if incomplete:
+    detail = _load_image_detail(evaluation_id, image_id)
+    if detail is None:
         raise HTTPException(
-            status_code=400, detail=f"These runs have not finished: {incomplete}"
+            status_code=404, detail="That image is not part of this evaluation"
         )
 
-    baseline = loaded[0]
-    baseline_classes = {
-        entry["class_name"]: entry
-        for entry in (baseline.get("per_class_metrics") or [])
-    }
-
-    comparable = len({(run["version_id"], run["split"]) for run in loaded}) == 1
-
-    summaries = []
-    for index, run in enumerate(loaded):
-        metrics = {
-            key: value
-            for key, value in (run.get("metrics") or {}).items()
-            if key != "sweep"
-        }
-        per_class = []
-        for entry in run.get("per_class_metrics") or []:
-            base = baseline_classes.get(entry["class_name"])
-            per_class.append({
-                **entry,
-                "delta_mAP50": (
-                    None if index == 0 or not base
-                    else entry["mAP50"] - base["mAP50"]
-                ),
-            })
-        summaries.append({
-            "run_id": run["id"],
-            "model_name": run["model_name"],
-            "job_id": run["job_id"],
-            "version_id": run["version_id"],
-            "split": run["split"],
-            "conf_threshold": run["conf_threshold"],
-            "iou_threshold": run["iou_threshold"],
-            "total_images": run["total_images"],
-            "created_at": run["created_at"],
-            "metrics": metrics,
-            "per_class_metrics": per_class,
-            "is_baseline": index == 0,
-            "delta_map50": (
-                None if index == 0
-                else metrics.get("map50", 0) - (baseline.get("metrics") or {}).get("map50", 0)
-            ),
-        })
-
-    best = max(summaries, key=lambda s: s["metrics"].get("map50", 0))
-    return {
-        "runs": summaries,
-        "baseline_run_id": baseline["id"],
-        "best_run_id": best["run_id"],
-        # False means the runs used different versions or splits, so the
-        # numbers describe different questions and ranking them is misleading.
-        "comparable": comparable,
-    }
+    return {"evaluation_id": evaluation_id, "image_id": image_id, "detail": detail}
 
 
-def _authenticate_image_request(request: Request, token: Optional[str]) -> Dict[str, Any]:
-    """Resolve the caller of an image request from a header or a query token.
-
-    An `<img src>` cannot send an Authorization header, so the token may arrive
-    in the query string. The header is preferred when both are present, since
-    a URL-borne credential travels in Referer on any outbound navigation.
-    """
-    from app.core.rbac import decode_access_token
-
-    bearer = request.headers.get("Authorization", "")
-    header_token = bearer[7:].strip() if bearer.lower().startswith("bearer ") else None
-
-    for candidate in (header_token, token):
-        if candidate:
-            payload = decode_access_token(candidate)
-            if payload:
-                return payload
-    raise HTTPException(status_code=401, detail="Authentication required to view images")
-
-
-@router.get("/image/{run_id}/{filename}")
-async def serve_evaluation_image(
-    run_id: str,
-    filename: str,
-    request: Request,
-    token: Optional[str] = None,
+@router.get("/compare/{evaluation_a}/{evaluation_b}")
+async def compare_evaluations(
+    evaluation_a: str,
+    evaluation_b: str,
+    metric: str = "mAP50",
+    current_user: dict = Depends(get_current_user),
 ):
-    """Serve a version-snapshot image for the failure explorer.
-
-    Accepts auth via the Authorization header or ?token=, because an <img src>
-    cannot send a header — the same arrangement the annotator's image route
-    uses.
     """
-    payload = _authenticate_image_request(request, token)
+    Diff two evaluations per class, worst regression first.
 
-    run = _fetch_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Evaluation run not found")
-    dataset = DatasetService.get_dataset(run["dataset_id"])
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    require_role(run["dataset_id"], payload["user_id"], dataset["user_id"], "viewer")
-
-    safe_filename = Path(filename).name
-    if safe_filename != filename or safe_filename in ("", ".", ".."):
-        raise HTTPException(status_code=400, detail="Invalid image filename")
-
-    # The stored path is trusted only after it is confirmed to sit inside the
-    # versions tree, so a tampered row cannot turn this into a file reader.
-    connection = get_db_connection()
-    if not connection:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT path FROM evaluation_images WHERE run_id = %s AND filename = %s",
-            (run_id, safe_filename),
-        )
-        row = cursor.fetchone()
-        cursor.close()
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
-
-    if not row or not row.get("path"):
-        raise HTTPException(status_code=404, detail="Image not found in this run")
-
-    image_path = Path(row["path"]).resolve()
-    if not str(image_path).startswith(str(_VERSIONS_BASE)):
-        logger.error(f"evaluation: refusing to serve {image_path} — outside {_VERSIONS_BASE}")
-        raise HTTPException(status_code=400, detail="Invalid image path")
-    if not image_path.exists():
-        raise HTTPException(status_code=404, detail=f"Image not found: {safe_filename}")
-
-    return FileResponse(
-        path=str(image_path),
-        media_type="image/jpeg",
-        headers={
-            # Snapshot images are immutable, but they are also per-project, so
-            # only the viewer's own browser may keep a copy.
-            "Cache-Control": "private, max-age=3600",
-            "Referrer-Policy": "no-referrer",
-        },
+    This is the view that catches the failure an overall mAP comparison hides:
+    a run that gains six points on average while losing eleven on one class.
+    """
+    row_a = _decode(
+        _load_evaluation(evaluation_a, current_user), "metrics", "per_class_metrics"
+    )
+    row_b = _decode(
+        _load_evaluation(evaluation_b, current_user), "metrics", "per_class_metrics"
     )
 
+    allowed_metrics = {"mAP50", "mAP50_95", "precision", "recall"}
+    if metric not in allowed_metrics:
+        raise HTTPException(
+            status_code=400,
+            detail=f"metric must be one of {', '.join(sorted(allowed_metrics))}",
+        )
 
-@router.delete("/run/{run_id}")
-async def delete_evaluation_run(run_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a run. Its images and per-box rows cascade."""
-    _authorize_run(run_id, current_user, minimum="annotator")
-    connection = get_db_connection()
-    if not connection:
-        raise HTTPException(status_code=503, detail="Database unavailable")
+    per_class = ea.compare_per_class(
+        row_a.get("per_class_metrics") or [],
+        row_b.get("per_class_metrics") or [],
+        metric=metric,
+    )
+
+    regressions = [row for row in per_class if row["status"] == "regressed"]
+
+    return {
+        "metric": metric,
+        "a": {
+            "evaluation_id": evaluation_a,
+            "job_id": row_a.get("job_id"),
+            "split": row_a.get("split"),
+            "metrics": row_a.get("metrics") or {},
+        },
+        "b": {
+            "evaluation_id": evaluation_b,
+            "job_id": row_b.get("job_id"),
+            "split": row_b.get("split"),
+            "metrics": row_b.get("metrics") or {},
+        },
+        "per_class": per_class,
+        "summary": {
+            "regressed": len(regressions),
+            "improved": sum(1 for row in per_class if row["status"] == "improved"),
+            # The single line worth putting in a changelog.
+            "worst_regression": regressions[0] if regressions else None,
+        },
+    }
+
+
+@router.get("/job/{job_id}/history")
+async def evaluation_history(
+    job_id: str, current_user: dict = Depends(get_current_user)
+):
+    """Every evaluation of one training job, newest first."""
+    _owned_job(job_id, current_user)
+
     try:
-        cursor = connection.cursor()
-        cursor.execute("DELETE FROM evaluation_runs WHERE id = %s", (run_id,))
-        connection.commit()
-        cursor.close()
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
-    return {"status": "deleted", "run_id": run_id}
+        with db_cursor(dictionary=True) as cursor:
+            cursor.execute(
+                "SELECT id, split, iou_threshold, conf_threshold, status, "
+                "       images_evaluated, metrics, created_at "
+                "FROM evaluations WHERE job_id = %s ORDER BY created_at DESC",
+                (job_id,),
+            )
+            rows = cursor.fetchall() or []
+    except Exception as e:
+        logger.error(f"Could not load evaluation history: {e}")
+        raise HTTPException(status_code=500, detail="Could not load history") from None
+
+    return {
+        "job_id": job_id,
+        "evaluations": [_decode(row, "metrics") for row in rows],
+    }

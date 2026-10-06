@@ -21,10 +21,10 @@ import ProjectAnnotate from "@/components/project/ProjectAnnotate";
 import ProjectGenerate from "@/components/project/ProjectGenerate";
 import ProjectTrain from "@/components/project/ProjectTrain";
 import ProjectVersions from "@/components/project/ProjectVersions";
+import ProjectEvaluate from "@/components/project/ProjectEvaluate";
 import ProjectTest from "@/components/project/ProjectTest";
 import ProjectDeploy from "@/components/project/ProjectDeploy";
 import ProjectHealth from "@/components/project/ProjectHealth";
-import ProjectEvaluate from "@/components/project/ProjectEvaluate";
 import ProjectActiveLearning from "@/components/project/ProjectActiveLearning";
 import ProjectMonitoring from "@/components/project/ProjectMonitoring";
 import ProjectTeam from "@/components/project/ProjectTeam";
@@ -38,7 +38,6 @@ export default function ProjectPage() {
     const [stats, setStats] = useState(null);
     const [trainingJobs, setTrainingJobs] = useState([]);
     const [monitoringTotal, setMonitoringTotal] = useState(0);
-    const [evaluationRuns, setEvaluationRuns] = useState([]);
     const [versionCount, setVersionCount] = useState(0);
     const [versionRefreshKey, setVersionRefreshKey] = useState(0);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "overview");
@@ -68,7 +67,6 @@ export default function ProjectPage() {
                 fetchTrainingJobs(params.id);
                 fetchMonitoringStats(params.id);
                 fetchVersionCount(params.id);
-                fetchEvaluationRuns(params.id);
             } else {
                 setLoading(false);
             }
@@ -138,21 +136,6 @@ export default function ProjectPage() {
         } catch (e) { /* non-critical */ }
     };
 
-    // The Evaluate step is one of the few that can honestly report `done`:
-    // a stored run is evidence the scoring happened, unlike test or deploy
-    // where nothing records that anyone did it.
-    const fetchEvaluationRuns = async (datasetId) => {
-        try {
-            const res = await fetch(API_ENDPOINTS.EVALUATION.RUNS(datasetId), {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setEvaluationRuns(data.runs || []);
-            }
-        } catch (e) { /* non-critical */ }
-    };
-
     const fetchMonitoringStats = async (datasetId) => {
         try {
             const res = await fetch(API_ENDPOINTS.MONITORING.STATS(datasetId), {
@@ -215,10 +198,6 @@ export default function ProjectPage() {
         runningJobs: runningJobs.length,
         failedJobs: failedJobs.length,
         monitoringTotal,
-        evaluationCount: evaluationRuns.filter(r => r.status === 'completed').length,
-        runningEvaluations: evaluationRuns.filter(
-            r => r.status === 'running' || r.status === 'pending'
-        ).length,
     });
 
     return (
@@ -347,8 +326,8 @@ export default function ProjectPage() {
                             <ProjectTrain dataset={dataset} versionRefreshKey={versionRefreshKey} onTrainingStarted={() => handleTabChange('versions')} onDeploy={() => handleTabChange('deploy')} />
                         </TabsContent>
 
-                        <TabsContent value="evaluate" className="mt-0 h-full overflow-y-auto">
-                            <ProjectEvaluate dataset={dataset} onNavigate={handleTabChange} />
+                        <TabsContent value="evaluate" className="mt-0 h-full">
+                            <ProjectEvaluate dataset={dataset} />
                         </TabsContent>
 
                         <TabsContent value="test" className="mt-0 h-full">

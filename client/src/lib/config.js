@@ -102,24 +102,28 @@ export const API_ENDPOINTS = {
     },
     EVALUATION: {
         RUN: `${API_BASE_URL}/api/evaluation/run`,
-        RUNS: (datasetId) => `${API_BASE_URL}/api/evaluation/runs/${datasetId}`,
-        GET: (runId) => `${API_BASE_URL}/api/evaluation/run/${runId}`,
-        DELETE: (runId) => `${API_BASE_URL}/api/evaluation/run/${runId}`,
-        SWEEP: (runId) => `${API_BASE_URL}/api/evaluation/run/${runId}/threshold-sweep`,
-        ERRORS: (runId, { errorType, limit = 50, offset = 0 } = {}) => {
-            const query = new URLSearchParams({ limit, offset });
-            if (errorType) query.set("error_type", errorType);
-            return `${API_BASE_URL}/api/evaluation/run/${runId}/errors?${query}`;
-        },
-        IMAGE_DETAIL: (runId, filename) =>
-            `${API_BASE_URL}/api/evaluation/run/${runId}/image/${encodeURIComponent(filename)}`,
-        // Version-snapshot image for the failure explorer. The token rides in
-        // the query string because an <img src> cannot send a header.
-        GET_IMAGE: (runId, filename, token) =>
-            `${API_BASE_URL}/api/evaluation/image/${runId}/${encodeURIComponent(filename)}` +
-            `${token ? `?token=${token}` : ""}`,
-        COMPARE: (runIds) =>
-            `${API_BASE_URL}/api/evaluation/compare?runs=${runIds.join(",")}`,
+        STATUS: (evaluationId) => `${API_BASE_URL}/api/evaluation/status/${evaluationId}`,
+        LATEST: (jobId) => `${API_BASE_URL}/api/evaluation/latest/${jobId}`,
+        GET: (evaluationId) => `${API_BASE_URL}/api/evaluation/${evaluationId}`,
+        IMAGES: (evaluationId, params = '') =>
+            `${API_BASE_URL}/api/evaluation/${evaluationId}/images${params}`,
+        IMAGE: (evaluationId, imageId) =>
+            `${API_BASE_URL}/api/evaluation/${evaluationId}/image/${imageId}`,
+        COMPARE: (a, b, metric = 'mAP50') =>
+            `${API_BASE_URL}/api/evaluation/compare/${a}/${b}?metric=${metric}`,
+        HISTORY: (jobId) => `${API_BASE_URL}/api/evaluation/job/${jobId}/history`,
+    },
+    SEARCH: {
+        BUILD_INDEX: (datasetId, force = false) =>
+            `${API_BASE_URL}/api/search/index/${datasetId}${force ? '?force=true' : ''}`,
+        INDEX_STATUS: (jobId) => `${API_BASE_URL}/api/search/index-status/${jobId}`,
+        COVERAGE: (datasetId) => `${API_BASE_URL}/api/search/status/${datasetId}`,
+        TEXT: `${API_BASE_URL}/api/search/text`,
+        SIMILAR: `${API_BASE_URL}/api/search/similar`,
+        DUPLICATES: (datasetId, threshold = 0.95) =>
+            `${API_BASE_URL}/api/search/duplicates/${datasetId}?threshold=${threshold}`,
+        CLUSTERS: (datasetId, clusters = 8) =>
+            `${API_BASE_URL}/api/search/clusters/${datasetId}?clusters=${clusters}`,
     },
     MONITORING: {
         LOG: `${API_BASE_URL}/api/monitoring/log`,
