@@ -59,8 +59,8 @@ backends behind one workflow.
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd NebulaML
+git clone https://github.com/nithin2k5/nebulaML.git
+cd nebulaML
 ```
 
 2. Run the startup script:
