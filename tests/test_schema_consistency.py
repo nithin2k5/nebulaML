@@ -90,6 +90,11 @@ _REQUIRED_COLUMNS = {
         "precision_score", "recall_score", "n_background", "n_wrong_class",
         "n_poor_localisation", "n_duplicate", "n_missed", "details",
     },
+    "dataset_publications": {
+        "id", "slug", "dataset_id", "version_id", "title", "description",
+        "license", "status", "allow_downloads", "formats", "view_count",
+        "download_count", "published_by", "published_at", "revoked_at",
+    },
 }
 
 
